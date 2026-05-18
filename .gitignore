@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+
+# Local/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Temporary files
+*.tmp
+*.log

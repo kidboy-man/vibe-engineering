@@ -1,0 +1,54 @@
+# Security and Data Safety
+
+## Security Posture
+
+Treat security as part of correctness for backend, API, database, auth, tenant, billing, device, and integration work.
+
+Always consider:
+
+- authentication and authorization
+- tenant isolation and cross-tenant data leakage
+- injection risks: SQL, command, template, path traversal, XSS where relevant
+- secret exposure in code, logs, config, tests, and error messages
+- unsafe logging of tokens, codes, PII, credentials, session IDs, or request bodies
+- replay, idempotency, and abuse paths
+- rate limiting and brute-force protection
+- unsafe deserialization or untrusted input handling
+- SSRF and outbound request risks
+- privilege escalation and insecure defaults
+
+## Authorization
+
+- Do not assume authentication implies authorization.
+- Check permissions at the boundary and again where domain invariants require it.
+- Make ownership and tenant checks explicit.
+- Prefer deny-by-default behavior for ambiguous access decisions.
+- Test both allowed and denied paths for sensitive operations.
+
+## Secrets and Sensitive Data
+
+- Never hardcode secrets.
+- Do not print, log, commit, or expose tokens, API keys, passwords, private keys, auth codes, billing codes, or credentials.
+- Avoid reading `.env`, secret files, or production config unless explicitly necessary and permitted.
+- Redact sensitive values in examples and summaries.
+- Use environment variables or secret managers according to project conventions.
+
+## Input and Output Safety
+
+- Validate and normalize input at system boundaries.
+- Use parameterized queries; never build SQL from untrusted strings.
+- Avoid shelling out with unsanitized input.
+- Return stable, structured errors without leaking internals.
+- Treat user-controlled file paths, URLs, headers, and identifiers as untrusted.
+
+## Data Safety
+
+Ask before:
+
+- deleting user data
+- running destructive migrations
+- modifying shared/staging/production databases
+- changing retention, archival, or privacy behavior
+- performing broad rewrites that could affect authorization or data exposure
+
+For high-risk changes, identify invariants and verification strategy before implementation.
