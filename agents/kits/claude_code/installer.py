@@ -40,7 +40,7 @@ class KitPaths:
 
 
 def _template_dir() -> Path:
-    return Path(str(resources.files("vibe_engineering.agents.kits.claude_code") / "templates" / "claude"))
+    return Path(__file__).resolve().parent / "templates" / "claude"
 
 
 def _paths(home: str | None = None) -> KitPaths:

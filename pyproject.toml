@@ -10,22 +10,13 @@ readme = "README.md"
 requires-python = ">=3.9"
 authors = [{name = "Vibe Engineering"}]
 license = {text = "MIT"}
-classifiers = [
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3 :: Only",
-]
-
-dependencies = []
 
 [project.scripts]
-vibe = "vibe_engineering.cli:main"
-vibe-engineering = "vibe_engineering.cli:main"
+vibe = "agents.cli:main"
+vibe-engineering = "agents.cli:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
+packages = ["agents"]
 
 [tool.setuptools.package-data]
-vibe_engineering = ["agents/kits/claude_code/templates/claude/**/*"]
+agents = ["kits/claude-code/templates/**/*"]

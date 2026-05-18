@@ -1,12 +1,11 @@
-import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vibe_engineering.agents.kits.claude_code.installer import doctor, install, uninstall
+from agents.kits.claude_code.installer import doctor, install, uninstall
 
 
 class ClaudeCodeInstallerTests(unittest.TestCase):
@@ -27,14 +26,14 @@ class ClaudeCodeInstallerTests(unittest.TestCase):
                 },
                 "model": "opus",
             }
-            (claude_dir / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+            (claude_dir / "settings.json").write_text(__import__('json').dumps(settings), encoding="utf-8")
 
             rc = install(home=tmp, dry_run=False, yes=True)
 
             self.assertEqual(rc, 0)
             self.assertTrue((claude_dir / "CLAUDE.md").exists())
             self.assertTrue((claude_dir / "agents" / "go-backend-implementer.md").exists())
-            merged = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
+            merged = __import__('json').loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
             self.assertEqual(merged["env"]["ANTHROPIC_AUTH_TOKEN"], "secret-token")
             self.assertEqual(merged["env"]["ANTHROPIC_BASE_URL"], "https://example.invalid/anthropic/v1")
             self.assertEqual(merged["model"], "opus")

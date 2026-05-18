@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from vibe_engineering.agents.kits.claude_code.installer import (
+from agents.kits.claude_code.installer import (
     diff_kit,
     doctor,
     install,
@@ -74,5 +74,5 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     sys.exit(main())

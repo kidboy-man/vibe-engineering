@@ -1,1 +1,1 @@
-recursive-include src/vibe_engineering/agents/kits/claude_code/templates *
+recursive-include agents/kits/claude-code/templates *
