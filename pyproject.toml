@@ -16,7 +16,7 @@ vibe = "agents.cli:main"
 vibe-engineering = "agents.cli:main"
 
 [tool.setuptools]
-packages = ["agents"]
+packages = {find = {}}
 
 [tool.setuptools.package-data]
-agents = ["kits/claude-code/templates/**/*"]
+agents = ["kits/claude_code/templates/**/*", "kits/claude_code/templates/**/**/*"]
