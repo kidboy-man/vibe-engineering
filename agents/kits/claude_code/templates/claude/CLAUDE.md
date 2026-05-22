@@ -46,6 +46,7 @@ Follow these detailed global rules:
 - `~/.claude/rules/testing-and-verification.md`
 - `~/.claude/rules/security-and-data-safety.md`
 - `~/.claude/rules/database-and-operations.md`
+- `~/.claude/rules/uncertainty-and-sources.md`
 
 If project-specific `CLAUDE.md` or `.claude/rules/*.md` files exist, treat them as higher-priority context for that project. Do not apply project-specific assumptions globally unless they are explicitly present in the project.
 

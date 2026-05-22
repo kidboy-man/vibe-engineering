@@ -31,7 +31,7 @@ vibe kits claude-code uninstall --yes
 Managed files are copied into `~/.claude`:
 
 - `CLAUDE.md` global senior/staff backend engineering persona
-- `rules/*.md` modular operating, Go backend, security/data, database/ops, and testing rules
+- `rules/*.md` modular operating, Go backend, security/data, database/ops, testing, and uncertainty/source rules
 - `agents/*.md` custom global agents for implementation, tech lead review, security/data review, DB/ops review, and TDD
 - `commands/*.md` reusable slash commands
 - selected portable skills, currently `skills/vibe-engineering/SKILL.md`

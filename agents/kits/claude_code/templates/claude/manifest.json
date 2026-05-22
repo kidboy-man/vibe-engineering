@@ -9,6 +9,7 @@
     "rules/operating-model.md",
     "rules/security-and-data-safety.md",
     "rules/testing-and-verification.md",
+    "rules/uncertainty-and-sources.md",
     "agents/backend-tech-lead.md",
     "agents/db-operations-reviewer.md",
     "agents/go-backend-implementer.md",
