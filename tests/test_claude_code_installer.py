@@ -15,6 +15,12 @@ class ClaudeCodeInstallerTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertFalse((Path(tmp) / ".claude" / "CLAUDE.md").exists())
 
+    def test_install_dry_run_creates_no_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = install(home=tmp, dry_run=True, yes=True)
+            self.assertEqual(rc, 0)
+            self.assertFalse((Path(tmp) / ".claude").exists())
+
     def test_install_copies_templates_and_preserves_secret_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             claude_dir = Path(tmp) / ".claude"

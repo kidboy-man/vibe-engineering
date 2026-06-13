@@ -1,0 +1,11 @@
+usage: vibe kits opencode [-h] {install,diff,doctor,uninstall} ...
+
+positional arguments:
+  {install,diff,doctor,uninstall}
+    install             Install or update the opencode kit
+    diff                Show file-level differences for managed files
+    doctor              Check opencode kit installation status
+    uninstall           Remove files managed by this kit
+
+options:
+  -h, --help            show this help message and exit

@@ -11,15 +11,15 @@ from __future__ import annotations
 import difflib
 import json
 import os
-import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-MANIFEST_FILE = ".vibe-engineering-manifest.json"
+from agents import installer_core as core
+
+MANIFEST_FILE = core.MANIFEST_FILE
 KIT_NAME = "opencode"
 
 # Markers used to delimit the persona section injected into a pre-existing
@@ -90,198 +90,64 @@ def _paths(home: str | None = None) -> KitPaths:
 
 
 def _load_manifest(paths: KitPaths) -> dict:
-    with (paths.template_dir / "manifest.json").open("r", encoding="utf-8") as fh:
-        return json.load(fh)
+    return core.load_manifest(paths.template_dir)
 
 
 def _target_files(paths: KitPaths) -> list[tuple[Path, Path, str]]:
     manifest = _load_manifest(paths)
-    files: list[tuple[Path, Path, str]] = []
-    for rel in manifest["managed_files"]:
-        files.append((paths.template_dir / rel, paths.config_dir / rel, rel))
-    return files
+    return core.target_files(paths.template_dir, paths.config_dir, manifest)
 
 
 def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return core.read_text(path)
 
 
 def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def _timestamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    core.write_text(path, content)
 
 
 def _backup(path: Path, paths: KitPaths) -> Path | None:
-    if not path.exists():
-        return None
-    rel = path.relative_to(paths.config_dir)
-    backup_path = paths.config_dir / "backups" / "vibe-engineering" / _timestamp() / rel
-    backup_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(path, backup_path)
-    return backup_path
+    return core.backup(path, paths.config_dir)
 
 
 def _merge_agents_md(template: str, existing: str | None) -> tuple[str, str]:
-    """Return (merged_content, action) for AGENTS.md install.
-
-    The template is always wrapped in begin/end markers before being written
-    to disk so that the on-disk format is uniform across fresh installs and
-    re-installs, and so uninstall can always strip the marked section.
-
-    Actions:
-      - 'create': file did not exist; the merged content equals the wrapped template.
-      - 'merge':  file existed and the merged content differs from existing.
-      - 'unchanged': file existed and the merged content equals existing.
-
-    Merge rules:
-      - Existing markers present: replace content between them; keep before
-        and after verbatim.
-      - No existing markers: prepend the marked section; keep the user's
-        existing content untouched below the markers.
-    """
-    wrapped = AGENTS_BEGIN_MARKER + template + AGENTS_END_MARKER
-    if existing is None:
-        return wrapped, "create"
-    if AGENTS_BEGIN_MARKER in existing and AGENTS_END_MARKER in existing:
-        before, _, rest = existing.partition(AGENTS_BEGIN_MARKER)
-        _, _, after = rest.partition(AGENTS_END_MARKER)
-        merged = before + AGENTS_BEGIN_MARKER + template + AGENTS_END_MARKER + after
-    else:
-        merged = wrapped + existing
-    if merged == existing:
-        return merged, "unchanged"
-    return merged, "merge"
+    from agents.merge_strategies import marked_section_strategy
+    return marked_section_strategy(template, existing, AGENTS_BEGIN_MARKER, AGENTS_END_MARKER)
 
 
 def _strip_agents_md_section(existing: str) -> tuple[str | None, bool]:
-    """Return (remaining_content, fully_owned).
-
-    - remaining_content: file with our section removed (None if file should be
-      deleted entirely).
-    - fully_owned: True if the entire file was our injected section (i.e. the
-      caller can safely delete the file). False if user content remains.
-    """
-    if AGENTS_BEGIN_MARKER not in existing or AGENTS_END_MARKER not in existing:
-        return existing, False
-    before, _, rest = existing.partition(AGENTS_BEGIN_MARKER)
-    _, _, after = rest.partition(AGENTS_END_MARKER)
-    remaining = (before + after).strip()
-    if not remaining:
-        return None, True
-    if not remaining.endswith("\n"):
-        remaining += "\n"
-    return remaining, False
+    from agents.merge_strategies import strip_marked_section
+    return strip_marked_section(existing, AGENTS_BEGIN_MARKER, AGENTS_END_MARKER)
 
 
 def _manifest_state(paths: KitPaths, managed_files: Iterable[str]) -> dict:
-    return {
-        "tool": "vibe-engineering",
-        "kit": KIT_NAME,
-        "installed_at": datetime.now(timezone.utc).isoformat(),
-        "managed_files": sorted(managed_files),
-        "notes": "Only files listed here are managed by vibe. Uninstall removes unchanged managed files and leaves modified files in place.",
-    }
+    return core.manifest_state(KIT_NAME, managed_files)
 
 
 def _load_existing_install_manifest(paths: KitPaths) -> dict | None:
-    if not paths.manifest_path.exists():
-        return None
-    try:
-        return json.loads(paths.manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-
-
-def _strip_jsonc_comments(text: str) -> str:
-    """Strip // and /* */ comments and trailing commas from a JSONC text.
-
-    This is intentionally minimal — it handles the common cases produced by
-    OpenCode's own config examples. It does not handle comments inside strings
-    containing '//' or '/*' as literal content; OpenCode config does not
-    produce such cases.
-    """
-    out: list[str] = []
-    i = 0
-    n = len(text)
-    in_string = False
-    string_quote = ""
-    while i < n:
-        ch = text[i]
-        if in_string:
-            out.append(ch)
-            if ch == "\\" and i + 1 < n:
-                out.append(text[i + 1])
-                i += 2
-                continue
-            if ch == string_quote:
-                in_string = False
-            i += 1
-            continue
-        if ch in ("'", '"'):
-            in_string = True
-            string_quote = ch
-            out.append(ch)
-            i += 1
-            continue
-        if ch == "/" and i + 1 < n and text[i + 1] == "/":
-            # line comment
-            while i < n and text[i] != "\n":
-                i += 1
-            continue
-        if ch == "/" and i + 1 < n and text[i + 1] == "*":
-            # block comment
-            i += 2
-            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
-                i += 1
-            i += 2
-            continue
-        out.append(ch)
-        i += 1
-    cleaned = "".join(out)
-    # Remove trailing commas before } or ]
-    cleaned = re.sub(r",(\s*[}\]])", r"\1", cleaned)
-    return cleaned
+    return core.load_existing_install_manifest(paths.manifest_path)
 
 
 def _parse_jsonc(text: str) -> dict:
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return json.loads(_strip_jsonc_comments(text))
+    from agents.merge_strategies import parse_jsonc
+    return parse_jsonc(text)
 
 
 def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
+    from agents.merge_strategies import jsonc_defaults_strategy, parse_jsonc
+
     fragment_path = paths.template_dir / "opencode.fragment.jsonc"
     fragment_text = _read_text(fragment_path)
-    fragment = _parse_jsonc(fragment_text)
+    fragment = parse_jsonc(fragment_text)
 
     # The fragment is JSONC with possible comments. Strip them before we use
     # the parsed dict (we only read keys from it).
     settings_path = paths.config_dir / "opencode.jsonc"
     current: dict = {}
     if settings_path.exists():
-        current = _parse_jsonc(_read_text(settings_path))
+        current = parse_jsonc(_read_text(settings_path))
 
-    # Never write portable local-only or secret keys. Preserve any existing
-    # local config as-is.
-    safe_fragment: dict = {}
-    for key, value in fragment.items():
-        if key in LOCAL_ONLY_KEYS:
-            continue
-        if _is_secret_key(key):
-            continue
-        safe_fragment[key] = value
-
-    changed = False
-    merged = dict(current)
-    for key, value in safe_fragment.items():
-        if key not in merged:
-            merged[key] = value
-            changed = True
+    merged, changed = jsonc_defaults_strategy(fragment, current, LOCAL_ONLY_KEYS, _is_secret_key)
 
     if not changed:
         return "opencode.jsonc unchanged", False
@@ -297,10 +163,7 @@ def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
 
 
 def _confirm(prompt: str, yes: bool) -> bool:
-    if yes:
-        return True
-    answer = input(f"{prompt} [y/N] ").strip().lower()
-    return answer in {"y", "yes"}
+    return core.confirm(prompt, yes)
 
 
 def _planned_changes(paths: KitPaths) -> list[str]:
@@ -325,7 +188,17 @@ def _planned_changes(paths: KitPaths) -> list[str]:
 
 def install(home: str | None = None, dry_run: bool = False, yes: bool = False, merge_settings: bool = True) -> int:
     paths = _paths(home)
-    paths.config_dir.mkdir(parents=True, exist_ok=True)
+
+    # Validate existing opencode.jsonc before any operations so we abort safely
+    # without partial writes.
+    settings_path = paths.config_dir / "opencode.jsonc"
+    if settings_path.exists():
+        try:
+            _parse_jsonc(_read_text(settings_path))
+        except (json.JSONDecodeError, ValueError):
+            print("invalid opencode.jsonc")
+            return 1
+
     changes = _planned_changes(paths)
     for change in changes:
         print(change)
@@ -336,6 +209,7 @@ def install(home: str | None = None, dry_run: bool = False, yes: bool = False, m
         print("aborted")
         return 1
 
+    paths.config_dir.mkdir(parents=True, exist_ok=True)
     managed: list[str] = []
     for src, dst, rel in _target_files(paths):
         if rel == AGENTS_MD:
@@ -353,13 +227,8 @@ def install(home: str | None = None, dry_run: bool = False, yes: bool = False, m
             continue
 
         managed.append(rel)
-        content = _read_text(src)
-        if dst.exists() and _read_text(dst) == content:
-            continue
-        if dst.exists():
-            _backup(dst, paths)
-        _write_text(dst, content)
-        print(f"installed {rel}")
+        if core.install_copy_style_file(src, dst, paths.config_dir):
+            print(f"installed {rel}")
 
     if merge_settings:
         message, changed = _merge_settings(paths, dry_run=False)
@@ -389,14 +258,8 @@ def diff_kit(home: str | None = None) -> int:
             merged_lines = merged.splitlines(keepends=True)
             print("".join(difflib.unified_diff(dst_lines, merged_lines, fromfile=f"installed/{rel}", tofile=f"kit-merged/{rel}")), end="")
             continue
-        src_text = _read_text(src).splitlines(keepends=True)
-        dst_text = _read_text(dst).splitlines(keepends=True) if dst.exists() else []
-        if src_text == dst_text:
-            continue
-        any_diff = True
-        print(f"--- {rel} (installed)")
-        print(f"+++ {rel} (kit)")
-        print("".join(difflib.unified_diff(dst_text, src_text, fromfile=f"installed/{rel}", tofile=f"kit/{rel}")), end="")
+        if core.diff_copy_style(src, dst, rel):
+            any_diff = True
     if not any_diff:
         print("managed files match kit templates")
     return 0
@@ -495,8 +358,7 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
             else:
                 print(f"kept {rel} (no kit section to strip)")
             continue
-        if src.exists() and _read_text(src) == _read_text(dst):
-            dst.unlink()
+        if core.uninstall_unchanged_file(src, dst):
             removed += 1
             print(f"removed {rel}")
         else:

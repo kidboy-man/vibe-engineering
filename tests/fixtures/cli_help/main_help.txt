@@ -1,0 +1,10 @@
+usage: vibe [-h] {kits} ...
+
+Install and manage portable engineering kits.
+
+positional arguments:
+  {kits}
+    kits      List and manage kits
+
+options:
+  -h, --help  show this help message and exit

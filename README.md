@@ -93,8 +93,26 @@ Both kits intentionally do **not** include or install:
 
 For the OpenCode kit, the top-level config keys `model`, `provider`, `plugin`, `mcp`, `tools`, `permission`, `env`, `agent`, `theme`, and any key containing `token`, `key`, `secret`, `password`, `auth`, or `credential` are always preserved as-is.
 
+## Adding a new kit
+
+To extend Vibe Engineering with a new kit:
+
+1. **Create the installer module** at `agents/kits/<kit_name>/installer.py` exporting four functions:
+   - `install(home=None, dry_run=False, yes=False, merge_settings=True) -> int`
+   - `diff_kit(home=None) -> int`
+   - `doctor(home=None) -> int`
+   - `uninstall(home=None, dry_run=False, yes=False) -> int`
+2. **Add a `KitSpec`** in `agents/kit_registry.py` pointing to those functions.
+3. **Place templates and a manifest** under `agents/kits/<kit_name>/templates/<kit_name>/`:
+   - `manifest.json` with `kit`, `version`, `managed_files`, `settings_fragment`, and `secret_policy`
+   - All files listed in `managed_files`
+4. **Add manifest contract tests** in `tests/test_manifest_contracts.py` asserting every managed file exists and the manifest surface is valid.
+
+No CLI dispatch code needs to change: `build_parser(kit_specs=KITS)` reads the registry dynamically.
+
 ## Development
 
 ```bash
-python -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
+Inside an activated virtualenv where python points to Python 3, python -m unittest discover -s tests -v is also acceptable.
 ```

@@ -1,0 +1,6 @@
+usage: vibe kits claude-code diff [-h] [--home HOME]
+
+options:
+  -h, --help   show this help message and exit
+  --home HOME  Target config base directory (default: $XDG_CONFIG_HOME or
+               current user's home)

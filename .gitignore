@@ -17,3 +17,7 @@ dist/
 # Temporary files
 *.tmp
 *.log
+
+#AI assistant
+.omo
+.understand-anything

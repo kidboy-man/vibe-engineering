@@ -8,18 +8,16 @@ caches, backups, project transcripts, or local machine state.
 
 from __future__ import annotations
 
-import difflib
 import json
-import os
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from importlib import resources
 from pathlib import Path
 from typing import Iterable
 
-MANIFEST_FILE = ".vibe-engineering-manifest.json"
+from agents import installer_core as core
+
+MANIFEST_FILE = core.MANIFEST_FILE
 KIT_NAME = "claude-code"
 SECRET_SETTING_KEYS = {
     "ANTHROPIC_API_KEY",
@@ -55,61 +53,37 @@ def _paths(home: str | None = None) -> KitPaths:
 
 
 def _load_manifest(paths: KitPaths) -> dict:
-    with (paths.template_dir / "manifest.json").open("r", encoding="utf-8") as fh:
-        return json.load(fh)
+    return core.load_manifest(paths.template_dir)
 
 
 def _target_files(paths: KitPaths) -> list[tuple[Path, Path, str]]:
     manifest = _load_manifest(paths)
-    files: list[tuple[Path, Path, str]] = []
-    for rel in manifest["managed_files"]:
-        files.append((paths.template_dir / rel, paths.claude_dir / rel, rel))
-    return files
+    return core.target_files(paths.template_dir, paths.claude_dir, manifest)
 
 
 def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return core.read_text(path)
 
 
 def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def _timestamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    core.write_text(path, content)
 
 
 def _backup(path: Path, paths: KitPaths) -> Path | None:
-    if not path.exists():
-        return None
-    rel = path.relative_to(paths.claude_dir)
-    backup_path = paths.claude_dir / "backups" / "vibe-engineering" / _timestamp() / rel
-    backup_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(path, backup_path)
-    return backup_path
+    return core.backup(path, paths.claude_dir)
 
 
 def _manifest_state(paths: KitPaths, managed_files: Iterable[str]) -> dict:
-    return {
-        "tool": "vibe-engineering",
-        "kit": KIT_NAME,
-        "installed_at": datetime.now(timezone.utc).isoformat(),
-        "managed_files": sorted(managed_files),
-        "notes": "Only files listed here are managed by vibe. Uninstall removes unchanged managed files and leaves modified files in place.",
-    }
+    return core.manifest_state(KIT_NAME, managed_files)
 
 
 def _load_existing_install_manifest(paths: KitPaths) -> dict | None:
-    if not paths.manifest_path.exists():
-        return None
-    try:
-        return json.loads(paths.manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
+    return core.load_existing_install_manifest(paths.manifest_path)
 
 
 def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
+    from agents.merge_strategies import json_defaults_strategy
+
     fragment_path = paths.template_dir / "settings.fragment.json"
     fragment = json.loads(fragment_path.read_text(encoding="utf-8"))
     settings_path = paths.claude_dir / "settings.json"
@@ -119,16 +93,7 @@ def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
 
     # Never write portable env/proxy/token settings. Preserve any existing local env as-is.
     fragment.pop("env", None)
-    changed = False
-    merged = dict(current)
-    for key, value in fragment.items():
-        if key == "env" or key in SECRET_SETTING_KEYS:
-            continue
-        # Treat the fragment as defaults. Do not overwrite a user's existing
-        # model/provider/autonomy choices; those can be machine/account-specific.
-        if key not in merged:
-            merged[key] = value
-            changed = True
+    merged, changed = json_defaults_strategy(fragment, current, SECRET_SETTING_KEYS)
 
     if not changed:
         return "settings.json unchanged", False
@@ -140,21 +105,11 @@ def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
 
 
 def _confirm(prompt: str, yes: bool) -> bool:
-    if yes:
-        return True
-    answer = input(f"{prompt} [y/N] ").strip().lower()
-    return answer in {"y", "yes"}
+    return core.confirm(prompt, yes)
 
 
 def _planned_changes(paths: KitPaths) -> list[str]:
-    changes: list[str] = []
-    for src, dst, rel in _target_files(paths):
-        if not dst.exists():
-            changes.append(f"create {rel}")
-        elif _read_text(src) != _read_text(dst):
-            changes.append(f"update {rel}")
-        else:
-            changes.append(f"unchanged {rel}")
+    changes = core.planned_changes_copy_style(_target_files(paths))
     changes.append("merge settings.json safe fragment")
     changes.append(f"write {MANIFEST_FILE}")
     return changes
@@ -162,7 +117,17 @@ def _planned_changes(paths: KitPaths) -> list[str]:
 
 def install(home: str | None = None, dry_run: bool = False, yes: bool = False, merge_settings: bool = True) -> int:
     paths = _paths(home)
-    paths.claude_dir.mkdir(parents=True, exist_ok=True)
+
+    # Validate existing settings.json before any operations so we abort safely
+    # without partial writes.
+    settings_path = paths.claude_dir / "settings.json"
+    if settings_path.exists():
+        try:
+            json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print("invalid settings.json")
+            return 1
+
     changes = _planned_changes(paths)
     for change in changes:
         print(change)
@@ -173,16 +138,12 @@ def install(home: str | None = None, dry_run: bool = False, yes: bool = False, m
         print("aborted")
         return 1
 
+    paths.claude_dir.mkdir(parents=True, exist_ok=True)
     managed: list[str] = []
     for src, dst, rel in _target_files(paths):
         managed.append(rel)
-        content = _read_text(src)
-        if dst.exists() and _read_text(dst) == content:
-            continue
-        if dst.exists():
-            _backup(dst, paths)
-        _write_text(dst, content)
-        print(f"installed {rel}")
+        if core.install_copy_style_file(src, dst, paths.claude_dir):
+            print(f"installed {rel}")
 
     if merge_settings:
         message, changed = _merge_settings(paths, dry_run=False)
@@ -199,14 +160,8 @@ def diff_kit(home: str | None = None) -> int:
     paths = _paths(home)
     any_diff = False
     for src, dst, rel in _target_files(paths):
-        src_text = _read_text(src).splitlines(keepends=True)
-        dst_text = _read_text(dst).splitlines(keepends=True) if dst.exists() else []
-        if src_text == dst_text:
-            continue
-        any_diff = True
-        print(f"--- {rel} (installed)")
-        print(f"+++ {rel} (kit)")
-        print("".join(difflib.unified_diff(dst_text, src_text, fromfile=f"installed/{rel}", tofile=f"kit/{rel}")), end="")
+        if core.diff_copy_style(src, dst, rel):
+            any_diff = True
     if not any_diff:
         print("managed files match kit templates")
     return 0
@@ -287,8 +242,7 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
         dst = paths.claude_dir / rel
         if not dst.exists():
             continue
-        if src.exists() and _read_text(src) == _read_text(dst):
-            dst.unlink()
+        if core.uninstall_unchanged_file(src, dst):
             removed += 1
             print(f"removed {rel}")
         else:

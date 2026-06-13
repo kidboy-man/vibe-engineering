@@ -1,0 +1,11 @@
+usage: vibe kits claude-code [-h] {install,diff,doctor,uninstall} ...
+
+positional arguments:
+  {install,diff,doctor,uninstall}
+    install             Install or update the claude-code kit
+    diff                Show file-level differences for managed files
+    doctor              Check claude-code kit installation status
+    uninstall           Remove files managed by this kit
+
+options:
+  -h, --help            show this help message and exit

@@ -18,6 +18,12 @@ class OpenCodeInstallerTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertFalse((Path(tmp) / "opencode" / "AGENTS.md").exists())
 
+    def test_install_dry_run_creates_no_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = install(home=tmp, dry_run=True, yes=True)
+            self.assertEqual(rc, 0)
+            self.assertFalse((Path(tmp) / "opencode").exists())
+
     def test_install_copies_templates_and_preserves_local_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "opencode"

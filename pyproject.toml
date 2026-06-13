@@ -23,4 +23,5 @@ agents = [
     "kits/claude_code/templates/**/*",
     "kits/claude_code/templates/**/**/*",
     "kits/opencode/templates/**/*",
+    "kits/opencode/templates/**/**/*",
 ]

@@ -1,0 +1,8 @@
+usage: vibe kits claude-code uninstall [-h] [--home HOME] [--dry-run] [--yes]
+
+options:
+  -h, --help   show this help message and exit
+  --home HOME  Target config base directory (default: $XDG_CONFIG_HOME or
+               current user's home)
+  --dry-run    Show changes without writing files
+  --yes, -y    Apply without interactive confirmation

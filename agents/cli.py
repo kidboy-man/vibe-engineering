@@ -4,54 +4,12 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
-from typing import Callable
+from typing import Mapping
 
-from agents.kits.claude_code.installer import (
-    diff_kit as claude_diff,
-    doctor as claude_doctor,
-    install as claude_install,
-    uninstall as claude_uninstall,
-)
-from agents.kits.opencode.installer import (
-    diff_kit as opencode_diff,
-    doctor as opencode_doctor,
-    install as opencode_install,
-    uninstall as opencode_uninstall,
-)
+from agents.kit_registry import KITS, KitSpec
 
 
-@dataclass(frozen=True)
-class Kit:
-    name: str
-    help: str
-    install: Callable
-    diff: Callable
-    doctor: Callable
-    uninstall: Callable
-
-
-KITS: dict[str, Kit] = {
-    "claude-code": Kit(
-        name="claude-code",
-        help="Manage the Claude Code kit",
-        install=claude_install,
-        diff=claude_diff,
-        doctor=claude_doctor,
-        uninstall=claude_uninstall,
-    ),
-    "opencode": Kit(
-        name="opencode",
-        help="Manage the OpenCode kit",
-        install=opencode_install,
-        diff=opencode_diff,
-        doctor=opencode_doctor,
-        uninstall=opencode_uninstall,
-    ),
-}
-
-
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vibe",
         description="Install and manage portable engineering kits.",
@@ -63,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     kits_sub.add_parser("list", help="List available kits")
 
-    for kit in KITS.values():
+    for kit in kit_specs.values():
         kit_parser = kits_sub.add_parser(kit.name, help=kit.help)
         kit_sub = kit_parser.add_subparsers(dest=f"{kit.name}_command", required=True)
 
