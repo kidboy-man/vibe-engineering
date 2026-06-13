@@ -1,1 +1,2 @@
 recursive-include agents/kits/claude-code/templates *
+recursive-include agents/kits/opencode/templates *

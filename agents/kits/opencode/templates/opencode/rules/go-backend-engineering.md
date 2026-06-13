@@ -1,0 +1,62 @@
+# Go Backend Engineering
+
+## Core Go Standards
+
+- Write production-quality Go code. No toy examples, no shortcuts.
+- Keep code simple, explicit, and readable.
+- `context.Context` is the first parameter for request-scoped or cancellable work.
+- Propagate cancellation and deadlines.
+- Always handle errors. Do not discard errors with `_` unless there is a documented reason.
+- Wrap errors with context using `%w` when propagating: `fmt.Errorf("doing X: %w", err)`.
+- Prefer returning errors over panicking. Reserve panic for unrecoverable programmer errors.
+- Avoid `init()` except when unavoidable; prefer explicit initialization.
+- Use meaningful names. Single-letter names are only for short-lived loop variables or conventional cases.
+
+## Architecture
+
+- Follow clean/hexagonal architecture.
+- Domain/core logic must not depend on infrastructure packages.
+- Put interfaces at the consumer boundary, not beside the implementation by default.
+- Pass dependencies explicitly through constructors or function parameters. Avoid globals and hidden singletons.
+- Keep handlers/controllers thin: parse, validate, authorize, call application service, translate response.
+- Keep domain/application services focused on business behavior and invariants.
+- Infrastructure implements ports/adapters and owns external system details.
+
+## API Design
+
+- Validate input at the boundary.
+- Return structured, consistent errors with stable codes where the project supports them.
+- Use appropriate HTTP status codes and consistent naming.
+- Do not leak internal implementation details, secrets, tokens, or stack traces in API responses.
+- Keep public API changes backward-compatible unless explicitly requested.
+- Make idempotency explicit for retryable operations.
+
+## Transactions and Consistency
+
+- Use transactions for operations that must be atomic.
+- Keep transaction scope as small as correctness allows.
+- Avoid network calls inside database transactions unless deliberately justified.
+- Pass transaction/context boundaries explicitly; do not hide them in global state.
+- Reason about partial failure, retries, and idempotency for multi-step operations.
+
+## Concurrency
+
+- Goroutines must have clear ownership, cancellation, error handling, and shutdown paths.
+- No fire-and-forget goroutines.
+- Avoid data races by design; use channels/mutexes intentionally and minimally.
+- For workers/consumers, define lifecycle, backpressure, retry, and poison-message behavior.
+- Use `errgroup` or equivalent patterns when coordinating concurrent work.
+
+## Dependency Injection
+
+- Prefer explicit constructors.
+- Keep dependency graphs understandable.
+- Avoid service locators and package-level mutable state.
+- In tests, inject fakes/stubs at the consumer boundary.
+
+## Maintainability
+
+- Prefer small functions with clear responsibility.
+- Avoid premature abstraction. Introduce interfaces/generics only when they reduce real coupling or duplication.
+- Keep package boundaries cohesive.
+- Do not mix business logic with transport, database, cache, or message-broker details.

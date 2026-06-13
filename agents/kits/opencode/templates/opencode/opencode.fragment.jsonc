@@ -1,0 +1,8 @@
+{
+  // Safe non-secret defaults for OpenCode. The installer merges these
+  // into ~/.config/opencode/opencode.jsonc only when keys are absent.
+  // Local-only keys (model, provider, plugin list, mcp auth, env)
+  // are NEVER overwritten by the kit.
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": true
+}

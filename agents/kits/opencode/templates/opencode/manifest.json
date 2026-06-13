@@ -1,0 +1,24 @@
+{
+  "kit": "opencode",
+  "version": "0.1.0",
+  "description": "Portable OpenCode senior backend engineering setup.",
+  "managed_files": [
+    "AGENTS.md",
+    "rules/database-and-operations.md",
+    "rules/go-backend-engineering.md",
+    "rules/operating-model.md",
+    "rules/security-and-data-safety.md",
+    "rules/testing-and-verification.md",
+    "agents/backend-tech-lead.md",
+    "agents/db-operations-reviewer.md",
+    "agents/go-backend-implementer.md",
+    "agents/security-data-reviewer.md",
+    "agents/tdd-test-engineer.md",
+    "commands/clone-setup.md",
+    "commands/review-go.md",
+    "commands/trd.md",
+    "skills/vibe-engineering/SKILL.md"
+  ],
+  "settings_fragment": "opencode.fragment.jsonc",
+  "secret_policy": "Never installs env, auth tokens, credentials, local router URLs, project histories, caches, backups, transcripts, MCP auth state, or composio keys."
+}

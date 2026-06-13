@@ -4,16 +4,51 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
+from typing import Callable
 
 from agents.kits.claude_code.installer import (
-    diff_kit,
-    doctor,
-    install,
-    uninstall,
+    diff_kit as claude_diff,
+    doctor as claude_doctor,
+    install as claude_install,
+    uninstall as claude_uninstall,
+)
+from agents.kits.opencode.installer import (
+    diff_kit as opencode_diff,
+    doctor as opencode_doctor,
+    install as opencode_install,
+    uninstall as opencode_uninstall,
 )
 
 
-KIT_NAMES = ["claude-code"]
+@dataclass(frozen=True)
+class Kit:
+    name: str
+    help: str
+    install: Callable
+    diff: Callable
+    doctor: Callable
+    uninstall: Callable
+
+
+KITS: dict[str, Kit] = {
+    "claude-code": Kit(
+        name="claude-code",
+        help="Manage the Claude Code kit",
+        install=claude_install,
+        diff=claude_diff,
+        doctor=claude_doctor,
+        uninstall=claude_uninstall,
+    ),
+    "opencode": Kit(
+        name="opencode",
+        help="Manage the OpenCode kit",
+        install=opencode_install,
+        diff=opencode_diff,
+        doctor=opencode_doctor,
+        uninstall=opencode_uninstall,
+    ),
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,25 +63,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     kits_sub.add_parser("list", help="List available kits")
 
-    claude = kits_sub.add_parser("claude-code", help="Manage the Claude Code kit")
-    claude_sub = claude.add_subparsers(dest="claude_command", required=True)
+    for kit in KITS.values():
+        kit_parser = kits_sub.add_parser(kit.name, help=kit.help)
+        kit_sub = kit_parser.add_subparsers(dest=f"{kit.name}_command", required=True)
 
-    install_parser = claude_sub.add_parser("install", help="Install or update the Claude Code kit")
-    install_parser.add_argument("--home", default=None, help="Target home directory (default: current user's home)")
-    install_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
-    install_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
-    install_parser.add_argument("--no-settings", action="store_true", help="Do not merge the safe settings fragment")
+        install_parser = kit_sub.add_parser("install", help=f"Install or update the {kit.name} kit")
+        install_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
+        install_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
+        install_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
+        install_parser.add_argument("--no-settings", action="store_true", help="Do not merge the safe settings fragment")
 
-    diff_parser = claude_sub.add_parser("diff", help="Show file-level differences for managed files")
-    diff_parser.add_argument("--home", default=None, help="Target home directory (default: current user's home)")
+        diff_parser = kit_sub.add_parser("diff", help="Show file-level differences for managed files")
+        diff_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
 
-    doctor_parser = claude_sub.add_parser("doctor", help="Check Claude Code and kit installation status")
-    doctor_parser.add_argument("--home", default=None, help="Target home directory (default: current user's home)")
+        doctor_parser = kit_sub.add_parser("doctor", help=f"Check {kit.name} kit installation status")
+        doctor_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
 
-    uninstall_parser = claude_sub.add_parser("uninstall", help="Remove files managed by this kit")
-    uninstall_parser.add_argument("--home", default=None, help="Target home directory (default: current user's home)")
-    uninstall_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
-    uninstall_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
+        uninstall_parser = kit_sub.add_parser("uninstall", help="Remove files managed by this kit")
+        uninstall_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
+        uninstall_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
+        uninstall_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
 
     return parser
 
@@ -56,19 +92,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "kits" and args.kits_command == "list":
-        for name in KIT_NAMES:
+        for name in KITS:
             print(name)
         return 0
 
-    if args.command == "kits" and args.kits_command == "claude-code":
-        if args.claude_command == "install":
-            return install(home=args.home, dry_run=args.dry_run, yes=args.yes, merge_settings=not args.no_settings)
-        if args.claude_command == "diff":
-            return diff_kit(home=args.home)
-        if args.claude_command == "doctor":
-            return doctor(home=args.home)
-        if args.claude_command == "uninstall":
-            return uninstall(home=args.home, dry_run=args.dry_run, yes=args.yes)
+    if args.command == "kits":
+        kit = KITS.get(args.kits_command)
+        if kit is None:
+            parser.error("unsupported kit")
+            return 2
+        sub_command_attr = f"{kit.name}_command"
+        sub_command = getattr(args, sub_command_attr, None)
+        if sub_command == "install":
+            return kit.install(home=args.home, dry_run=args.dry_run, yes=args.yes, merge_settings=not args.no_settings)
+        if sub_command == "diff":
+            return kit.diff(home=args.home)
+        if sub_command == "doctor":
+            return kit.doctor(home=args.home)
+        if sub_command == "uninstall":
+            return kit.uninstall(home=args.home, dry_run=args.dry_run, yes=args.yes)
 
     parser.error("unsupported command")
     return 2
