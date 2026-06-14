@@ -7,7 +7,7 @@ name = "vibe-engineering"
 version = "0.1.0"
 description = "Portable engineering kits for AI coding tools."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [{name = "Vibe Engineering"}]
 license = {text = "MIT"}
 dependencies = [
