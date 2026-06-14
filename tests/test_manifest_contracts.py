@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
-import tomllib
 import sys
 import unittest
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib  # type: ignore[no-redef]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
