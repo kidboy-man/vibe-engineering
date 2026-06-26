@@ -1,0 +1,7 @@
+usage: vibe kits second-brain install [-h] [--home HOME] [--dry-run] [--yes]
+
+options:
+  -h, --help     show this help message and exit
+  --home HOME    Target config base directory (default: current user's home)
+  --dry-run      Show changes without writing files
+  --yes, -y      Apply without interactive confirmation

@@ -1,0 +1,4 @@
+[mcp_servers.qmd]
+type = "stdio"
+command = "qmd"
+args = ["mcp"]
