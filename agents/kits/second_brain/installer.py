@@ -7,10 +7,14 @@ import json
 import os
 import shutil
 import subprocess
-import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from agents import installer_core as core
 from agents import merge_strategies as ms
