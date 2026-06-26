@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Iterable
 
 from agents import installer_core as core
+from agents.secret_policies import LOCAL_ONLY_KEYS, SECRET_KEY_SUBSTRINGS, is_secret_key
 
 MANIFEST_FILE = core.MANIFEST_FILE
 KIT_NAME = "opencode"
@@ -28,36 +29,6 @@ KIT_NAME = "opencode"
 AGENTS_BEGIN_MARKER = "<!-- vibe-engineering-kit:begin -->\n"
 AGENTS_END_MARKER = "<!-- vibe-engineering-kit:end -->\n"
 AGENTS_MD = "AGENTS.md"
-
-# Top-level opencode.jsonc keys the kit will NEVER overwrite. These are
-# machine/account-specific by design (model selection, MCP servers, plugin
-# list, environment, tool permissions, etc.).
-LOCAL_ONLY_KEYS = {
-    "model",
-    "provider",
-    "plugin",
-    "mcp",
-    "tools",
-    "tool",
-    "permission",
-    "env",
-    "agent",
-    "experimental",
-    "theme",
-    "share",
-    "autoupdate",
-    "instructions",
-}
-
-# Substrings that, if found in any top-level key, mark it as a secret
-# and force the installer to leave it alone.
-SECRET_KEY_SUBSTRINGS = ("token", "key", "secret", "password", "auth", "credential")
-
-
-def _is_secret_key(name: str) -> bool:
-    lowered = name.lower()
-    return any(sub in lowered for sub in SECRET_KEY_SUBSTRINGS)
-
 
 def _xdg_config_home() -> Path:
     env = os.environ.get("XDG_CONFIG_HOME")
@@ -147,7 +118,7 @@ def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
     if settings_path.exists():
         current = parse_jsonc(_read_text(settings_path))
 
-    merged, changed = jsonc_defaults_strategy(fragment, current, LOCAL_ONLY_KEYS, _is_secret_key)
+    merged, changed = jsonc_defaults_strategy(fragment, current, LOCAL_ONLY_KEYS, is_secret_key)
 
     if not changed:
         return "opencode.jsonc unchanged", False
@@ -303,7 +274,7 @@ def doctor(home: str | None = None) -> int:
         try:
             settings = _parse_jsonc(_read_text(settings_path))
             local_only = sorted(k for k in settings if k in LOCAL_ONLY_KEYS)
-            secretish = sorted(k for k in settings if _is_secret_key(k))
+            secretish = sorted(k for k in settings if is_secret_key(k))
             if local_only or secretish:
                 preserved = ", ".join(local_only + secretish)
                 print(f"opencode.jsonc: preserved local-only / secret-ish keys ({preserved}); kit will not overwrite them")

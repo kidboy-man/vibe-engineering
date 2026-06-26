@@ -8,11 +8,13 @@ import os
 import shutil
 import subprocess
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from agents import installer_core as core
 from agents import merge_strategies as ms
+from agents.secret_policies import LOCAL_ONLY_KEYS, is_secret_key
 
 KIT_NAME = "second-brain"
 MANIFEST_FILE = core.MANIFEST_FILE
@@ -117,20 +119,17 @@ def _print_dry_run(paths: KitPaths) -> None:
         status = "create" if not target.exists() else "skip (exists)"
         print(f"  {rel} [{status}]")
     print()
-    gitignore = paths.vault / ".gitignore"
-    if gitignore.exists():
-        existing_lines = set(gitignore.read_text(encoding="utf-8").splitlines())
-        new_entries = [e for e in GITIGNORE_ENTRIES if e not in existing_lines]
-        if new_entries:
-            print("would append to .gitignore:")
-            for e in new_entries:
-                print(f"  + {e}")
-        else:
-            print(".gitignore: all entries already present")
-    else:
+    exists, new_entries = _gitignore_diff(paths.vault)
+    if not exists:
         print("would create .gitignore:")
         for e in GITIGNORE_ENTRIES:
             print(f"  {e}")
+    elif new_entries:
+        print("would append to .gitignore:")
+        for e in new_entries:
+            print(f"  + {e}")
+    else:
+        print(".gitignore: all entries already present")
     print()
     if not (paths.vault / ".git").exists():
         print(f"would git init in {paths.vault}")
@@ -142,10 +141,6 @@ def _print_dry_run(paths: KitPaths) -> None:
     print("dry run: no files written")
 
 
-def _confirm(prompt: str, yes: bool) -> bool:
-    return core.confirm(prompt, yes)
-
-
 def _seed_page(src: Path, dst: Path) -> bool:
     """Copy seed page from template if target does not exist. Never overwrite."""
     if dst.exists():
@@ -155,19 +150,27 @@ def _seed_page(src: Path, dst: Path) -> bool:
     return True
 
 
+def _gitignore_diff(vault: Path) -> tuple[bool, list[str]]:
+    """Return (gitignore_exists, entries_to_add). Empty list = nothing to add."""
+    gitignore = vault / ".gitignore"
+    if not gitignore.exists():
+        return False, list(GITIGNORE_ENTRIES)
+    existing = set(gitignore.read_text(encoding="utf-8").splitlines())
+    return True, [e for e in GITIGNORE_ENTRIES if e not in existing]
+
+
 def _merge_gitignore(vault: Path) -> None:
     """Write or merge .gitignore entries. Append missing; never duplicate."""
+    exists, new_entries = _gitignore_diff(vault)
     gitignore = vault / ".gitignore"
-    if gitignore.exists():
-        content = gitignore.read_text(encoding="utf-8")
-        lines = content.splitlines()
-        for entry in GITIGNORE_ENTRIES:
-            if entry not in lines:
-                if not content.endswith("\n"):
-                    content += "\n"
-                content += entry + "\n"
-    else:
-        content = "\n".join(GITIGNORE_ENTRIES) + "\n"
+    if not exists:
+        gitignore.write_text("\n".join(GITIGNORE_ENTRIES) + "\n", encoding="utf-8")
+        return
+    content = gitignore.read_text(encoding="utf-8")
+    for entry in new_entries:
+        if not content.endswith("\n"):
+            content += "\n"
+        content += entry + "\n"
     gitignore.write_text(content, encoding="utf-8")
 
 
@@ -196,31 +199,7 @@ QMD_MCP_SNIPPET_JSON: dict = {
 CODEX_TOML_SECTION = "[mcp_servers.qmd]"
 CODEX_TOML_BODY = 'type = "stdio"\ncommand = "qmd"\nargs = ["mcp"]\n'
 
-# Mirrors agents/kits/opencode/installer.py:35-50 — keys the kit never overwrites.
-OPENCODE_LOCAL_ONLY_KEYS = {
-    "model",
-    "provider",
-    "plugin",
-    "mcp",
-    "tools",
-    "tool",
-    "permission",
-    "env",
-    "agent",
-    "experimental",
-    "theme",
-    "share",
-    "autoupdate",
-    "instructions",
-}
-
-OPENCODE_SECRET_SUBSTRINGS = ("token", "key", "secret", "password", "auth", "credential")
-
 CLAUDE_SECRET_KEYS = {"env"}
-
-
-def _is_secret_jsonc_key(key: str) -> bool:
-    return any(sub in key.lower() for sub in OPENCODE_SECRET_SUBSTRINGS)
 
 
 def _merge_claude_config(paths: KitPaths) -> None:
@@ -255,7 +234,10 @@ def _merge_opencode_config(paths: KitPaths) -> None:
             return
 
     merged, changed = ms.jsonc_defaults_strategy(
-        QMD_MCP_SNIPPET_JSON, current, OPENCODE_LOCAL_ONLY_KEYS, _is_secret_jsonc_key
+        QMD_MCP_SNIPPET_JSON,
+        current,
+        LOCAL_ONLY_KEYS,
+        is_secret_key,
     )
     if not changed:
         return
@@ -308,7 +290,7 @@ def install(
             print("  Cursor and Hermes: no config mutation")
         return 0
 
-    if not _confirm("Install/update the second-brain kit?", yes=yes):
+    if not core.confirm("Install/update the second-brain kit?", yes=yes):
         print("aborted")
         return 1
 
@@ -366,25 +348,21 @@ def doctor(home: str | None = None) -> int:
         return 1
     print("✓ vault exists")
 
-    print("\n-- vault directories --")
-    missing_dirs = [d for d in VAULT_DIRS if not (vault_path / d).is_dir()]
-    if missing_dirs:
-        print("✗ missing directories:")
-        for d in missing_dirs:
-            print(f"  {d}")
-        problems = True
-    else:
-        print("✓ all directories present")
+    def _check_paths(label: str, items: list[str], is_file: bool) -> None:
+        nonlocal problems
+        check = (Path.is_file if is_file else Path.is_dir)
+        print(f"\n-- {label} --")
+        missing = [i for i in items if not check(vault_path / i)]
+        if missing:
+            print(f"✗ missing {label}:")
+            for m in missing:
+                print(f"  {m}")
+            problems = True
+        else:
+            print(f"✓ all {label} present")
 
-    print("\n-- seed pages --")
-    missing_pages = [p for p in SEED_PAGES if not (vault_path / p).is_file()]
-    if missing_pages:
-        print("✗ missing seed pages:")
-        for p in missing_pages:
-            print(f"  {p}")
-        problems = True
-    else:
-        print("✓ all seed pages present")
+    _check_paths("vault directories", VAULT_DIRS, is_file=False)
+    _check_paths("seed pages", SEED_PAGES, is_file=True)
 
     print("\n-- git --")
     if (vault_path / ".git").is_dir():
@@ -454,39 +432,26 @@ def doctor(home: str | None = None) -> int:
     print("ℹ hermes: config path unverified (docs/sample only)")
     print("ℹ cursor: project-local .cursor/rules/*.mdc recommended")
 
-    print("\n-- agent configs --")
-    settings_json = paths.claude_dir / "settings.json"
-    if settings_json.exists():
+    def _check_config(label: str, path: Path, parse) -> None:
+        nonlocal problems
+        if not path.exists():
+            print(f"ℹ {label}: absent")
+            return
         try:
-            json.loads(settings_json.read_text(encoding="utf-8"))
-            print("✓ settings.json: valid")
-        except json.JSONDecodeError as exc:
-            print(f"✗ settings.json: invalid JSON ({exc})")
-            problems = True
-    else:
-        print("ℹ settings.json: absent")
-
-    opencode_jsonc = paths.opencode_config_dir / "opencode.jsonc"
-    if opencode_jsonc.exists():
-        try:
-            ms.parse_jsonc(opencode_jsonc.read_text(encoding="utf-8"))
-            print("✓ opencode.jsonc: valid")
-        except (json.JSONDecodeError, ValueError) as exc:
-            print(f"✗ opencode.jsonc: invalid ({exc})")
-            problems = True
-    else:
-        print("ℹ opencode.jsonc: absent")
-
-    codex_toml = paths.codex_dir / "config.toml"
-    if codex_toml.exists():
-        try:
-            tomllib.loads(codex_toml.read_text(encoding="utf-8"))
-            print("✓ config.toml: valid")
+            parse(path.read_text(encoding="utf-8"))
+            print(f"✓ {label}: valid")
         except Exception as exc:
-            print(f"✗ config.toml: invalid TOML ({exc})")
+            print(f"✗ {label}: invalid ({exc})")
             problems = True
-    else:
-        print("ℹ config.toml: absent")
+
+    print("\n-- agent configs --")
+    _check_config("settings.json", paths.claude_dir / "settings.json", json.loads)
+    _check_config(
+        "opencode.jsonc",
+        paths.opencode_config_dir / "opencode.jsonc",
+        ms.parse_jsonc,
+    )
+    _check_config("config.toml", paths.codex_dir / "config.toml", tomllib.loads)
 
     vault_str = str(vault_path)
     if "\\\\wsl$" in vault_str or vault_str.startswith("/mnt/"):
@@ -532,20 +497,17 @@ def diff_kit(home: str | None = None) -> int:
     print()
 
     # .gitignore
-    gitignore = paths.vault / ".gitignore"
-    if gitignore.exists():
-        existing_lines = set(gitignore.read_text(encoding="utf-8").splitlines())
-        new_entries = [e for e in GITIGNORE_ENTRIES if e not in existing_lines]
-        if new_entries:
-            print(".gitignore: would add entries:")
-            for e in new_entries:
-                print(f"  + {e}")
-        else:
-            print(".gitignore: all entries already present")
-    else:
+    exists, new_entries = _gitignore_diff(paths.vault)
+    if not exists:
         print(".gitignore: would create with:")
         for e in GITIGNORE_ENTRIES:
             print(f"  {e}")
+    elif new_entries:
+        print(".gitignore: would add entries:")
+        for e in new_entries:
+            print(f"  + {e}")
+    else:
+        print(".gitignore: all entries already present")
     print()
 
     # Git init
@@ -613,41 +575,22 @@ def diff_kit(home: str | None = None) -> int:
     return 0
 
 
-def _strip_qmd_from_json_config(text: str) -> tuple[str | None, bool]:
-    """Remove qmd mcpServer entry from a JSON config string.
+def _strip_qmd_mcp(text: str, parse) -> str | None:
+    """Remove qmd mcpServer entry. Returns new text or None if not present.
 
-    Returns (remaining_text_or_None, was_stripped).
-    - If qmd was the only mcpServer and mcpServers is now empty,
-      remove the mcpServers key entirely.
-    - If no qmd entry found, returns (text, False).
+    parse: callable that takes raw text and returns a dict (json.loads or ms.parse_jsonc).
+    If qmd was the only mcpServer, drops the mcpServers key entirely.
     """
-    config = json.loads(text)
+    config = parse(text)
     mcps = config.get("mcpServers")
     if not isinstance(mcps, dict) or "qmd" not in mcps:
-        return text, False
+        return None
 
     del mcps["qmd"]
     if not mcps:
         del config["mcpServers"]
 
-    return json.dumps(config, indent=2) + "\n", True
-
-
-def _strip_qmd_from_jsonc_config(text: str) -> tuple[str | None, bool]:
-    """Remove qmd mcpServer entry from a JSONC config string.
-
-    Same semantics as _strip_qmd_from_json_config but handles JSONC comments.
-    """
-    config = ms.parse_jsonc(text)
-    mcps = config.get("mcpServers")
-    if not isinstance(mcps, dict) or "qmd" not in mcps:
-        return text, False
-
-    del mcps["qmd"]
-    if not mcps:
-        del config["mcpServers"]
-
-    return json.dumps(config, indent=2) + "\n", True
+    return json.dumps(config, indent=2) + "\n"
 
 
 def uninstall(
@@ -668,90 +611,73 @@ def uninstall(
     """
     paths = _paths(home)
 
-    # Build list of actions
-    actions: list[tuple[str, Path]] = []
+    def _strip_codex(text: str) -> tuple[str | None, bool]:
+        remaining, fully_owned = ms.strip_toml_block(text, CODEX_TOML_SECTION)
+        return remaining, fully_owned
 
-    # Claude settings.json
+    specs: list[tuple[Path, str, Callable[[str], tuple[str | None, bool]] | None]] = []
+
     settings_path = paths.claude_dir / "settings.json"
     if settings_path.exists():
         try:
-            settings = json.loads(settings_path.read_text(encoding="utf-8"))
-            mcps = settings.get("mcpServers")
-            if isinstance(mcps, dict) and "qmd" in mcps:
-                actions.append(("claude", settings_path))
+            mcps = json.loads(settings_path.read_text(encoding="utf-8")).get("mcpServers")
         except json.JSONDecodeError:
-            pass
+            mcps = None
+        if isinstance(mcps, dict) and "qmd" in mcps:
 
-    # OpenCode opencode.jsonc
+            def _mutate_claude(text: str) -> tuple[str | None, bool]:
+                new = _strip_qmd_mcp(text, json.loads)
+                return (None, False) if new is None else (new, False)
+
+            specs.append((settings_path, "qmd MCP from settings.json", _mutate_claude))
+
     opencode_path = paths.opencode_config_dir / "opencode.jsonc"
     if opencode_path.exists():
         try:
-            opencode_config = ms.parse_jsonc(
-                opencode_path.read_text(encoding="utf-8")
-            )
-            mcps = opencode_config.get("mcpServers")
-            if isinstance(mcps, dict) and "qmd" in mcps:
-                actions.append(("opencode", opencode_path))
+            mcps = ms.parse_jsonc(opencode_path.read_text(encoding="utf-8")).get("mcpServers")
         except (json.JSONDecodeError, ValueError):
-            pass
+            mcps = None
+        if isinstance(mcps, dict) and "qmd" in mcps:
 
-    # Codex config.toml
+            def _mutate_opencode(text: str) -> tuple[str | None, bool]:
+                new = _strip_qmd_mcp(text, ms.parse_jsonc)
+                return (None, False) if new is None else (new, False)
+
+            specs.append((opencode_path, "qmd MCP from opencode.jsonc", _mutate_opencode))
+
     codex_path = paths.codex_dir / "config.toml"
-    if codex_path.exists():
-        content = codex_path.read_text(encoding="utf-8")
-        if CODEX_TOML_SECTION in content:
-            actions.append(("codex", codex_path))
+    if codex_path.exists() and CODEX_TOML_SECTION in codex_path.read_text(encoding="utf-8"):
+        specs.append((codex_path, "qmd MCP section", _strip_codex))
 
-    # Manifest
     if paths.manifest.exists():
-        actions.append(("manifest", paths.manifest))
+        specs.append((paths.manifest, "kit manifest", None))
 
-    if not actions:
+    if not specs:
         print("nothing to uninstall")
         return 0
 
-    # Dry-run: print planned actions only
     if dry_run:
-        for kind, _path in actions:
-            if kind == "claude":
-                print("would strip qmd MCP from settings.json")
-            elif kind == "opencode":
-                print("would strip qmd MCP from opencode.jsonc")
-            elif kind == "codex":
-                print("would strip qmd MCP section from config.toml")
-            elif kind == "manifest":
-                print(f"would remove {_path}")
+        for _path, label, _fn in specs:
+            print(f"would remove {label}")
         print("dry run: no files modified")
         return 0
 
-    if not _confirm("Uninstall second-brain kit managed snippets?", yes=yes):
+    if not core.confirm("Uninstall second-brain kit managed snippets?", yes=yes):
         print("aborted")
         return 1
 
-    for kind, path in actions:
-        if kind == "claude":
-            current = path.read_text(encoding="utf-8")
-            stripped, _changed = _strip_qmd_from_json_config(current)
-            if stripped is not None:
-                path.write_text(stripped, encoding="utf-8")
-            print("stripped qmd MCP from settings.json")
-        elif kind == "opencode":
-            current = path.read_text(encoding="utf-8")
-            stripped, _changed = _strip_qmd_from_jsonc_config(current)
-            if stripped is not None:
-                path.write_text(stripped, encoding="utf-8")
-            print("stripped qmd MCP from opencode.jsonc")
-        elif kind == "codex":
-            current = path.read_text(encoding="utf-8")
-            remaining, fully_owned = ms.strip_toml_block(current, CODEX_TOML_SECTION)
-            if fully_owned:
-                path.unlink()
-                print("removed config.toml (was entirely qmd MCP section)")
-            elif remaining is not None:
-                path.write_text(remaining, encoding="utf-8")
-                print("stripped qmd MCP section from config.toml")
-        elif kind == "manifest":
+    for path, label, mutate in specs:
+        if mutate is None:
             path.unlink()
-            print(f"removed {path}")
-
+            print(f"removed {label}")
+        else:
+            new_text, delete_file = mutate(path.read_text(encoding="utf-8"))
+            if new_text is None and not delete_file:
+                continue
+            if delete_file:
+                path.unlink()
+                print(f"removed {path.name} (was entirely {label})")
+            else:
+                path.write_text(new_text or "", encoding="utf-8")
+                print(f"stripped {label}")
     return 0

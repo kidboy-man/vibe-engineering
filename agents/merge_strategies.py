@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Callable
+from collections.abc import Callable, Collection
+from typing import Any
 
 
 def json_defaults_strategy(
@@ -100,7 +101,7 @@ def parse_jsonc(text: str) -> dict:
 def jsonc_defaults_strategy(
     fragment: dict,
     current: dict,
-    local_only_keys: set[str],
+    local_only_keys: Collection[str],
     is_secret_key: Callable[[str], bool],
 ) -> tuple[dict, bool]:
     """Merge JSONC fragment defaults into current settings.
