@@ -2,4 +2,5 @@ usage: vibe kits second-brain doctor [-h] [--home HOME]
 
 options:
   -h, --help   show this help message and exit
-  --home HOME  Target config base directory (default: current user's home)
+  --home HOME  Target config base directory (default: $XDG_CONFIG_HOME or
+               current user's home)

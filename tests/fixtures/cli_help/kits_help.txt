@@ -5,7 +5,8 @@ positional arguments:
     list                List available kits
     claude-code         Manage the Claude Code kit
     opencode            Manage the OpenCode kit
-    second-brain        Manage the second-brain kit
+    second-brain        Manage the second-brain kit — safe scaffold of vault
+                        at VIBE_SECOND_BRAIN_PATH
 
 options:
   -h, --help            show this help message and exit
