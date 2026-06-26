@@ -45,7 +45,7 @@ Users run these commands manually for search:
 
 ```bash
 # Add the wiki collection (run once)
-qmd collection add wiki <vault>/wiki --name second-brain
+qmd collection add <vault>/wiki --name second-brain
 
 # Update the index (after new pages)
 qmd update
@@ -60,7 +60,9 @@ qmd search "your query" --semantic
 ## Supported AI Agents
 
 ### Claude Code
-- Install the `claude-obsidian` plugin for slash commands (`/wiki`, `/save`, `/canvas`, `/autoresearch`) and agent skills (natural language triggers like "lint the wiki", "ingest this").
+- Install the `claude-obsidian` plugin via marketplace (see `docs/claude-code-plugin.md` for exact commands: `claude plugin marketplace add`, `claude plugin install`, `claude plugin list`).
+- Provides slash commands (`/wiki`, `/save`, `/canvas`, `/autoresearch`) and agent skills (natural language triggers like "lint the wiki", "ingest this").
+- Slash commands require `/` prefix. Skills trigger by natural language — you cannot type `/wiki-lint`; say "lint the wiki" instead.
 - Start sessions in the vault root so `CLAUDE.md` is read automatically.
 
 ### OpenCode
@@ -77,6 +79,8 @@ qmd search "your query" --semantic
 
 ### Cursor
 - Copy `agent-snippets/cursor/second-brain.mdc` into each project's `.cursor/rules/second-brain.mdc`.
+- `AGENTS.md` in the project root also works as a cross-tool alternative.
+- `.cursorrules` is deprecated since Cursor 0.45 — migrate to `.cursor/rules/*.mdc`.
 - Do not use global `~/.cursor/rules` — unstable across versions.
 
 ## Anti-Patterns

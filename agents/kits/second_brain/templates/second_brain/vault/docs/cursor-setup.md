@@ -22,6 +22,10 @@ cp <vault>/agent-snippets/cursor/second-brain.mdc <your-project>/.cursor/rules/s
 
 The root-level `.cursorrules` file was deprecated in Cursor 0.45. Existing files still work but will not receive updates. Migrate to `.cursor/rules/*.mdc`.
 
+## Cross-Tool Alternative: `AGENTS.md`
+
+If you use multiple AI coding tools (Claude Code, OpenCode, Codex, Cursor), place second-brain instructions in the project's `AGENTS.md` file instead. All agents read `AGENTS.md` automatically. This avoids maintaining separate rule files per tool.
+
 ## Do Not Use: Global Rules
 
 **Never use `~/.cursor/rules`** for vault configuration. Global rules are unstable across Cursor versions and can cause unexpected behavior in unrelated projects. Always scope vault rules to specific projects via `.cursor/rules/`.

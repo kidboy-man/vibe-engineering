@@ -386,6 +386,13 @@ def doctor(home: str | None = None) -> int:
     else:
         print("✓ all seed pages present")
 
+    print("\n-- git --")
+    if (vault_path / ".git").is_dir():
+        print("✓ git repo present")
+    else:
+        print("✗ git repo not found")
+        print("  fix: re-run install to initialize the vault git repository")
+
     print("\n-- qmd --")
     qmd_path = shutil.which("qmd")
     collection_match = False

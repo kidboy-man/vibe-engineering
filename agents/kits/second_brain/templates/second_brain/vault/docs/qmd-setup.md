@@ -24,7 +24,7 @@ qmd --version
 
 ```bash
 # Index the wiki folder (run once)
-qmd collection add wiki <vault>/wiki --name second-brain
+qmd collection add <vault>/wiki --name second-brain
 
 # Build the initial index
 qmd update
