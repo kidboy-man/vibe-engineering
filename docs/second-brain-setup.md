@@ -4,6 +4,39 @@
 
 ---
 
+## About this guide
+
+This is the **source guide** for the `second-brain` kit. The kit
+(`vibe kits second-brain install`) now automates the safe-scaffold parts
+of this guide — vault directories, seed pages, `.gitignore` merge, git
+init, and the non-secret agent config snippets for Claude Code, OpenCode,
+and Codex CLI. The kit's shipped templates under
+`agents/kits/second_brain/templates/second_brain/vault/docs/` cover the
+manual user-facing steps (qmd install, Claude plugin install, Obsidian
+install, Cursor sample, memory-compiler add-on).
+
+**Why keep this file?** It preserves the parts that are not duplicated
+elsewhere:
+
+- The **pitfalls** section (8 items) — the "why" behind the kit's design
+  decisions, including the confirmed WSL2 EISDIR bug with the Obsidian
+  forum thread reference.
+- The **wishlist** — future work not yet in the kit.
+- The **daily workflow** — the intended-use ritual for a second-brain
+  vault.
+- The **references** — provenance (Karpathy, Cole Medin, Tobi Lütke,
+  Steph Ango) and the Agent Skills spec.
+- The **first-ingest verification** — the "prove the loop works" step
+  that closes the wiring into a working system.
+
+If you are a **user** of the kit, you do not need to read this file —
+the README and the kit's `wiki/docs/` templates are enough. If you are a
+**maintainer** or **contributor** to the kit, this file is the
+authoritative source for the rationale, design tradeoffs, and known
+limitations.
+
+---
+
 ## What You'll Build
 
 A **local-first Obsidian vault** that acts as a persistent, interlinked knowledge base. Multiple AI agents (Claude Code, Codex CLI, Hermes, OpenCode, Cursor) read and write the same plain Markdown files. The AI agents **ingest sources** into the wiki, **query** it for answers, and **lint** it for consistency — all with natural language, not custom tooling.

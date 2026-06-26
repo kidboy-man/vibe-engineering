@@ -145,7 +145,7 @@ class SecondBrainVaultCreationTests(unittest.TestCase):
                 )
 
     def test_vault_dirs_match_setup_spec(self):
-        """Ensure dirs created match LLM_SECOND_BRAIN_SETUP.md:38-52."""
+        """Ensure dirs created match docs/second-brain-setup.md:38-52."""
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             install(home=str(home), dry_run=False, yes=True)
