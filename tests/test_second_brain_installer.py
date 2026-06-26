@@ -406,7 +406,12 @@ class SecondBrainDoctorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             install(home=str(home), dry_run=False, yes=True)
-            result = doctor(home=str(home))
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertIn("qmd not found", output)
+            self.assertIn("npm install -g @tobilu/qmd", output)
             self.assertEqual(result, 1)
 
     @patch("agents.kits.second_brain.installer.shutil.which")

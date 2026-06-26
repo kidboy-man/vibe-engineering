@@ -391,6 +391,7 @@ def doctor(home: str | None = None) -> int:
     collection_match = False
     if not qmd_path:
         print("✗ qmd not found")
+        print("  fix: npm install -g @tobilu/qmd")
     else:
         print(f"✓ qmd: {qmd_path}")
         try:
