@@ -488,12 +488,262 @@ def doctor(home: str | None = None) -> int:
 
 
 def diff_kit(home: str | None = None) -> int:
+    """Show planned differences without making any changes.
+
+    Reports:
+    - Vault directories that would be created vs already exist
+    - Seed pages that would be seeded vs preserved (never overwritten)
+    - .gitignore entries that would be added vs already present
+    - Agent config snippet status for Claude/OpenCode/Codex
+    - Manifest state
+    """
+    paths = _paths(home)
+
+    print(f"home: {paths.home_root}")
+    print(f"vault: {paths.vault}")
+    print(f"template: {paths.template}")
+    print()
+
+    # Vault directories
+    print("vault directories:")
+    for d in VAULT_DIRS:
+        target = paths.vault / d
+        status = "exists" if target.is_dir() else "would create"
+        print(f"  {d} [{status}]")
+    print()
+
+    # Seed pages
+    template_vault = paths.template / "vault"
+    print("seed pages:")
+    for rel in SEED_PAGES:
+        target = paths.vault / rel
+        if target.exists():
+            print(f"  {rel} [preserved existing user file]")
+        else:
+            print(f"  {rel} [would create from template]")
+    print()
+
+    # .gitignore
+    gitignore = paths.vault / ".gitignore"
+    if gitignore.exists():
+        existing_lines = set(gitignore.read_text(encoding="utf-8").splitlines())
+        new_entries = [e for e in GITIGNORE_ENTRIES if e not in existing_lines]
+        if new_entries:
+            print(".gitignore: would add entries:")
+            for e in new_entries:
+                print(f"  + {e}")
+        else:
+            print(".gitignore: all entries already present")
+    else:
+        print(".gitignore: would create with:")
+        for e in GITIGNORE_ENTRIES:
+            print(f"  {e}")
+    print()
+
+    # Git init
+    if not (paths.vault / ".git").exists():
+        print(f"would git init in {paths.vault}")
+    else:
+        print("git already initialized")
+    print()
+
+    # Agent configs
+    print("agent configs:")
+
+    # Claude Code
+    settings_path = paths.claude_dir / "settings.json"
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            mcps = settings.get("mcpServers", {})
+            if isinstance(mcps, dict) and "qmd" in mcps:
+                print("  settings.json: qmd MCP already present")
+            else:
+                print("  settings.json: would add qmd MCP")
+        except json.JSONDecodeError:
+            print("  settings.json: invalid (would skip)")
+    else:
+        print("  settings.json: would create with qmd MCP")
+
+    # OpenCode
+    opencode_path = paths.opencode_config_dir / "opencode.jsonc"
+    if opencode_path.exists():
+        try:
+            opencode_config = ms.parse_jsonc(
+                opencode_path.read_text(encoding="utf-8")
+            )
+            mcps = opencode_config.get("mcpServers", {})
+            if isinstance(mcps, dict) and "qmd" in mcps:
+                print("  opencode.jsonc: qmd MCP already present")
+            else:
+                print("  opencode.jsonc: would add qmd MCP")
+        except (json.JSONDecodeError, ValueError):
+            print("  opencode.jsonc: invalid (would skip)")
+    else:
+        print("  opencode.jsonc: would create with qmd MCP")
+
+    # Codex CLI
+    codex_path = paths.codex_dir / "config.toml"
+    if codex_path.exists():
+        content = codex_path.read_text(encoding="utf-8")
+        if CODEX_TOML_SECTION in content:
+            print("  config.toml: qmd MCP section already present")
+        else:
+            print("  config.toml: would add qmd MCP section")
+    else:
+        print("  config.toml: would create with qmd MCP section")
+    print()
+
+    # Manifest
+    manifest = paths.manifest
+    if manifest.exists():
+        print(f"manifest: exists at {manifest}")
+    else:
+        print(f"manifest: would create at {manifest}")
+    print()
+
     return 0
+
+
+def _strip_qmd_from_json_config(text: str) -> tuple[str | None, bool]:
+    """Remove qmd mcpServer entry from a JSON config string.
+
+    Returns (remaining_text_or_None, was_stripped).
+    - If qmd was the only mcpServer and mcpServers is now empty,
+      remove the mcpServers key entirely.
+    - If no qmd entry found, returns (text, False).
+    """
+    config = json.loads(text)
+    mcps = config.get("mcpServers")
+    if not isinstance(mcps, dict) or "qmd" not in mcps:
+        return text, False
+
+    del mcps["qmd"]
+    if not mcps:
+        del config["mcpServers"]
+
+    return json.dumps(config, indent=2) + "\n", True
+
+
+def _strip_qmd_from_jsonc_config(text: str) -> tuple[str | None, bool]:
+    """Remove qmd mcpServer entry from a JSONC config string.
+
+    Same semantics as _strip_qmd_from_json_config but handles JSONC comments.
+    """
+    config = ms.parse_jsonc(text)
+    mcps = config.get("mcpServers")
+    if not isinstance(mcps, dict) or "qmd" not in mcps:
+        return text, False
+
+    del mcps["qmd"]
+    if not mcps:
+        del config["mcpServers"]
+
+    return json.dumps(config, indent=2) + "\n", True
 
 
 def uninstall(
     home: str | None = None,
-    dry_run: bool = False,  # noqa: ARG001
-    yes: bool = False,  # noqa: ARG001
+    dry_run: bool = False,
+    yes: bool = False,
 ) -> int:
+    """Uninstall kit-owned snippets and manifest.
+
+    Removes only:
+    - qmd MCP snippets from Claude/OpenCode/Codex agent configs
+    - Runtime manifest at <vault>/.vibe-engineering-manifest.json
+
+    NEVER deletes:
+    - Vault directory, .git, seed pages, .gitignore, raw/, wiki/, output/
+    - Any user content under the vault
+    - User-added config entries around kit snippets
+    """
+    paths = _paths(home)
+
+    # Build list of actions
+    actions: list[tuple[str, Path]] = []
+
+    # Claude settings.json
+    settings_path = paths.claude_dir / "settings.json"
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            mcps = settings.get("mcpServers")
+            if isinstance(mcps, dict) and "qmd" in mcps:
+                actions.append(("claude", settings_path))
+        except json.JSONDecodeError:
+            pass
+
+    # OpenCode opencode.jsonc
+    opencode_path = paths.opencode_config_dir / "opencode.jsonc"
+    if opencode_path.exists():
+        try:
+            opencode_config = ms.parse_jsonc(
+                opencode_path.read_text(encoding="utf-8")
+            )
+            mcps = opencode_config.get("mcpServers")
+            if isinstance(mcps, dict) and "qmd" in mcps:
+                actions.append(("opencode", opencode_path))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Codex config.toml
+    codex_path = paths.codex_dir / "config.toml"
+    if codex_path.exists():
+        content = codex_path.read_text(encoding="utf-8")
+        if CODEX_TOML_SECTION in content:
+            actions.append(("codex", codex_path))
+
+    # Manifest
+    if paths.manifest.exists():
+        actions.append(("manifest", paths.manifest))
+
+    if not actions:
+        print("nothing to uninstall")
+        return 0
+
+    # Dry-run: print planned actions only
+    if dry_run:
+        for kind, _path in actions:
+            if kind == "claude":
+                print("would strip qmd MCP from settings.json")
+            elif kind == "opencode":
+                print("would strip qmd MCP from opencode.jsonc")
+            elif kind == "codex":
+                print("would strip qmd MCP section from config.toml")
+            elif kind == "manifest":
+                print(f"would remove {_path}")
+        print("dry run: no files modified")
+        return 0
+
+    if not _confirm("Uninstall second-brain kit managed snippets?", yes=yes):
+        print("aborted")
+        return 1
+
+    for kind, path in actions:
+        if kind == "claude":
+            current = path.read_text(encoding="utf-8")
+            stripped, _changed = _strip_qmd_from_json_config(current)
+            if stripped is not None:
+                path.write_text(stripped, encoding="utf-8")
+            print("stripped qmd MCP from settings.json")
+        elif kind == "opencode":
+            current = path.read_text(encoding="utf-8")
+            stripped, _changed = _strip_qmd_from_jsonc_config(current)
+            if stripped is not None:
+                path.write_text(stripped, encoding="utf-8")
+            print("stripped qmd MCP from opencode.jsonc")
+        elif kind == "codex":
+            current = path.read_text(encoding="utf-8")
+            remaining, fully_owned = ms.strip_toml_block(current, CODEX_TOML_SECTION)
+            if fully_owned:
+                path.unlink()
+                print("removed config.toml (was entirely qmd MCP section)")
+            elif remaining is not None:
+                path.write_text(remaining, encoding="utf-8")
+                print("stripped qmd MCP section from config.toml")
+        elif kind == "manifest":
+            path.unlink()
+            print(f"removed {path}")
+
     return 0
