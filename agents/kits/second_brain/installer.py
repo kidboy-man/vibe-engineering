@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -345,10 +347,144 @@ def install(
 
 
 def doctor(home: str | None = None) -> int:
+    """Read-only health check for the second-brain kit and its dependencies.
+
+    Returns 1 when the kit or a hard dependency is unhealthy;
+    returns 0 with warnings when only optional components are missing.
+    """
     paths = _paths(home)
-    if not paths.vault.is_dir():
+    problems = False
+
+    vault_path = paths.vault.resolve()
+
+    print(f"home: {paths.home_root}")
+    print(f"vault: {vault_path}")
+    print()
+
+    if not vault_path.is_dir():
+        print("✗ vault missing")
         return 1
-    return 0
+    print("✓ vault exists")
+
+    print("\n-- vault directories --")
+    missing_dirs = [d for d in VAULT_DIRS if not (vault_path / d).is_dir()]
+    if missing_dirs:
+        print("✗ missing directories:")
+        for d in missing_dirs:
+            print(f"  {d}")
+        problems = True
+    else:
+        print("✓ all directories present")
+
+    print("\n-- seed pages --")
+    missing_pages = [p for p in SEED_PAGES if not (vault_path / p).is_file()]
+    if missing_pages:
+        print("✗ missing seed pages:")
+        for p in missing_pages:
+            print(f"  {p}")
+        problems = True
+    else:
+        print("✓ all seed pages present")
+
+    print("\n-- qmd --")
+    qmd_path = shutil.which("qmd")
+    collection_match = False
+    if not qmd_path:
+        print("✗ qmd not found")
+    else:
+        print(f"✓ qmd: {qmd_path}")
+        try:
+            result = subprocess.run(
+                ["qmd", "collection", "list"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                print("✗ qmd collection list failed")
+                print(f"  stderr: {(result.stderr or '').strip()}")
+            else:
+                wiki_collection_str = str(vault_path / "wiki")
+                if wiki_collection_str in result.stdout:
+                    print(f"✓ qmd collection matches {wiki_collection_str}")
+                    collection_match = True
+                else:
+                    print(f"✗ no qmd collection matches {wiki_collection_str}")
+        except Exception as exc:
+            print(f"✗ qmd collection list error: {exc}")
+
+    if not qmd_path or not collection_match:
+        wiki_path = vault_path / "wiki"
+        print(f"  fix: qmd collection add {wiki_path} --name second-brain")
+        return 1
+
+    print("\n-- obsidian --")
+    if shutil.which("obsidian"):
+        print("✓ obsidian available")
+    else:
+        print("⚠ obsidian not found (visual client; optional)")
+
+    print("\n-- memory compiler --")
+    if (paths.home_root / ".qmd" / "config.yaml").exists():
+        print("✓ memory compiler configured")
+    else:
+        print("ℹ memory compiler: not configured (optional)")
+
+    print("\n-- agent binaries --")
+    for binary, label in [
+        ("claude", "Claude Code"),
+        ("opencode", "OpenCode"),
+        ("codex", "Codex CLI"),
+    ]:
+        found = shutil.which(binary)
+        if found:
+            print(f"✓ {binary} ({label}): {found}")
+        else:
+            print(f"⚠ {binary}: not found ({label})")
+
+    print("\n-- other agents --")
+    print("ℹ hermes: config path unverified (docs/sample only)")
+    print("ℹ cursor: project-local .cursor/rules/*.mdc recommended")
+
+    print("\n-- agent configs --")
+    settings_json = paths.claude_dir / "settings.json"
+    if settings_json.exists():
+        try:
+            json.loads(settings_json.read_text(encoding="utf-8"))
+            print("✓ settings.json: valid")
+        except json.JSONDecodeError as exc:
+            print(f"✗ settings.json: invalid JSON ({exc})")
+            problems = True
+    else:
+        print("ℹ settings.json: absent")
+
+    opencode_jsonc = paths.opencode_config_dir / "opencode.jsonc"
+    if opencode_jsonc.exists():
+        try:
+            ms.parse_jsonc(opencode_jsonc.read_text(encoding="utf-8"))
+            print("✓ opencode.jsonc: valid")
+        except (json.JSONDecodeError, ValueError) as exc:
+            print(f"✗ opencode.jsonc: invalid ({exc})")
+            problems = True
+    else:
+        print("ℹ opencode.jsonc: absent")
+
+    codex_toml = paths.codex_dir / "config.toml"
+    if codex_toml.exists():
+        try:
+            tomllib.loads(codex_toml.read_text(encoding="utf-8"))
+            print("✓ config.toml: valid")
+        except Exception as exc:
+            print(f"✗ config.toml: invalid TOML ({exc})")
+            problems = True
+    else:
+        print("ℹ config.toml: absent")
+
+    vault_str = str(vault_path)
+    if "\\\\wsl$" in vault_str or vault_str.startswith("/mnt/"):
+        print("\n⚠ WSL2 detected: paths may behave differently across OS boundaries")
+
+    return 1 if problems else 0
 
 
 def diff_kit(home: str | None = None) -> int:

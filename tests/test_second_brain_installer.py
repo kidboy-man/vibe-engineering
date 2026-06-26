@@ -1,8 +1,11 @@
+import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -355,19 +358,336 @@ class SecondBrainGitInitTests(unittest.TestCase):
 class SecondBrainDoctorTests(unittest.TestCase):
     """Tests for the doctor command."""
 
-    def test_doctor_returns_zero_on_clean_vault(self):
+    def _which_returns_qmd(self, cmd):
+        if cmd == "qmd":
+            return "/fake/qmd"
+        return None
+
+    def _which_returns_qmd_and_agents(self, cmd):
+        known = {
+            "qmd": "/fake/qmd",
+            "claude": "/fake/claude",
+            "opencode": "/fake/opencode",
+            "codex": "/fake/codex",
+            "obsidian": "/fake/obsidian",
+        }
+        return known.get(cmd)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_returns_zero_when_qmd_collection_matches(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd_and_agents
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n/some/other\n",
+                stderr="",
+            )
             result = doctor(home=str(home))
             self.assertEqual(result, 0)
 
     def test_doctor_returns_nonzero_when_vault_missing(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
-            # Don't install, vault doesn't exist
             result = doctor(home=str(home))
             self.assertNotEqual(result, 0)
+
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_doctor_returns_nonzero_when_qmd_missing(self, mock_which):
+        mock_which.return_value = None
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            result = doctor(home=str(home))
+            self.assertEqual(result, 1)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_returns_nonzero_when_no_matching_collection(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout="/some/other/collection\n",
+                stderr="",
+            )
+            result = doctor(home=str(home))
+            self.assertEqual(result, 1)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_returns_nonzero_when_collection_list_fails(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=1,
+                stdout="",
+                stderr="error",
+            )
+            result = doctor(home=str(home))
+            self.assertEqual(result, 1)
+
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_output_contains_fix_command(self, mock_run, mock_which):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = home.resolve() / "second-brain" / "wiki"
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout="/other/collection\n",
+                stderr="",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertIn("qmd collection add", output)
+            self.assertIn(str(wiki_path), output)
+            self.assertIn("--name second-brain", output)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_output_lists_agent_statuses(self, mock_run, mock_which):
+        mock_which.side_effect = self._which_returns_qmd_and_agents
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                doctor(home=str(home))
+            output = buf.getvalue()
+
+            self.assertIn("claude", output)
+            self.assertIn("opencode", output)
+            self.assertIn("codex", output)
+            self.assertIn("hermes", output)
+            self.assertIn("cursor", output)
+
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_never_creates_files(self, mock_run, mock_which):
+        mock_which.side_effect = self._which_returns_qmd_and_agents
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+
+            before_files = set()
+            for root, dirs, files in os.walk(home_str):
+                for f in files:
+                    before_files.add(os.path.join(root, f))
+
+            doctor(home=str(home))
+
+            after_files = set()
+            for root, dirs, files in os.walk(home_str):
+                for f in files:
+                    after_files.add(os.path.join(root, f))
+
+            new_files = after_files - before_files
+            self.assertEqual(
+                new_files, set(), f"doctor created files: {new_files}"
+            )
+
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_returns_nonzero_for_invalid_settings_json(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd_and_agents
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+
+            settings = home / ".claude" / "settings.json"
+            settings.parent.mkdir(parents=True, exist_ok=True)
+            settings.write_text("{not valid json", encoding="utf-8")
+
+            result = doctor(home=str(home))
+            self.assertEqual(result, 1)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_returns_nonzero_for_invalid_opencode_jsonc(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd_and_agents
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+
+            opencode_dir = home / ".config" / "opencode"
+            opencode_dir.mkdir(parents=True, exist_ok=True)
+            (opencode_dir / "opencode.jsonc").write_text(
+                "{not valid jsonc", encoding="utf-8"
+            )
+
+            result = doctor(home=str(home))
+            self.assertEqual(result, 1)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_returns_nonzero_for_invalid_config_toml(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd_and_agents
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            (codex_dir / "config.toml").write_text(
+                "[[[invalid toml", encoding="utf-8"
+            )
+
+            result = doctor(home=str(home))
+            self.assertEqual(result, 1)
+
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_warns_when_obsidian_missing(self, mock_run, mock_which):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+
+            self.assertEqual(result, 0)
+            self.assertIn("obsidian not found", output)
+
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_notes_when_memory_compiler_unconfigured(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+
+            self.assertEqual(result, 0)
+            self.assertIn("memory compiler", output)
+
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_warns_missing_agent_binaries_but_returns_zero(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+
+            self.assertEqual(result, 0)
+            self.assertIn("not found (Claude Code)", output)
+            self.assertIn("not found (OpenCode)", output)
+            self.assertIn("not found (Codex CLI)", output)
 
 
 class SecondBrainDiffTests(unittest.TestCase):
