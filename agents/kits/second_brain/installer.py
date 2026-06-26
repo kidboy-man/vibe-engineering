@@ -1,4 +1,5 @@
-"""Second-brain kit installer — vault scaffold, seed pages, .gitignore, git init."""
+"""Second-brain kit installer — vault scaffold, seed pages, .gitignore, git init,
+and agent config adapters (Claude Code, OpenCode, Codex CLI)."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents import installer_core as core
+from agents import merge_strategies as ms
 
 KIT_NAME = "second-brain"
 MANIFEST_FILE = core.MANIFEST_FILE
@@ -179,6 +181,108 @@ def _git_init(vault: Path) -> None:
     )
 
 
+QMD_MCP_SNIPPET_JSON: dict = {
+    "mcpServers": {
+        "qmd": {
+            "type": "stdio",
+            "command": "qmd",
+            "args": ["mcp"],
+        }
+    }
+}
+
+CODEX_TOML_SECTION = "[mcp_servers.qmd]"
+CODEX_TOML_BODY = 'type = "stdio"\ncommand = "qmd"\nargs = ["mcp"]\n'
+
+# Mirrors agents/kits/opencode/installer.py:35-50 — keys the kit never overwrites.
+OPENCODE_LOCAL_ONLY_KEYS = {
+    "model",
+    "provider",
+    "plugin",
+    "mcp",
+    "tools",
+    "tool",
+    "permission",
+    "env",
+    "agent",
+    "experimental",
+    "theme",
+    "share",
+    "autoupdate",
+    "instructions",
+}
+
+OPENCODE_SECRET_SUBSTRINGS = ("token", "key", "secret", "password", "auth", "credential")
+
+CLAUDE_SECRET_KEYS = {"env"}
+
+
+def _is_secret_jsonc_key(key: str) -> bool:
+    return any(sub in key.lower() for sub in OPENCODE_SECRET_SUBSTRINGS)
+
+
+def _merge_claude_config(paths: KitPaths) -> None:
+    settings_path = paths.claude_dir / "settings.json"
+    current: dict = {}
+    if settings_path.exists():
+        try:
+            current = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print("skipping invalid settings.json")
+            return
+
+    merged, changed = ms.json_defaults_strategy(
+        QMD_MCP_SNIPPET_JSON, current, CLAUDE_SECRET_KEYS
+    )
+    if not changed:
+        return
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+    print("merged qmd MCP into settings.json")
+
+
+def _merge_opencode_config(paths: KitPaths) -> None:
+    config_path = paths.opencode_config_dir / "opencode.jsonc"
+    current: dict = {}
+    if config_path.exists():
+        try:
+            current = ms.parse_jsonc(config_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError):
+            print("skipping invalid opencode.jsonc")
+            return
+
+    merged, changed = ms.jsonc_defaults_strategy(
+        QMD_MCP_SNIPPET_JSON, current, OPENCODE_LOCAL_ONLY_KEYS, _is_secret_jsonc_key
+    )
+    if not changed:
+        return
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+    print("merged qmd MCP into opencode.jsonc")
+
+
+def _merge_codex_config(paths: KitPaths) -> None:
+    config_path = paths.codex_dir / "config.toml"
+    current: str | None = None
+    if config_path.exists():
+        current = config_path.read_text(encoding="utf-8")
+
+    merged, action = ms.toml_block_merge_strategy(
+        CODEX_TOML_SECTION, CODEX_TOML_BODY, current
+    )
+    if action == "unchanged":
+        return
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(merged, encoding="utf-8")
+    if action == "create":
+        print(f"created {config_path} with qmd MCP section")
+    else:
+        print("merged qmd MCP into config.toml")
+
+
 def _manifest_state(managed_files: list[str]) -> dict:
     return core.manifest_state(KIT_NAME, managed_files)
 
@@ -187,7 +291,7 @@ def install(
     home: str | None = None,
     dry_run: bool = False,
     yes: bool = False,
-    merge_settings: bool = True,  # noqa: ARG001 — reserved for future agent config adapters
+    merge_settings: bool = True,
 ) -> int:
     paths = _paths(home)
 
@@ -197,6 +301,9 @@ def install(
 
     if dry_run:
         _print_dry_run(paths)
+        if merge_settings:
+            print("would merge qmd MCP into agent configs (Claude, OpenCode, Codex)")
+            print("  Cursor and Hermes: no config mutation")
         return 0
 
     if not _confirm("Install/update the second-brain kit?", yes=yes):
@@ -225,6 +332,11 @@ def install(
     # Git init.
     _git_init(paths.vault)
     print("git repo ready")
+
+    if merge_settings:
+        _merge_claude_config(paths)
+        _merge_opencode_config(paths)
+        _merge_codex_config(paths)
 
     # Write runtime manifest.
     core.write_text(paths.manifest, json.dumps(_manifest_state(managed), indent=2) + "\n")
