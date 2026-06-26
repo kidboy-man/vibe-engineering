@@ -1,10 +1,12 @@
-usage: vibe kits [-h] {list,claude-code,opencode} ...
+usage: vibe kits [-h] {list,claude-code,opencode,second-brain} ...
 
 positional arguments:
-  {list,claude-code,opencode}
+  {list,claude-code,opencode,second-brain}
     list                List available kits
     claude-code         Manage the Claude Code kit
     opencode            Manage the OpenCode kit
+    second-brain        Manage the second-brain kit — safe scaffold of vault
+                        at VIBE_SECOND_BRAIN_PATH
 
 options:
   -h, --help            show this help message and exit

@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.kits.opencode import installer
 from agents.kits.opencode.installer import doctor, install, uninstall
+from agents.secret_policies import is_secret_key
 
 
 class OpenCodeInstallerTests(unittest.TestCase):
@@ -269,9 +270,9 @@ class JsoncParsingTests(unittest.TestCase):
 
     def test_secret_key_detection(self):
         for key in ("apiKey", "API_TOKEN", "client_secret", "dbPassword", "authHeader", "userCredential"):
-            self.assertTrue(installer._is_secret_key(key))
+            self.assertTrue(is_secret_key(key))
         for key in ("model", "plugin", "theme", "lsp", "provider"):
-            self.assertFalse(installer._is_secret_key(key))
+            self.assertFalse(is_secret_key(key))
 
 
 if __name__ == "__main__":

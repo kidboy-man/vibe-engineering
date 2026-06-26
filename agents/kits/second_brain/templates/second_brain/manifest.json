@@ -1,0 +1,22 @@
+{
+  "kit": "second-brain",
+  "version": "0.1.0",
+  "description": "LLM second-brain vault scaffold: seed pages, agent snippets, and setup docs for multi-agent knowledge management.",
+  "managed_files": [
+    "vault/wiki/index.md",
+    "vault/wiki/log.md",
+    "vault/wiki/hot.md",
+    "vault/AGENTS.md",
+    "vault/docs/qmd-setup.md",
+    "vault/docs/claude-code-plugin.md",
+    "vault/docs/cursor-setup.md",
+    "vault/docs/obsidian-setup.md",
+    "vault/docs/memory-compiler.md",
+    "vault/agent-snippets/cursor/second-brain.mdc",
+    "vault/agent-snippets/qmd-mcp.json",
+    "vault/agent-snippets/codex/qmd-mcp.toml"
+  ],
+  "settings_fragment": null,
+  "secret_policy": "Never installs auth tokens, credentials, API keys, local router URLs, or machine-specific paths. Vault data is create-if-absent and never uninstall-deleted.",
+  "notes": "Vault content (seed pages, .gitignore, raw/, wiki/) is created only if absent. Uninstall never deletes vault data, .git history, or user-authored pages."
+}

@@ -17,6 +17,12 @@ from agents.kits.opencode.installer import (
     install as opencode_install,
     uninstall as opencode_uninstall,
 )
+from agents.kits.second_brain.installer import (
+    diff_kit as second_brain_diff,
+    doctor as second_brain_doctor,
+    install as second_brain_install,
+    uninstall as second_brain_uninstall,
+)
 
 
 @dataclass(frozen=True)
@@ -45,5 +51,13 @@ KITS: dict[str, KitSpec] = {
         diff=opencode_diff,
         doctor=opencode_doctor,
         uninstall=opencode_uninstall,
+    ),
+    "second-brain": KitSpec(
+        name="second-brain",
+        help="Manage the second-brain kit — safe scaffold of vault at VIBE_SECOND_BRAIN_PATH",
+        install=second_brain_install,
+        diff=second_brain_diff,
+        doctor=second_brain_doctor,
+        uninstall=second_brain_uninstall,
     ),
 }

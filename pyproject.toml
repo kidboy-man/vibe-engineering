@@ -27,4 +27,6 @@ agents = [
     "kits/claude_code/templates/**/**/*",
     "kits/opencode/templates/**/*",
     "kits/opencode/templates/**/**/*",
+    "kits/second_brain/templates/**/*",
+    "kits/second_brain/templates/**/**/*",
 ]

@@ -87,6 +87,29 @@ class CliHelpContractTests(unittest.TestCase):
             "kits_opencode_uninstall_help.txt", "kits", "opencode", "uninstall"
         )
 
+    def test_kits_second_brain_help(self):
+        self._assert_matches_fixture("kits_second_brain_help.txt", "kits", "second-brain")
+
+    def test_kits_second_brain_install_help(self):
+        self._assert_matches_fixture(
+            "kits_second_brain_install_help.txt", "kits", "second-brain", "install"
+        )
+
+    def test_kits_second_brain_diff_help(self):
+        self._assert_matches_fixture(
+            "kits_second_brain_diff_help.txt", "kits", "second-brain", "diff"
+        )
+
+    def test_kits_second_brain_doctor_help(self):
+        self._assert_matches_fixture(
+            "kits_second_brain_doctor_help.txt", "kits", "second-brain", "doctor"
+        )
+
+    def test_kits_second_brain_uninstall_help(self):
+        self._assert_matches_fixture(
+            "kits_second_brain_uninstall_help.txt", "kits", "second-brain", "uninstall"
+        )
+
 
 class CliDispatchContractTests(unittest.TestCase):
     """Characterization tests for CLI argument dispatching.
@@ -105,6 +128,7 @@ class CliDispatchContractTests(unittest.TestCase):
         lines = result.stdout.strip().splitlines()
         self.assertIn("claude-code", lines)
         self.assertIn("opencode", lines)
+        self.assertIn("second-brain", lines)
 
     def test_kits_unknown_kit_exits_nonzero(self):
         result = subprocess.run(

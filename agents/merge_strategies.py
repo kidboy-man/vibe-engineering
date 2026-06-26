@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Callable
+from collections.abc import Callable, Collection
+from typing import Any
 
 
 def json_defaults_strategy(
@@ -100,7 +101,7 @@ def parse_jsonc(text: str) -> dict:
 def jsonc_defaults_strategy(
     fragment: dict,
     current: dict,
-    local_only_keys: set[str],
+    local_only_keys: Collection[str],
     is_secret_key: Callable[[str], bool],
 ) -> tuple[dict, bool]:
     """Merge JSONC fragment defaults into current settings.
@@ -179,6 +180,95 @@ def strip_marked_section(
         return existing, False
     before, _, rest = existing.partition(begin_marker)
     _, _, after = rest.partition(end_marker)
+    remaining = (before + after).strip()
+    if not remaining:
+        return None, True
+    if not remaining.endswith("\n"):
+        remaining += "\n"
+    return remaining, False
+
+
+def _find_toml_section(
+    content: str, section_header: str
+) -> tuple[str, str, str] | None:
+    """Locate a TOML top-level section by its ``[header]`` line.
+
+    Returns ``(before, body, after)`` or ``None`` if the section is not present.
+
+    *before*  — everything up to (but not including) the header line.
+    *body*    — content after the header line until the next top-level
+                ``[section]`` line or end-of-file.
+    *after*   — content from the next top-level ``[section]`` line onward
+                (empty string if this is the last section).
+    """
+    target = section_header + "\n"
+    idx = content.find(target)
+    if idx == -1:
+        return None
+    before = content[:idx]
+    body_start = idx + len(target)
+    rest = content[body_start:]
+    next_section = re.search(r"^\[", rest, re.MULTILINE)
+    if next_section:
+        body = rest[: next_section.start()]
+        after = rest[next_section.start() :]
+    else:
+        body = rest
+        after = ""
+    return before, body, after
+
+
+def toml_block_merge_strategy(
+    section_header: str,
+    template_body: str,
+    current: str | None,
+) -> tuple[str, str]:
+    """Insert or replace a kit-owned TOML section block.
+
+    - *current* is ``None`` → create a new file with just the section.
+    - Section present → replace its body with *template_body*.
+    - Section absent → append the section block.
+    - Unrelated tables and comments outside the kit block are preserved
+      byte-for-byte.  Comments *inside* the kit block may be replaced by the
+      canonical template.
+
+    Returns ``(merged_content, action)`` where *action* is one of
+    ``"create"``, ``"merge"``, or ``"unchanged"``.
+    """
+    if current is None:
+        return section_header + "\n" + template_body, "create"
+
+    located = _find_toml_section(current, section_header)
+    if located is None:
+        merged = current.rstrip("\n") + "\n\n" + section_header + "\n" + template_body
+        if not merged.endswith("\n"):
+            merged += "\n"
+        return merged, "merge"
+
+    before, _existing_body, after = located
+    merged = before + section_header + "\n" + template_body + after
+    if merged == current:
+        return merged, "unchanged"
+    return merged, "merge"
+
+
+def strip_toml_block(
+    existing: str,
+    section_header: str,
+) -> tuple[str | None, bool]:
+    """Remove only the kit-owned TOML section.
+
+    Returns ``(remaining_content, fully_owned)``.
+
+    - *remaining_content* is ``None`` when the file should be deleted entirely
+      (it contained only the kit section).
+    - *fully_owned* is ``True`` only in that case; ``False`` otherwise.
+    """
+    located = _find_toml_section(existing, section_header)
+    if located is None:
+        return existing, False
+
+    before, _body, after = located
     remaining = (before + after).strip()
     if not remaining:
         return None, True

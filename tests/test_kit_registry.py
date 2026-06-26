@@ -34,6 +34,10 @@ class KitRegistryImportTests(unittest.TestCase):
         source = REGISTRY_SOURCE.read_text(encoding="utf-8")
         self.assertIn("agents.kits.opencode.installer", source)
 
+    def test_registry_imports_second_brain_installer(self):
+        source = REGISTRY_SOURCE.read_text(encoding="utf-8")
+        self.assertIn("agents.kits.second_brain.installer", source)
+
 
 class KitRegistryExtensionContractTests(unittest.TestCase):
     """Verify build_parser accepts injected registry and exposes new kits."""
@@ -82,10 +86,19 @@ class KitRegistrySmokeTests(unittest.TestCase):
     def test_kits_has_expected_keys(self):
         self.assertIn("claude-code", KITS)
         self.assertIn("opencode", KITS)
+        self.assertIn("second-brain", KITS)
 
     def test_kitspec_attributes(self):
         kit = KITS["claude-code"]
         self.assertEqual(kit.name, "claude-code")
+        self.assertTrue(callable(kit.install))
+        self.assertTrue(callable(kit.diff))
+        self.assertTrue(callable(kit.doctor))
+        self.assertTrue(callable(kit.uninstall))
+
+    def test_second_brain_kitspec_attributes(self):
+        kit = KITS["second-brain"]
+        self.assertEqual(kit.name, "second-brain")
         self.assertTrue(callable(kit.install))
         self.assertTrue(callable(kit.diff))
         self.assertTrue(callable(kit.doctor))

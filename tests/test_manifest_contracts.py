@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.kits.claude_code import installer as claude_installer
 from agents.kits.opencode import installer as opencode_installer
+from agents.kits.second_brain import installer as second_brain_installer
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,6 +32,8 @@ class PackageDataGlobTests(unittest.TestCase):
                 "kits/claude_code/templates/**/**/*",
                 "kits/opencode/templates/**/*",
                 "kits/opencode/templates/**/**/*",
+                "kits/second_brain/templates/**/*",
+                "kits/second_brain/templates/**/**/*",
             ],
         )
 
@@ -54,6 +57,9 @@ class ManifestSurfaceTests(unittest.TestCase):
 
     def test_opencode_manifest_surface(self) -> None:
         self._assert_manifest_surface(opencode_installer, "opencode")
+
+    def test_second_brain_manifest_surface(self) -> None:
+        self._assert_manifest_surface(second_brain_installer, "second-brain")
 
 
 class ManifestParityTests(unittest.TestCase):

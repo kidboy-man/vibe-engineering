@@ -1,0 +1,58 @@
+---
+description: "Second-brain vault and qmd MCP guidance"
+alwaysApply: true
+---
+
+# Second Brain Vault
+
+This project has access to a local second-brain knowledge vault.
+
+## Vault Location
+
+The vault is located at `<vault>` (replace with your actual vault path).
+
+## qmd Search
+
+Use qmd for knowledge search:
+
+```bash
+qmd search "your query"
+```
+
+The qmd MCP server should be configured in your agent's MCP settings with:
+```json
+{"type": "stdio", "command": "qmd", "args": ["mcp"]}
+```
+
+## Wiki Pages
+
+Wiki pages are plain Markdown with YAML frontmatter and `[[wikilinks]]`.
+
+### Frontmatter format
+```yaml
+---
+type: concept          # or: source, entity
+status: active
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+tags: [domain, subdomain]
+---
+```
+
+## Ingest Rules
+
+- Ingest one source at a time into `raw/`
+- Create 1 source page + 3-8 concept/entity pages in `wiki/`
+- Update `wiki/index.md` and `wiki/log.md` after each ingest
+- Use `[[wikilinks]]` to connect pages
+
+## Anti-Patterns
+
+- No batch ingest
+- No auto-tags
+- No premature RAG (BM25 works until ~30+ pages)
+- No external API calls without asking
+
+## Setup
+
+Copy this file into your project's `.cursor/rules/second-brain.mdc` for Cursor to read it automatically.

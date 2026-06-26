@@ -1,0 +1,11 @@
+usage: vibe kits second-brain [-h] {install,diff,doctor,uninstall} ...
+
+positional arguments:
+  {install,diff,doctor,uninstall}
+    install             Install or update the second-brain kit
+    diff                Show file-level differences for managed files
+    doctor              Check second-brain kit installation status
+    uninstall           Remove files managed by this kit
+
+options:
+  -h, --help            show this help message and exit
