@@ -14,19 +14,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agents import merge_strategies as ms  # noqa: E402
 
 try:
-    from agents.kits.second_brain.installer import (  # noqa: E402, F401
+    from agents.kits.second_brain.installer import (  # noqa: E402
         _paths,
         install,
         doctor,
         diff_kit,
         uninstall,
+        _setup_qmd,
     )
-except ModuleNotFoundError:
-    _paths = None  # type: ignore[assignment]
-    install = None  # type: ignore[assignment]
-    doctor = None
-    diff_kit = None
-    uninstall = None
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest(f"second_brain installer unavailable: {exc}") from exc
 
 
 VAULT_DIRS = [
@@ -1091,7 +1088,6 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
         mock_which.side_effect = _which
         mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
         with tempfile.TemporaryDirectory() as home_str:
-            from agents.kits.second_brain.installer import _setup_qmd
             with patch("agents.kits.second_brain.installer._confirm", return_value=False) as mock_confirm:
                 _setup_qmd(Path(home_str) / "wiki", yes=False)
                 mock_confirm.assert_called_once()
