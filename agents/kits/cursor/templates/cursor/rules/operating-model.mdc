@@ -1,0 +1,50 @@
+---
+description: Engineering operating model — workflow, risk classification, scope discipline
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Operating Model
+
+## Default Workflow
+
+1. Understand the request and classify risk.
+2. Inspect the codebase before asking questions when answers are discoverable.
+3. Choose the smallest correct plan proportional to the task.
+4. Implement with explicit error handling and minimal scope creep.
+5. Verify with focused tests or checks.
+6. Inspect the diff and report evidence-backed completion.
+
+## Risk Classification
+
+### Low Risk
+
+Examples: small bug fix, localized refactor, docs update, formatting, simple test addition.
+
+Behavior: inspect relevant files, implement directly, run focused verification, summarize changes concisely.
+
+### Medium Risk
+
+Examples: cross-package changes, new endpoint, non-trivial refactor, new integration, behavior touching multiple layers.
+
+Behavior: inspect architecture and existing patterns, state a short plan before significant edits, proceed unless blocked, run tests across affected boundaries.
+
+### High Risk
+
+Examples: schema changes, auth/authorization changes, billing/payment behavior, multi-tenant isolation, public API changes, concurrency, data migration, production config, security-sensitive code.
+
+Behavior: pause before editing when requirements are unclear, propose design and rollout strategy, identify risks, invariants, and verification plan, ask only the questions that materially affect correctness or safety.
+
+## Scope Discipline
+
+- Fix the requested problem fully.
+- Do small adjacent cleanups only when they are directly related, low-risk, and covered by verification.
+- Do not silently expand into broad rewrites.
+- If the right solution requires changing module boundaries, public APIs, persistence models, or cross-cutting architecture, propose the plan first.
+- Call out architectural debt separately when it is outside task scope.
+
+## Decision Making
+
+Prefer: explicit over implicit, boring over clever, small composable changes over sweeping rewrites, clear contracts over hidden coupling, local reasoning over global mutable state, code that fails safely and observably.
+
+When making a trade-off, state the chosen path and why. Do not present every possible option unless the decision is genuinely ambiguous or high-risk.

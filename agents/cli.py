@@ -30,6 +30,7 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
         install_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
         install_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
         install_parser.add_argument("--no-settings", action="store_true", help="Do not merge the safe settings fragment")
+        install_parser.add_argument("--no-setup-deps", action="store_true", help="Do not auto-install qmd or other dependencies")
 
         diff_parser = kit_sub.add_parser("diff", help="Show file-level differences for managed files")
         diff_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         sub_command_attr = f"{kit.name}_command"
         sub_command = getattr(args, sub_command_attr, None)
         if sub_command == "install":
-            return kit.install(home=args.home, dry_run=args.dry_run, yes=args.yes, merge_settings=not args.no_settings)
+            return kit.install(home=args.home, dry_run=args.dry_run, yes=args.yes, merge_settings=not args.no_settings, setup_deps=not args.no_setup_deps)
         if sub_command == "diff":
             return kit.diff(home=args.home)
         if sub_command == "doctor":

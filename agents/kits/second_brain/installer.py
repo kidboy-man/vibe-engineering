@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -190,6 +191,70 @@ def _git_init(vault: Path) -> None:
     )
 
 
+def _vault_foreign_files(vault_path: Path, manifest_path: Path) -> list[Path]:
+    """Return sample of files in vault when manifest is absent (foreign vault)."""
+    if not vault_path.exists():
+        return []
+    if manifest_path.exists():
+        return []  # our vault — idempotent re-install, no warning
+    _SKIP = {".git", "node_modules"}
+    files: list[Path] = []
+    for p in vault_path.rglob("*"):
+        if any(part in _SKIP for part in p.parts):
+            continue
+        if p.is_file():
+            files.append(p)
+            if len(files) == 5:
+                break
+    return files
+
+
+def _confirm(prompt: str) -> bool:
+    """Prompt for y/N. Returns False on EOF (non-interactive stdin)."""
+    try:
+        return input(prompt).strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def _check_min_version(binary: str, args: list[str], min_major: int) -> tuple[bool, str]:
+    """Return (ok, message). ok=False when binary missing or major version < min_major."""
+    if not shutil.which(binary):
+        return False, f"{binary}: not found"
+    try:
+        out = subprocess.run([binary] + args, capture_output=True, text=True, timeout=5)
+        m = re.search(r"(\d+)\.", out.stdout + out.stderr)
+        if m and int(m.group(1)) < min_major:
+            return False, f"{binary}: major version {m.group(1)} < {min_major}"
+    except Exception:
+        pass
+    return True, ""
+
+
+def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
+    """Install qmd via npm if absent, then register the wiki collection."""
+    if shutil.which("qmd"):
+        return 0  # already installed — silent
+    npm = shutil.which("npm")
+    if not npm:
+        print("[second-brain] qmd not found and npm not available.")
+        print("  Install Node.js 20+, then: npm install -g @tobilu/qmd")
+        return 1
+    print("[second-brain] qmd not found (required for search).")
+    print("  Install now? Runs 'npm install -g @tobilu/qmd' (network + global install).")
+    if not yes and not _confirm("  Proceed? [y/N] "):
+        print("  Skipped. Run manually: npm install -g @tobilu/qmd")
+        return 1
+    r = subprocess.run([npm, "install", "-g", "@tobilu/qmd"], check=False)
+    if r.returncode != 0:
+        print("[second-brain] npm install failed. Run manually: npm install -g @tobilu/qmd")
+        return 1
+    wiki_path = vault_path / "wiki"
+    subprocess.run(["qmd", "collection", "add", str(wiki_path), "--name", "second-brain"], check=False)
+    subprocess.run(["qmd", "update"], check=False)
+    return 0
+
+
 QMD_MCP_SNIPPET_JSON: dict = {
     "mcpServers": {
         "qmd": {
@@ -280,6 +345,8 @@ def install(
     dry_run: bool = False,
     yes: bool = False,
     merge_settings: bool = True,
+    setup_deps: bool = True,
+    **kwargs,
 ) -> int:
     paths = _paths(home)
 
@@ -293,6 +360,20 @@ def install(
             print("would merge qmd MCP into agent configs (Claude, OpenCode, Codex)")
             print("  Cursor and Hermes: no config mutation")
         return 0
+
+    # Warn when vault exists with foreign files (no manifest = not our vault).
+    foreign = _vault_foreign_files(paths.vault, paths.manifest)
+    if foreign:
+        print(f"[second-brain] Vault at {paths.vault} already contains files:")
+        for f in foreign:
+            print(f"  {f.relative_to(paths.vault)}")
+        print("Existing files are never overwritten.")
+        print(
+            f"To use a different path: "
+            f"VIBE_SECOND_BRAIN_PATH=/other/path vibe kits second-brain install --yes"
+        )
+        if not yes and not _confirm("Continue with this vault? [y/N] "):
+            return 1
 
     if not core.confirm("Install/update the second-brain kit?", yes=yes):
         print("aborted")
@@ -325,6 +406,9 @@ def install(
         _merge_claude_config(paths)
         _merge_opencode_config(paths)
         _merge_codex_config(paths)
+
+    if setup_deps:
+        _setup_qmd(paths.vault, yes=yes)
 
     # Write runtime manifest.
     core.write_text(paths.manifest, json.dumps(_manifest_state(managed), indent=2) + "\n")
@@ -365,6 +449,13 @@ def doctor(home: str | None = None) -> int:
         else:
             print(f"✓ all {label} present")
 
+    print("\n-- prerequisites --")
+    if not shutil.which("git"):
+        print("✗ git: not found")
+        print("  fix: sudo apt install git  # macOS: brew install git")
+        return 1
+    print("✓ git: found")
+
     _check_paths("vault directories", VAULT_DIRS, is_file=False)
     _check_paths("seed pages", SEED_PAGES, is_file=True)
 
@@ -379,6 +470,16 @@ def doctor(home: str | None = None) -> int:
     qmd_path = shutil.which("qmd")
     collection_match = False
     if not qmd_path:
+        ok_node, msg_node = _check_min_version("node", ["--version"], 20)
+        if not ok_node:
+            print(f"✗ {msg_node}")
+            print("  fix: install Node.js 20+ via nvm or https://nodejs.org")
+            return 1
+        ok_npm, msg_npm = _check_min_version("npm", ["--version"], 9)
+        if not ok_npm:
+            print(f"✗ {msg_npm}")
+            print("  fix: upgrade Node.js (npm is bundled); nvm: nvm install 20")
+            return 1
         print("✗ qmd not found")
         print("  fix: npm install -g @tobilu/qmd")
     else:

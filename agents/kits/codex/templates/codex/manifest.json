@@ -1,0 +1,9 @@
+{
+  "kit": "codex",
+  "version": "0.1.0",
+  "description": "Portable Codex CLI senior backend engineering setup.",
+  "managed_files": [
+    "instructions.md"
+  ],
+  "secret_policy": "Never installs API keys, auth tokens, credentials, or machine-specific configuration."
+}

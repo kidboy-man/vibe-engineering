@@ -9,6 +9,12 @@
 
 ## Install
 
+`vibe kits second-brain install` prompts to run `npm install -g @tobilu/qmd`
+automatically when qmd is not found. To skip the prompt, pass `--yes`; to
+skip auto-install entirely, pass `--no-setup-deps`.
+
+To install manually:
+
 ```bash
 # npm
 npm install -g @tobilu/qmd
@@ -21,6 +27,9 @@ qmd --version
 ```
 
 ## Configure the Vault
+
+The auto-install registers the wiki collection and runs `qmd update` for you.
+If you installed manually, do this once:
 
 ```bash
 # Index the wiki folder (run once)

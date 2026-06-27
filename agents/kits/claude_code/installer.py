@@ -115,7 +115,7 @@ def _planned_changes(paths: KitPaths) -> list[str]:
     return changes
 
 
-def install(home: str | None = None, dry_run: bool = False, yes: bool = False, merge_settings: bool = True) -> int:
+def install(home: str | None = None, dry_run: bool = False, yes: bool = False, merge_settings: bool = True, **kwargs) -> int:
     paths = _paths(home)
 
     # Validate existing settings.json before any operations so we abort safely

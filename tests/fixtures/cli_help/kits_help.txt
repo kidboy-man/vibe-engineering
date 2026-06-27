@@ -1,12 +1,17 @@
-usage: vibe kits [-h] {list,claude-code,opencode,second-brain} ...
+usage: vibe kits [-h]
+                 {list,claude-code,opencode,second-brain,gemini,codex,cursor}
+                 ...
 
 positional arguments:
-  {list,claude-code,opencode,second-brain}
+  {list,claude-code,opencode,second-brain,gemini,codex,cursor}
     list                List available kits
     claude-code         Manage the Claude Code kit
     opencode            Manage the OpenCode kit
     second-brain        Manage the second-brain kit — safe scaffold of vault
                         at VIBE_SECOND_BRAIN_PATH
+    gemini              Manage the Gemini CLI kit
+    codex               Manage the Codex CLI kit
+    cursor              Manage the Cursor IDE kit
 
 options:
   -h, --help            show this help message and exit

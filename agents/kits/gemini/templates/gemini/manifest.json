@@ -1,0 +1,9 @@
+{
+  "kit": "gemini",
+  "version": "0.1.0",
+  "description": "Portable Gemini CLI senior backend engineering setup.",
+  "managed_files": [
+    "GEMINI.md"
+  ],
+  "secret_policy": "Never installs credentials, auth tokens, API keys, or machine-specific configuration."
+}

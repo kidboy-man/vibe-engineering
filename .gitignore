@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 venv/
 env/
+.venv/
 
 # Build artifacts
 build/

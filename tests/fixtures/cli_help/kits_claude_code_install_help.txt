@@ -1,10 +1,11 @@
 usage: vibe kits claude-code install [-h] [--home HOME] [--dry-run] [--yes]
-                                     [--no-settings]
+                                     [--no-settings] [--no-setup-deps]
 
 options:
-  -h, --help     show this help message and exit
-  --home HOME    Target config base directory (default: $XDG_CONFIG_HOME or
-                 current user's home)
-  --dry-run      Show changes without writing files
-  --yes, -y      Apply without interactive confirmation
-  --no-settings  Do not merge the safe settings fragment
+  -h, --help       show this help message and exit
+  --home HOME      Target config base directory (default: $XDG_CONFIG_HOME or
+                   current user's home)
+  --dry-run        Show changes without writing files
+  --yes, -y        Apply without interactive confirmation
+  --no-settings    Do not merge the safe settings fragment
+  --no-setup-deps  Do not auto-install qmd or other dependencies

@@ -14,19 +14,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agents import merge_strategies as ms  # noqa: E402
 
 try:
-    from agents.kits.second_brain.installer import (  # noqa: E402, F401
+    from agents.kits.second_brain.installer import (  # noqa: E402
         _paths,
         install,
         doctor,
         diff_kit,
         uninstall,
+        _setup_qmd,
     )
-except ModuleNotFoundError:
-    _paths = None  # type: ignore[assignment]
-    install = None  # type: ignore[assignment]
-    doctor = None
-    diff_kit = None
-    uninstall = None
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest(f"second_brain installer unavailable: {exc}") from exc
 
 
 VAULT_DIRS = [
@@ -361,10 +358,13 @@ class SecondBrainDoctorTests(unittest.TestCase):
     def _which_returns_qmd(self, cmd):
         if cmd == "qmd":
             return "/fake/qmd"
+        if cmd == "git":
+            return "/usr/bin/git"
         return None
 
     def _which_returns_qmd_and_agents(self, cmd):
         known = {
+            "git": "/usr/bin/git",
             "qmd": "/fake/qmd",
             "claude": "/fake/claude",
             "opencode": "/fake/opencode",
@@ -402,10 +402,17 @@ class SecondBrainDoctorTests(unittest.TestCase):
 
     @patch("agents.kits.second_brain.installer.shutil.which")
     def test_doctor_returns_nonzero_when_qmd_missing(self, mock_which):
-        mock_which.return_value = None
+        def _which(cmd):
+            if cmd == "git":
+                return "/usr/bin/git"
+            if cmd in ("node", "npm"):
+                return f"/fake/{cmd}"
+            return None
+
+        mock_which.side_effect = _which
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
-            install(home=str(home), dry_run=False, yes=True)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
             buf = io.StringIO()
             with redirect_stdout(buf):
                 result = doctor(home=str(home))
@@ -886,6 +893,236 @@ class SecondBrainSecretKeySafetyTests(unittest.TestCase):
             is_secret_key=lambda k: "key" in k.lower(),
         )
         self.assertEqual(merged["apiKey"], "user-real-key")
+
+
+class SecondBrainVaultConflictTests(unittest.TestCase):
+    """Vault conflict detection: warn on foreign vault, silent on our vault."""
+
+    def test_install_warns_on_existing_foreign_vault(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            vault = home / "second-brain"
+            vault.mkdir(parents=True, exist_ok=True)
+            (vault / "my-notes.md").write_text("user content", encoding="utf-8")
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            output = buf.getvalue()
+
+            self.assertEqual(rc, 0)
+            self.assertIn("already contains files", output)
+            self.assertIn("VIBE_SECOND_BRAIN_PATH", output)
+
+    def test_install_silent_on_manifest_vault(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            output = buf.getvalue()
+
+            self.assertEqual(rc, 0)
+            self.assertNotIn("already contains files", output)
+
+    def test_install_yes_bypasses_vault_prompt(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            vault = home / "second-brain"
+            vault.mkdir(parents=True, exist_ok=True)
+            (vault / "user-file.md").write_text("content", encoding="utf-8")
+
+            with patch("agents.kits.second_brain.installer._confirm") as mock_confirm:
+                rc = install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+                mock_confirm.assert_not_called()
+
+            self.assertEqual(rc, 0)
+
+    def test_install_empty_existing_dir_no_warning(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            vault = home / "second-brain"
+            vault.mkdir(parents=True, exist_ok=True)
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            output = buf.getvalue()
+
+            self.assertEqual(rc, 0)
+            self.assertNotIn("already contains files", output)
+
+
+class SecondBrainDoctorDepTests(unittest.TestCase):
+    """Doctor prerequisite dependency checks."""
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_doctor_fails_on_missing_git(self, mock_which):
+        mock_which.return_value = None
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 1)
+            self.assertIn("git", output)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_node_npm_not_checked_when_qmd_present(self, mock_run, mock_which):
+        def _which(cmd):
+            if cmd in ("git", "qmd"):
+                return f"/fake/{cmd}"
+            return None
+
+        mock_which.side_effect = _which
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+            mock_run.return_value = subprocess.CompletedProcess(
+                [], 0, f"  {wiki_path}\n", ""
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertNotIn("node:", output)
+            self.assertNotIn("npm:", output)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_doctor_fails_on_missing_node_when_qmd_absent(self, mock_which):
+        def _which(cmd):
+            if cmd == "git":
+                return "/usr/bin/git"
+            return None
+
+        mock_which.side_effect = _which
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 1)
+            self.assertIn("node", output)
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_doctor_fails_on_old_node_version(self, mock_which, mock_run):
+        def _which(cmd):
+            if cmd in ("git", "node", "npm"):
+                return f"/fake/{cmd}"
+            return None
+
+        mock_which.side_effect = _which
+
+        def _run(cmd, **kw):
+            if "node" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "v18.12.0\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        mock_run.side_effect = _run
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 1)
+            self.assertIn("node", output)
+
+
+class SecondBrainQmdAutoInstallTests(unittest.TestCase):
+    """qmd auto-install behavior during install."""
+
+    @patch("agents.kits.second_brain.installer._setup_qmd")
+    def test_install_skips_qmd_when_setup_deps_false(self, mock_setup):
+        with tempfile.TemporaryDirectory() as home_str:
+            rc = install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+            self.assertEqual(rc, 0)
+            mock_setup.assert_not_called()
+
+    @patch("agents.kits.second_brain.installer._setup_qmd")
+    def test_install_calls_setup_qmd_when_setup_deps_true(self, mock_setup):
+        mock_setup.return_value = 0
+        with tempfile.TemporaryDirectory() as home_str:
+            rc = install(home=home_str, dry_run=False, yes=True, setup_deps=True)
+            self.assertEqual(rc, 0)
+            mock_setup.assert_called_once()
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_install_skips_npm_when_qmd_already_present(self, mock_which, mock_run):
+        def _which(cmd):
+            if cmd in ("git", "qmd"):
+                return f"/fake/{cmd}"
+            return None
+
+        mock_which.side_effect = _which
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        with tempfile.TemporaryDirectory() as home_str:
+            rc = install(home=home_str, dry_run=False, yes=True, setup_deps=True)
+            self.assertEqual(rc, 0)
+            npm_calls = [
+                c for c in mock_run.call_args_list
+                if c[0][0][:2] == ["npm", "install"]
+            ]
+            self.assertEqual(npm_calls, [])
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_setup_qmd_prompts_when_yes_false(self, mock_which, mock_run):
+        def _which(cmd):
+            if cmd in ("npm",):
+                return f"/fake/{cmd}"
+            return None
+
+        mock_which.side_effect = _which
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        with tempfile.TemporaryDirectory() as home_str:
+            with patch("agents.kits.second_brain.installer._confirm", return_value=False) as mock_confirm:
+                _setup_qmd(Path(home_str) / "wiki", yes=False)
+                mock_confirm.assert_called_once()
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_install_yes_bypasses_npm_prompt(self, mock_which, mock_run):
+        def _which(cmd):
+            if cmd in ("git", "npm"):
+                return f"/fake/{cmd}"
+            return None
+
+        mock_which.side_effect = _which
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        with tempfile.TemporaryDirectory() as home_str:
+            with patch("agents.kits.second_brain.installer._confirm") as mock_confirm:
+                rc = install(home=home_str, dry_run=False, yes=True, setup_deps=True)
+            self.assertEqual(rc, 0)
+            mock_confirm.assert_not_called()
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_install_non_fatal_when_npm_missing(self, mock_which, mock_run):
+        def _which(cmd):
+            if cmd == "git":
+                return "/usr/bin/git"
+            return None
+
+        mock_which.side_effect = _which
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        with tempfile.TemporaryDirectory() as home_str:
+            rc = install(home=home_str, dry_run=False, yes=True, setup_deps=True)
+            self.assertEqual(rc, 0)
+            manifest = Path(home_str) / "second-brain" / ".vibe-engineering-manifest.json"
+            self.assertTrue(manifest.exists(), "manifest should exist even when npm missing")
 
 
 class SecondBrainMarkerSafetyTests(unittest.TestCase):

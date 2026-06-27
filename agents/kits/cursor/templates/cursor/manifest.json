@@ -1,0 +1,15 @@
+{
+  "kit": "cursor",
+  "version": "0.1.0",
+  "description": "Portable Cursor IDE senior backend engineering rules.",
+  "managed_files": [
+    "rules/00-persona.mdc",
+    "rules/operating-model.mdc",
+    "rules/go-backend-engineering.mdc",
+    "rules/testing-and-verification.mdc",
+    "rules/security-and-data-safety.mdc",
+    "rules/database-and-operations.mdc",
+    "rules/uncertainty-and-sources.mdc"
+  ],
+  "secret_policy": "Never installs credentials, auth tokens, API keys, or machine-specific configuration."
+}
