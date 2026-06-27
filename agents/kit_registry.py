@@ -11,6 +11,24 @@ from agents.kits.claude_code.installer import (
     install as claude_install,
     uninstall as claude_uninstall,
 )
+from agents.kits.codex.installer import (
+    diff_kit as codex_diff,
+    doctor as codex_doctor,
+    install as codex_install,
+    uninstall as codex_uninstall,
+)
+from agents.kits.cursor.installer import (
+    diff_kit as cursor_diff,
+    doctor as cursor_doctor,
+    install as cursor_install,
+    uninstall as cursor_uninstall,
+)
+from agents.kits.gemini.installer import (
+    diff_kit as gemini_diff,
+    doctor as gemini_doctor,
+    install as gemini_install,
+    uninstall as gemini_uninstall,
+)
 from agents.kits.opencode.installer import (
     diff_kit as opencode_diff,
     doctor as opencode_doctor,
@@ -59,5 +77,29 @@ KITS: dict[str, KitSpec] = {
         diff=second_brain_diff,
         doctor=second_brain_doctor,
         uninstall=second_brain_uninstall,
+    ),
+    "gemini": KitSpec(
+        name="gemini",
+        help="Manage the Gemini CLI kit",
+        install=gemini_install,
+        diff=gemini_diff,
+        doctor=gemini_doctor,
+        uninstall=gemini_uninstall,
+    ),
+    "codex": KitSpec(
+        name="codex",
+        help="Manage the Codex CLI kit",
+        install=codex_install,
+        diff=codex_diff,
+        doctor=codex_doctor,
+        uninstall=codex_uninstall,
+    ),
+    "cursor": KitSpec(
+        name="cursor",
+        help="Manage the Cursor IDE kit",
+        install=cursor_install,
+        diff=cursor_diff,
+        doctor=cursor_doctor,
+        uninstall=cursor_uninstall,
     ),
 }

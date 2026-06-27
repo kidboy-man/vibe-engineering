@@ -1,10 +1,10 @@
 # Vibe Engineering
 
 Portable engineering kits for AI coding tools. The `vibe kits` CLI installs
-context, rules, agents, and skills into Claude Code and OpenCode, and
-scaffolds a local-first Obsidian/qmd second-brain vault with safe AI-agent
-config snippets — all without copying secrets, running network commands, or
-overwriting your existing config files.
+context, rules, agents, and skills into Claude Code, OpenCode, Gemini CLI,
+Codex CLI, and Cursor, and scaffolds a local-first Obsidian/qmd second-brain
+vault with safe AI-agent config snippets — all without copying secrets, running
+network commands, or overwriting your existing config files.
 
 ## Available Kits
 
@@ -12,6 +12,9 @@ overwriting your existing config files.
 |---------|---------|--------------|
 | `claude-code` | `vibe kits claude-code …` | Persona, rules, agents, commands, skills into `~/.claude` |
 | `opencode` | `vibe kits opencode …` | Same content, adapted to `~/.config/opencode` layout + JSONC merge |
+| `gemini` | `vibe kits gemini …` | Self-contained persona + rules into `~/.gemini/GEMINI.md` |
+| `codex` | `vibe kits codex …` | Self-contained persona + rules into `~/.codex/instructions.md` |
+| `cursor` | `vibe kits cursor …` | Seven `.mdc` rule files into `~/.cursor/rules/` |
 | `second-brain` | `vibe kits second-brain …` | Local Obsidian/qmd vault scaffold + non-secret AI-agent snippets |
 
 ## Install from GitHub
@@ -19,10 +22,28 @@ overwriting your existing config files.
 ```bash
 pipx install git+https://github.com/kidboy-man/vibe-engineering.git
 vibe kits list
+
+# Claude Code
 vibe kits claude-code doctor
 vibe kits claude-code install --yes
+
+# OpenCode
 vibe kits opencode doctor
 vibe kits opencode install --yes
+
+# Gemini CLI
+vibe kits gemini doctor
+vibe kits gemini install --yes
+
+# Codex CLI
+vibe kits codex doctor
+vibe kits codex install --yes
+
+# Cursor IDE
+vibe kits cursor doctor
+vibe kits cursor install --yes
+
+# Second Brain
 vibe kits second-brain install --dry-run --yes
 VIBE_SECOND_BRAIN_PATH="$HOME/notes" vibe kits second-brain install --yes
 vibe kits second-brain doctor
@@ -93,6 +114,93 @@ Unlike most managed files, `AGENTS.md` is **merged** with any existing file, nev
 # My Project Rules
 ...your content (preserved)...
 ```
+
+## Gemini CLI Kit
+
+Portable Gemini CLI setup for senior backend engineering. Installs a single
+`GEMINI.md` file with the full persona, all six engineering rules, and specialist
+role descriptions embedded inline — no separate rule files needed since Gemini CLI
+reads a single global instructions file.
+
+### Commands
+
+```bash
+vibe kits gemini doctor
+vibe kits gemini install --dry-run
+vibe kits gemini install --yes
+vibe kits gemini diff
+vibe kits gemini uninstall --yes
+```
+
+### What it installs
+
+`~/.gemini/GEMINI.md` — a single self-contained file containing:
+
+- senior/staff backend engineering persona and operating identity
+- task risk policy and autonomy boundaries
+- all six modular engineering rules (operating model, Go backend, testing, security/data, database/ops, uncertainty/sources) embedded as sections
+- specialist role descriptions for all five subagent modes (backend-tech-lead, go-backend-implementer, security-data-reviewer, db-operations-reviewer, tdd-test-engineer)
+- communication style and definition of done
+
+Rules are embedded rather than referenced because Gemini CLI loads a single
+instructions file rather than a rules directory.
+
+## Codex CLI Kit
+
+Portable Codex CLI setup for senior backend engineering. Installs a single
+`instructions.md` file with the same comprehensive persona and embedded rules.
+
+### Commands
+
+```bash
+vibe kits codex doctor
+vibe kits codex install --dry-run
+vibe kits codex install --yes
+vibe kits codex diff
+vibe kits codex uninstall --yes
+```
+
+### What it installs
+
+`~/.codex/instructions.md` — a single self-contained file with the same
+structure as `GEMINI.md` above, adapted to Codex CLI conventions. If a
+project-level `AGENTS.md` or `.codex/instructions.md` exists, it takes
+priority over the global file.
+
+## Cursor IDE Kit
+
+Portable Cursor IDE setup for senior backend engineering. Installs rule files
+into `~/.cursor/rules/` as `.mdc` files. Each file has YAML frontmatter
+(`description`, `globs`, `alwaysApply`) so Cursor can selectively load rules
+based on file type.
+
+### Commands
+
+```bash
+vibe kits cursor doctor
+vibe kits cursor install --dry-run
+vibe kits cursor install --yes
+vibe kits cursor diff
+vibe kits cursor uninstall --yes
+```
+
+### What it installs
+
+Seven `.mdc` files into `~/.cursor/rules/`:
+
+| File | `alwaysApply` | Scope |
+|------|---------------|-------|
+| `00-persona.mdc` | `true` | global persona, risk policy, autonomy, definition of done |
+| `operating-model.mdc` | `true` | workflow, risk classification, scope discipline |
+| `security-and-data-safety.mdc` | `true` | authz, secrets, injection, tenant isolation |
+| `uncertainty-and-sources.mdc` | `true` | epistemic honesty, citation standards |
+| `go-backend-engineering.mdc` | `false` | Go-specific rules; globs `**/*.go` |
+| `testing-and-verification.mdc` | `false` | TDD, test quality; globs test file patterns |
+| `database-and-operations.mdc` | `false` | migrations, queries, transactions; globs DB file patterns |
+
+**Note:** Cursor 0.45+ also supports project-local rules at `.cursor/rules/`. For
+per-project behavior, copy the relevant `.mdc` files from `~/.cursor/rules/` into
+your project's `.cursor/rules/` directory and adjust as needed.
 
 ## Second-Brain Kit
 
@@ -197,7 +305,7 @@ qmd update                                  # build the initial index
 
 ## Safety Model
 
-All three kits intentionally do **not** include or install:
+All kits intentionally do **not** include or install:
 
 - auth tokens, API keys, or passwords
 - local router/proxy URLs
@@ -205,7 +313,7 @@ All three kits intentionally do **not** include or install:
 - project transcripts, histories, tasks, caches, or backups
 - local machine-specific MCP auth state
 
-For the OpenCode kit, the top-level config keys `model`, `provider`, `plugin`, `mcp`, `tools`, `permission`, `env`, `agent`, `theme`, and any key containing `token`, `key`, `secret`, `password`, `auth`, or `credential` are always preserved as-is. The second-brain kit reuses the same policy via `agents/secret_policies.py`.
+For the OpenCode kit, the top-level config keys `model`, `provider`, `plugin`, `mcp`, `tools`, `permission`, `env`, `agent`, `theme`, and any key containing `token`, `key`, `secret`, `password`, `auth`, or `credential` are always preserved as-is. The second-brain kit reuses the same policy via `agents/secret_policies.py`. The Gemini, Codex, and Cursor kits install only portable markdown/text files and never touch settings files or credentials.
 
 The `second-brain` kit additionally guarantees:
 

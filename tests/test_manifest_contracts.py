@@ -34,6 +34,12 @@ class PackageDataGlobTests(unittest.TestCase):
                 "kits/opencode/templates/**/**/*",
                 "kits/second_brain/templates/**/*",
                 "kits/second_brain/templates/**/**/*",
+                "kits/gemini/templates/**/*",
+                "kits/gemini/templates/**/**/*",
+                "kits/codex/templates/**/*",
+                "kits/codex/templates/**/**/*",
+                "kits/cursor/templates/**/*",
+                "kits/cursor/templates/**/**/*",
             ],
         )
 
