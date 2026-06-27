@@ -74,6 +74,7 @@ def install(
     dry_run: bool = False,
     yes: bool = False,
     merge_settings: bool = True,
+    **kwargs,
 ) -> int:
     paths = _paths(home)
     changes = [*core.planned_changes_copy_style(_target_files(paths)), f"write {MANIFEST_FILE}"]

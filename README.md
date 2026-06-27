@@ -3,8 +3,9 @@
 Portable engineering kits for AI coding tools. The `vibe kits` CLI installs
 context, rules, agents, and skills into Claude Code, OpenCode, Gemini CLI,
 Codex CLI, and Cursor, and scaffolds a local-first Obsidian/qmd second-brain
-vault with safe AI-agent config snippets — all without copying secrets, running
-network commands, or overwriting your existing config files.
+vault with safe AI-agent config snippets — all without copying secrets or
+overwriting your existing config files. The `second-brain` kit optionally runs
+`npm install -g @tobilu/qmd` with your consent; all other kits run no network commands.
 
 ## Available Kits
 
@@ -207,8 +208,10 @@ your project's `.cursor/rules/` directory and adjust as needed.
 Local-first Obsidian + qmd vault with safe AI-agent config snippets. The
 kit creates a vault scaffold, seeds three wiki pages, and merges a
 non-secret `qmd` MCP entry into Claude Code, OpenCode, and Codex CLI
-configs. It never runs `qmd`, `npm`, `pip`, `git clone`, or any network
-command — those are printed as instructions for you to run.
+configs. When qmd is not found, `install` prompts then runs
+`npm install -g @tobilu/qmd` and registers the wiki collection. Pass
+`--no-setup-deps` to skip; all other network commands (`qmd`, `pip`,
+`git clone`, etc.) are never run.
 
 ### Vault location
 
@@ -284,13 +287,17 @@ settings are preserved byte-for-byte.
 
 ### qmd policy
 
-`qmd` is the core search/index dependency. The installer never installs
-or runs `qmd` — it only prints the commands you need to run yourself.
-`doctor` returns `1` if `qmd` is missing or its `collection list` does
-not point at `<vault>/wiki`. To configure the collection:
+`qmd` is the core search/index dependency. When qmd is not found,
+`install` prompts to run `npm install -g @tobilu/qmd` and register the
+wiki collection automatically. Pass `--yes` to skip the prompt; pass
+`--no-setup-deps` to skip auto-install entirely (you'll see the manual
+commands below). `doctor` returns `1` if `qmd` is missing or its
+`collection list` does not point at `<vault>/wiki`.
+
+To install manually:
 
 ```bash
-npm install -g @tobilu/qmd                  # Node >= 22
+npm install -g @tobilu/qmd                  # Node >= 20
 qmd collection add <vault>/wiki --name second-brain
 qmd update                                  # build the initial index
 ```
@@ -317,8 +324,8 @@ For the OpenCode kit, the top-level config keys `model`, `provider`, `plugin`, `
 
 The `second-brain` kit additionally guarantees:
 
-- **No package-manager execution**: never runs `npm install`, `pip install`, `uv sync`, or any equivalent
-- **No network or install commands**: never runs `git pull`, `git clone`, `qmd collection add`, `qmd embed`, `qmd init`, or starts the qmd MCP daemon
+- **Controlled package-manager execution**: `second-brain install` prompts then runs `npm install -g @tobilu/qmd` when qmd is not found, then registers the wiki collection. Pass `--no-setup-deps` or decline the prompt to skip. All other kits never run any package-manager command.
+- **No other network or install commands**: never runs `git pull`, `git clone`, `qmd embed`, `qmd init`, or starts the qmd MCP daemon
 - **No symlinks**: never creates cross-directory symlinks
 - **No plugin or Obsidian installs**: `obsidian` is checked by `doctor` but never installed
 - **No memory-compiler hooks**: never mutates `.claude/settings.json` for memory-compiler hooks

@@ -88,6 +88,14 @@ mkdir -p $VAULT/wiki/concepts/{backend,ai-engineering,pkm,personal}
 
 [qmd](https://github.com/tobi/qmd) combines BM25 full-text search, vector semantic search, and LLM reranking — all running locally with GGUF models. No cloud, no API keys, no indexing service.
 
+`vibe kits second-brain install` prompts to install qmd automatically when it
+is not found. Accept the prompt (or pass `--yes`) and it runs
+`npm install -g @tobilu/qmd`, registers the wiki collection, and builds the
+initial index for you. Pass `--no-setup-deps` to skip and follow the manual
+steps below instead.
+
+To install manually:
+
 ```bash
 npm i -g @tobilu/qmd
 qmd --version                                            # should be >= 2.5.x
