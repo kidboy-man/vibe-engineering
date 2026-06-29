@@ -18,10 +18,20 @@ overwriting your existing config files. The `second-brain` kit optionally runs
 | `cursor` | `vibe kits cursor …` | Seven `.mdc` rule files into `~/.cursor/rules/` |
 | `second-brain` | `vibe kits second-brain …` | Local Obsidian/qmd vault scaffold + non-secret AI-agent snippets |
 
-## Install from GitHub
+## Install
 
 ```bash
+# From PyPI (recommended)
+pipx install vibe-engineering
+
+# From GitHub (latest unreleased)
 pipx install git+https://github.com/kidboy-man/vibe-engineering.git
+
+# Self-upgrade
+vibe upgrade
+```
+
+```bash
 vibe kits list
 
 # Claude Code
