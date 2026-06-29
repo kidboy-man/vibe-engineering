@@ -22,7 +22,7 @@ overwriting your existing config files. The `second-brain` kit optionally runs
 
 ```bash
 # From PyPI (recommended)
-pipx install vibe-engineering
+pipx install vibe-kits
 
 # From GitHub (latest unreleased)
 pipx install git+https://github.com/kidboy-man/vibe-engineering.git
