@@ -42,7 +42,7 @@ jobs:
       id-token: write
     environment:
       name: pypi
-      url: https://pypi.org/p/vibe-engineering
+      url: https://pypi.org/p/vibe-kits
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vibe-engineering"
-version = "0.1.0"
+name = "vibe-kits"
+dynamic = ["version"]
 description = "Portable engineering kits for AI coding tools."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,7 +22,8 @@ Changelog = "https://github.com/kidboy-man/vibe-engineering/releases"
 
 [project.scripts]
 vibe = "agents.cli:main"
-vibe-engineering = "agents.cli:main"
+
+[tool.setuptools_scm]
 
 [tool.setuptools]
 packages = {find = {}}

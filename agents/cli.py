@@ -10,7 +10,7 @@ from typing import Mapping
 from agents.kit_registry import KITS, KitSpec
 
 GIT_SOURCE_URL = "git+https://github.com/kidboy-man/vibe-engineering.git"
-PYPI_PACKAGE = "vibe-engineering"
+PYPI_PACKAGE = "vibe-kits"
 
 
 def _is_pipx() -> bool:
