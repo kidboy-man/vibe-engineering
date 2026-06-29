@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -21,26 +22,42 @@ ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
 
 
+def _normalize_glob(g: str) -> str:
+    """Collapse redundant `**` segments so duplicates compare equal."""
+    while "/**/**" in g:
+        g = g.replace("/**/**", "/**")
+    return g
+
+
+def _glob_matches(glob: str, path: str) -> bool:
+    """setuptools-style glob match: `**` matches any depth, `*` matches one segment."""
+    parts = re.split(r"/\*\*", glob)
+    pattern = re.escape(parts[0])
+    for tail in parts[1:]:
+        pattern += r"(?:/.*)?"
+        pattern += re.escape(tail)
+    pattern = pattern.replace(r"\*", r"[^/]*")
+    return re.fullmatch(pattern, path) is not None
+
+
 class PackageDataGlobTests(unittest.TestCase):
-    def test_package_data_globs_are_symmetric(self) -> None:
+    def test_package_data_globs_cover_every_kit(self) -> None:
         data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
         globs = data["tool"]["setuptools"]["package-data"]["agents"]
+        kits = {p.name for p in (ROOT / "agents" / "kits").iterdir() if p.is_dir()}
+        for kit in kits:
+            probe = f"kits/{kit}/templates/any.md"
+            covered = any(_glob_matches(g, probe) for g in globs)
+            self.assertTrue(covered, f"no glob covers kit {kit!r}")
+
+    def test_package_data_globs_have_no_redundant_subset(self) -> None:
+        data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+        globs = list(data["tool"]["setuptools"]["package-data"]["agents"])
+        normalized = [_normalize_glob(g) for g in globs]
         self.assertEqual(
-            globs,
-            [
-                "kits/claude_code/templates/**/*",
-                "kits/claude_code/templates/**/**/*",
-                "kits/opencode/templates/**/*",
-                "kits/opencode/templates/**/**/*",
-                "kits/second_brain/templates/**/*",
-                "kits/second_brain/templates/**/**/*",
-                "kits/gemini/templates/**/*",
-                "kits/gemini/templates/**/**/*",
-                "kits/codex/templates/**/*",
-                "kits/codex/templates/**/**/*",
-                "kits/cursor/templates/**/*",
-                "kits/cursor/templates/**/**/*",
-            ],
+            len(normalized),
+            len(set(normalized)),
+            f"redundant globs after normalization: {globs}",
         )
 
 

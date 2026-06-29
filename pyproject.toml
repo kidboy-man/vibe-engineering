@@ -14,6 +14,12 @@ dependencies = [
     'tomli>=1.1; python_version < "3.11"',
 ]
 
+[project.urls]
+Homepage = "https://github.com/kidboy-man/vibe-engineering"
+Source = "https://github.com/kidboy-man/vibe-engineering"
+Issues = "https://github.com/kidboy-man/vibe-engineering/issues"
+Changelog = "https://github.com/kidboy-man/vibe-engineering/releases"
+
 [project.scripts]
 vibe = "agents.cli:main"
 vibe-engineering = "agents.cli:main"
@@ -22,17 +28,4 @@ vibe-engineering = "agents.cli:main"
 packages = {find = {}}
 
 [tool.setuptools.package-data]
-agents = [
-    "kits/claude_code/templates/**/*",
-    "kits/claude_code/templates/**/**/*",
-    "kits/opencode/templates/**/*",
-    "kits/opencode/templates/**/**/*",
-    "kits/second_brain/templates/**/*",
-    "kits/second_brain/templates/**/**/*",
-    "kits/gemini/templates/**/*",
-    "kits/gemini/templates/**/**/*",
-    "kits/codex/templates/**/*",
-    "kits/codex/templates/**/**/*",
-    "kits/cursor/templates/**/*",
-    "kits/cursor/templates/**/**/*",
-]
+agents = ["kits/*/templates/**/*"]
