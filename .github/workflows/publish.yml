@@ -6,13 +6,12 @@ on:
       - "v*.*.*"
   workflow_dispatch:
 
-permissions:
-  id-token: write
-
 jobs:
   build:
     name: Build distributions
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,6 +38,8 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/p/vibe-engineering
