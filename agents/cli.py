@@ -14,7 +14,14 @@ PYPI_PACKAGE = "vibe-engineering"
 
 
 def _is_pipx() -> bool:
-    return ".local/pipx/venvs" in sys.executable or "/pipx/venvs/" in sys.executable
+    return "pipx/venvs" in sys.executable
+
+
+def _has_pip() -> bool:
+    return subprocess.run(
+        [sys.executable, "-m", "pip", "--version"],
+        capture_output=True,
+    ).returncode == 0
 
 
 def _run(cmd: list[str]) -> int:
@@ -24,6 +31,10 @@ def _run(cmd: list[str]) -> int:
 
 def cmd_upgrade(_args: argparse.Namespace) -> int:
     if _is_pipx():
+        if _has_pip():
+            # --force-reinstall so pip doesn't skip VCS packages with same version string
+            return _run([sys.executable, "-m", "pip", "install", "--force-reinstall", GIT_SOURCE_URL])
+        # pipx+uv venvs have no pip — fall back to pipx which manages the venv itself
         return _run(["pipx", "install", "--force", GIT_SOURCE_URL])
     return _run([sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE])
 
