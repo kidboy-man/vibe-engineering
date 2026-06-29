@@ -21,6 +21,10 @@ try:
         diff_kit,
         uninstall,
         _setup_qmd,
+        OPENCODE_QMD_MCP_ENTRY,
+        _is_legacy_kit_owned_qmd_mcp,
+        _is_expected_opencode_qmd_mcp,
+        _merge_opencode_qmd_mcp,
     )
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest(f"second_brain installer unavailable: {exc}") from exc
@@ -399,7 +403,6 @@ class SecondBrainDoctorTests(unittest.TestCase):
             result = doctor(home=str(home))
             self.assertNotEqual(result, 0)
 
-
     @patch("agents.kits.second_brain.installer.shutil.which")
     def test_doctor_returns_nonzero_when_qmd_missing(self, mock_which):
         def _which(cmd):
@@ -459,7 +462,6 @@ class SecondBrainDoctorTests(unittest.TestCase):
             result = doctor(home=str(home))
             self.assertEqual(result, 1)
 
-
     @patch("agents.kits.second_brain.installer.shutil.which")
     @patch("agents.kits.second_brain.installer.subprocess.run")
     def test_doctor_output_contains_fix_command(self, mock_run, mock_which):
@@ -509,7 +511,6 @@ class SecondBrainDoctorTests(unittest.TestCase):
             self.assertIn("hermes", output)
             self.assertIn("cursor", output)
 
-
     @patch("agents.kits.second_brain.installer.shutil.which")
     @patch("agents.kits.second_brain.installer.subprocess.run")
     def test_doctor_never_creates_files(self, mock_run, mock_which):
@@ -542,7 +543,6 @@ class SecondBrainDoctorTests(unittest.TestCase):
             self.assertEqual(
                 new_files, set(), f"doctor created files: {new_files}"
             )
-
 
     @patch("agents.kits.second_brain.installer.shutil.which")
     @patch("agents.kits.second_brain.installer.subprocess.run")
@@ -623,7 +623,6 @@ class SecondBrainDoctorTests(unittest.TestCase):
             result = doctor(home=str(home))
             self.assertEqual(result, 1)
 
-
     @patch("agents.kits.second_brain.installer.shutil.which")
     @patch("agents.kits.second_brain.installer.subprocess.run")
     def test_doctor_warns_when_obsidian_missing(self, mock_run, mock_which):
@@ -646,7 +645,6 @@ class SecondBrainDoctorTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertIn("obsidian not found", output)
-
 
     @patch("agents.kits.second_brain.installer.shutil.which")
     @patch("agents.kits.second_brain.installer.subprocess.run")
@@ -672,7 +670,6 @@ class SecondBrainDoctorTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertIn("memory compiler", output)
-
 
     @patch("agents.kits.second_brain.installer.shutil.which")
     @patch("agents.kits.second_brain.installer.subprocess.run")
@@ -701,6 +698,109 @@ class SecondBrainDoctorTests(unittest.TestCase):
             self.assertIn("not found (OpenCode)", output)
             self.assertIn("not found (Codex CLI)", output)
 
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_returns_zero_when_opencode_has_legacy_mcpServers(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd_and_agents
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+
+            opencode_path = home / ".config" / "opencode" / "opencode.jsonc"
+            legacy_config = {
+                "$schema": "https://opencode.ai/opencode.json",
+                "mcpServers": {
+                    "qmd": {
+                        "type": "stdio",
+                        "command": "qmd",
+                        "args": ["mcp"],
+                    }
+                },
+            }
+            opencode_path.write_text(json.dumps(legacy_config), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+
+            self.assertEqual(result, 0)
+            self.assertIn("legacy mcpServers.qmd found", output)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_warns_when_opencode_mcp_not_object(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd_and_agents
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+
+            opencode_path = home / ".config" / "opencode" / "opencode.jsonc"
+            config = ms.parse_jsonc(opencode_path.read_text(encoding="utf-8"))
+            config["mcp"] = "not-a-dict"
+            opencode_path.write_text(json.dumps(config), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+
+            self.assertEqual(result, 0)
+            self.assertIn("mcp is not an object", output)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_warns_when_opencode_has_custom_qmd(
+        self, mock_run, mock_which
+    ):
+        mock_which.side_effect = self._which_returns_qmd_and_agents
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["qmd", "collection", "list"],
+                returncode=0,
+                stdout=f"  {wiki_path}\n",
+                stderr="",
+            )
+
+            opencode_path = home / ".config" / "opencode" / "opencode.jsonc"
+            config = ms.parse_jsonc(opencode_path.read_text(encoding="utf-8"))
+            config.setdefault("mcp", {})["qmd"] = {
+                "type": "local",
+                "command": "my-own-qmd",
+                "args": ["mcp"],
+                "enabled": True,
+            }
+            opencode_path.write_text(json.dumps(config), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+
+            self.assertEqual(result, 0)
+            self.assertIn("qmd MCP is custom", output)
+
 
 class SecondBrainDiffTests(unittest.TestCase):
     """Tests for diff_kit command."""
@@ -711,6 +811,111 @@ class SecondBrainDiffTests(unittest.TestCase):
             install(home=str(home), dry_run=False, yes=True)
             result = diff_kit(home=str(home))
             self.assertEqual(result, 0)
+
+    def test_diff_opencode_qmd_already_present(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("opencode.jsonc: qmd MCP already present", output)
+
+    def test_diff_opencode_would_add_qmd_mcp(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            opencode_path = home / ".config" / "opencode" / "opencode.jsonc"
+            config = ms.parse_jsonc(opencode_path.read_text(encoding="utf-8"))
+            config.pop("mcp", None)
+            config.pop("mcpServers", None)
+            opencode_path.write_text(json.dumps(config), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("opencode.jsonc: would add qmd MCP", output)
+
+    def test_diff_opencode_legacy_mcpServers_shows_migration(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            opencode_path = home / ".config" / "opencode" / "opencode.jsonc"
+            legacy_config = {
+                "$schema": "https://opencode.ai/opencode.json",
+                "mcpServers": {
+                    "qmd": {
+                        "type": "stdio",
+                        "command": "qmd",
+                        "args": ["mcp"],
+                    }
+                },
+            }
+            opencode_path.write_text(json.dumps(legacy_config), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("would migrate legacy", output)
+
+    def test_diff_opencode_mcp_not_object_shows_warning(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            opencode_path = home / ".config" / "opencode" / "opencode.jsonc"
+            config = ms.parse_jsonc(opencode_path.read_text(encoding="utf-8"))
+            config["mcp"] = "not-a-dict"
+            opencode_path.write_text(json.dumps(config), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("mcp is not an object", output)
+
+    def test_diff_opencode_custom_qmd_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            opencode_path = home / ".config" / "opencode" / "opencode.jsonc"
+            config = ms.parse_jsonc(opencode_path.read_text(encoding="utf-8"))
+            config.setdefault("mcp", {})["qmd"] = {
+                "type": "local",
+                "command": "my-own-qmd",
+                "args": ["mcp"],
+                "enabled": True,
+            }
+            opencode_path.write_text(json.dumps(config), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("custom; not overwritten", output)
+
+    def test_diff_opencode_absent_config_shows_create_message(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            vault = home / "second-brain"
+            for d in [
+                "raw/assets", "inbox", "wiki/sources/learning",
+                "wiki/sources/journal", "wiki/entities/projects",
+                "wiki/concepts/backend", "wiki/concepts/ai-engineering",
+                "wiki/concepts/pkm", "wiki/concepts/personal",
+                "wiki/synthesis", "output", ".claude",
+            ]:
+                (vault / d).mkdir(parents=True, exist_ok=True)
+            (vault / ".gitignore").write_text("", encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("opencode.jsonc: would create with qmd MCP", output)
 
 
 class SecondBrainUninstallTests(unittest.TestCase):
@@ -755,6 +960,87 @@ class SecondBrainUninstallTests(unittest.TestCase):
                 vault.exists(),
                 "vault must survive uninstall",
             )
+
+    def test_uninstall_removes_kit_owned_mcp_qmd_preserves_mcp_other(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            config_path = home / ".config" / "opencode" / "opencode.jsonc"
+            config = ms.parse_jsonc(config_path.read_text(encoding="utf-8"))
+            config.setdefault("mcp", {})["other"] = {"command": "keep-me"}
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            result = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertNotIn("qmd", result.get("mcp", {}))
+            self.assertEqual(result["mcp"]["other"], {"command": "keep-me"})
+
+    def test_uninstall_removes_legacy_mcpservers_qmd_preserves_mcpservers_other(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            config_path = home / ".config" / "opencode" / "opencode.jsonc"
+            config = ms.parse_jsonc(config_path.read_text(encoding="utf-8"))
+            config["mcpServers"] = {
+                "qmd": {"type": "stdio", "command": "qmd", "args": ["mcp"]},
+                "other": {"command": "keep-me"},
+            }
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            result = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertNotIn("qmd", result.get("mcpServers", {}))
+            self.assertEqual(result["mcpServers"]["other"], {"command": "keep-me"})
+
+    def test_uninstall_removes_both_new_and_legacy_kit_owned(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            config_path = home / ".config" / "opencode" / "opencode.jsonc"
+            config = ms.parse_jsonc(config_path.read_text(encoding="utf-8"))
+            config["mcpServers"] = {
+                "qmd": {"type": "stdio", "command": "qmd", "args": ["mcp"]},
+            }
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            result = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertNotIn("qmd", result.get("mcp", {}))
+            self.assertNotIn("mcpServers", result)
+
+    def test_uninstall_preserves_custom_mcp_qmd_with_enabled_false(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            config_path = home / ".config" / "opencode" / "opencode.jsonc"
+            custom = {"type": "local", "command": "qmd", "args": ["mcp"], "enabled": False}
+            config = ms.parse_jsonc(config_path.read_text(encoding="utf-8"))
+            config.setdefault("mcp", {})["qmd"] = custom
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            result = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(result["mcp"]["qmd"], custom)
+
+    def test_uninstall_preserves_nonmatching_mcpservers_qmd(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True)
+            config_path = home / ".config" / "opencode" / "opencode.jsonc"
+            config = ms.parse_jsonc(config_path.read_text(encoding="utf-8"))
+            config["mcpServers"] = {
+                "qmd": {"command": "my-own", "args": ["mcp"]},
+            }
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            result = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(result["mcpServers"]["qmd"]["command"], "my-own")
 
 
 class SecondBrainConfigMergeCycleTests(unittest.TestCase):
@@ -839,6 +1125,318 @@ class SecondBrainConfigMergeCycleTests(unittest.TestCase):
         assert remaining is not None
         self.assertIn("USER_VAR=1", remaining)
         self.assertNotIn("KIT_VAR=second_brain", remaining)
+
+
+class SecondBrainOpenCodeMcpTests(unittest.TestCase):
+    """_merge_opencode_qmd_mcp and helper matchers."""
+
+    # -- _is_legacy_kit_owned_qmd_mcp tests --
+
+    def test_legacy_matcher_matches_claude_format(self):
+        entry = {"type": "stdio", "command": "qmd", "args": ["mcp"]}
+        self.assertTrue(_is_legacy_kit_owned_qmd_mcp(entry))
+
+    def test_legacy_matcher_matches_opencode_format(self):
+        entry = {"type": "local", "command": "qmd", "args": ["mcp"], "enabled": True}
+        self.assertTrue(_is_legacy_kit_owned_qmd_mcp(entry))
+
+    def test_legacy_matcher_rejects_non_dict(self):
+        self.assertFalse(_is_legacy_kit_owned_qmd_mcp("string"))
+
+    def test_legacy_matcher_rejects_wrong_command(self):
+        self.assertFalse(
+            _is_legacy_kit_owned_qmd_mcp({"command": "other", "args": ["mcp"]})
+        )
+
+    def test_legacy_matcher_rejects_non_bool_enabled(self):
+        entry = {"command": "qmd", "args": ["mcp"], "enabled": "yes"}
+        self.assertFalse(_is_legacy_kit_owned_qmd_mcp(entry))
+
+    # -- _is_expected_opencode_qmd_mcp tests --
+
+    def test_expected_matcher_matches_exact(self):
+        self.assertTrue(_is_expected_opencode_qmd_mcp(OPENCODE_QMD_MCP_ENTRY))
+
+    def test_expected_matcher_rejects_enabled_false(self):
+        entry = {"type": "local", "command": "qmd", "args": ["mcp"], "enabled": False}
+        self.assertFalse(_is_expected_opencode_qmd_mcp(entry))
+
+    def test_expected_matcher_rejects_extra_keys(self):
+        entry = dict(OPENCODE_QMD_MCP_ENTRY)
+        entry["extra"] = True
+        self.assertFalse(_is_expected_opencode_qmd_mcp(entry))
+
+    def test_expected_matcher_rejects_missing_enabled(self):
+        entry = {"type": "local", "command": "qmd", "args": ["mcp"]}
+        self.assertFalse(_is_expected_opencode_qmd_mcp(entry))
+
+    # -- _merge_opencode_qmd_mcp tests --
+
+    def test_adds_mcp_qmd_when_absent(self):
+        current = {"model": "sonnet"}
+        merged, changed, warnings = _merge_opencode_qmd_mcp(current)
+        self.assertTrue(changed)
+        self.assertEqual(merged["mcp"]["qmd"], OPENCODE_QMD_MCP_ENTRY)
+        self.assertEqual(merged["model"], "sonnet")
+        self.assertEqual(warnings, [])
+
+    def test_existing_other_keys_and_mcp_servers_survive(self):
+        current = {
+            "model": "sonnet",
+            "mcp": {"other": {"command": "something"}},
+        }
+        merged, changed, warnings = _merge_opencode_qmd_mcp(current)
+        self.assertTrue(changed)
+        self.assertEqual(merged["mcp"]["qmd"], OPENCODE_QMD_MCP_ENTRY)
+        self.assertEqual(merged["mcp"]["other"], {"command": "something"})
+        self.assertEqual(merged["model"], "sonnet")
+        self.assertEqual(warnings, [])
+
+    def test_custom_mcp_qmd_preserved(self):
+        custom = {"type": "local", "command": "qmd", "args": ["mcp"], "enabled": False}
+        current = {"mcp": {"qmd": custom}}
+        merged, changed, warnings = _merge_opencode_qmd_mcp(current)
+        self.assertFalse(changed)
+        self.assertIs(merged["mcp"]["qmd"], custom)
+        self.assertIn("qmd MCP present (custom; not overwritten)", warnings)
+
+    def test_legacy_mcp_servers_qmd_removed(self):
+        current = {
+            "mcpServers": {
+                "qmd": {"type": "stdio", "command": "qmd", "args": ["mcp"]},
+                "other": {"command": "something"},
+            }
+        }
+        merged, changed, warnings = _merge_opencode_qmd_mcp(current)
+        self.assertTrue(changed)
+        self.assertNotIn("qmd", merged.get("mcpServers", {}))
+        self.assertEqual(merged["mcpServers"]["other"], {"command": "something"})
+        self.assertEqual(warnings, [])
+
+    def test_empty_mcp_servers_removed_after_legacy_cleanup(self):
+        current = {
+            "mcpServers": {
+                "qmd": {"type": "stdio", "command": "qmd", "args": ["mcp"]},
+            }
+        }
+        merged, changed, warnings = _merge_opencode_qmd_mcp(current)
+        self.assertTrue(changed)
+        self.assertNotIn("mcpServers", merged)
+        self.assertEqual(warnings, [])
+
+    def test_non_object_root_unchanged(self):
+        current = "not a dict"
+        merged, changed, warnings = _merge_opencode_qmd_mcp(current)
+        self.assertFalse(changed)
+        self.assertIs(merged, current)
+        self.assertIn("opencode.jsonc root is not an object", warnings)
+
+    def test_non_object_mcp_unchanged(self):
+        current = {"mcp": "not a dict"}
+        merged, changed, warnings = _merge_opencode_qmd_mcp(current)
+        self.assertFalse(changed)
+        self.assertIs(merged, current)
+        self.assertIn("existing mcp is not an object", warnings)
+
+    def test_enabled_false_treated_as_custom_not_kit_owned(self):
+        custom = {"type": "local", "command": "qmd", "args": ["mcp"], "enabled": False}
+        self.assertFalse(_is_expected_opencode_qmd_mcp(custom))
+        merged, changed, warnings = _merge_opencode_qmd_mcp({"mcp": {"qmd": custom}})
+        self.assertFalse(changed)
+        self.assertIn("qmd MCP present (custom; not overwritten)", warnings)
+
+    def test_install_creates_mcp_qmd_from_empty(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            config_path = home / ".config" / "opencode" / "opencode.jsonc"
+            self.assertTrue(config_path.exists())
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(config["mcp"]["qmd"], OPENCODE_QMD_MCP_ENTRY)
+            self.assertNotIn("mcpServers", config)
+
+    def test_install_preserves_existing_mcp_other_and_top_keys(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+
+            seed = {
+                "model": "sonnet",
+                "mcp": {"other": {"command": "something"}},
+            }
+            config_dir = home / ".config" / "opencode"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / "opencode.jsonc").write_text(
+                json.dumps(seed), encoding="utf-8"
+            )
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            config = json.loads(
+                (config_dir / "opencode.jsonc").read_text(encoding="utf-8")
+            )
+            self.assertEqual(config["mcp"]["qmd"], OPENCODE_QMD_MCP_ENTRY)
+            self.assertEqual(config["mcp"]["other"], {"command": "something"})
+            self.assertEqual(config["model"], "sonnet")
+
+    def test_install_removes_legacy_mcp_servers_qmd(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+
+            seed = {
+                "mcpServers": {
+                    "qmd": {"type": "stdio", "command": "qmd", "args": ["mcp"]},
+                    "other": {"command": "something"},
+                }
+            }
+            config_dir = home / ".config" / "opencode"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / "opencode.jsonc").write_text(
+                json.dumps(seed), encoding="utf-8"
+            )
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            config = json.loads(
+                (config_dir / "opencode.jsonc").read_text(encoding="utf-8")
+            )
+            self.assertNotIn("qmd", config.get("mcpServers", {}))
+            self.assertEqual(config["mcpServers"]["other"], {"command": "something"})
+            self.assertEqual(config["mcp"]["qmd"], OPENCODE_QMD_MCP_ENTRY)
+
+    def test_install_skips_invalid_jsonc(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+
+            config_dir = home / ".config" / "opencode"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_path = config_dir / "opencode.jsonc"
+            config_path.write_text("{not valid jsonc", encoding="utf-8")
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            output = buf.getvalue()
+
+            self.assertIn("invalid opencode.jsonc", output)
+            self.assertEqual(
+                config_path.read_text(encoding="utf-8"), "{not valid jsonc"
+            )
+
+    def test_install_skips_non_object_root(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+
+            config_dir = home / ".config" / "opencode"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_path = config_dir / "opencode.jsonc"
+            config_path.write_text(json.dumps("just a string"), encoding="utf-8")
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            output = buf.getvalue()
+
+            self.assertIn("opencode.jsonc root is not an object", output)
+            self.assertEqual(
+                config_path.read_text(encoding="utf-8"), json.dumps("just a string")
+            )
+
+    def test_install_skips_non_object_mcp(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+
+            config_dir = home / ".config" / "opencode"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_path = config_dir / "opencode.jsonc"
+            config_path.write_text(
+                json.dumps({"mcp": "not a dict"}), encoding="utf-8"
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            output = buf.getvalue()
+
+            self.assertIn("existing mcp is not an object", output)
+            self.assertEqual(
+                config_path.read_text(encoding="utf-8"),
+                json.dumps({"mcp": "not a dict"}),
+            )
+
+    def test_install_returns_1_for_invalid_opencode_jsonc(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+
+            config_dir = home / ".config" / "opencode"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_path = config_dir / "opencode.jsonc"
+            config_path.write_text("{not valid jsonc", encoding="utf-8")
+
+            result = install(
+                home=str(home), dry_run=False, yes=True, setup_deps=False
+            )
+
+            self.assertEqual(result, 1)
+            self.assertEqual(
+                config_path.read_text(encoding="utf-8"), "{not valid jsonc"
+            )
+
+    def test_install_preserves_non_qmd_mcpservers_with_matching_shape(self):
+        """Non-qmd key with same shape as legacy qmd MCP survives install."""
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+
+            seed = {
+                "mcpServers": {
+                    "qmd_alias": {
+                        "type": "stdio",
+                        "command": "qmd",
+                        "args": ["mcp"],
+                    },
+                }
+            }
+            config_dir = home / ".config" / "opencode"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / "opencode.jsonc").write_text(
+                json.dumps(seed), encoding="utf-8"
+            )
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            config = json.loads(
+                (config_dir / "opencode.jsonc").read_text(encoding="utf-8")
+            )
+            # Non-qmd key with matching shape must survive
+            self.assertIn("qmd_alias", config.get("mcpServers", {}))
+            self.assertEqual(
+                config["mcpServers"]["qmd_alias"],
+                {"type": "stdio", "command": "qmd", "args": ["mcp"]},
+            )
+            # qmd MCP must be added in new location
+            self.assertEqual(
+                config["mcp"]["qmd"], OPENCODE_QMD_MCP_ENTRY
+            )
+
+    def test_diff_opencode_non_object_root_does_not_crash(self):
+        """diff_kit handles non-object opencode.jsonc root gracefully."""
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            opencode_path = (
+                home / ".config" / "opencode" / "opencode.jsonc"
+            )
+            opencode_path.write_text(
+                json.dumps("not-an-object"), encoding="utf-8"
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                diff_kit(home=str(home))
+            output = buf.getvalue()
+
+            self.assertIn("root is not an object", output)
 
 
 class SecondBrainSecretKeySafetyTests(unittest.TestCase):

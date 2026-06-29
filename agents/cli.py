@@ -3,10 +3,29 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from typing import Mapping
 
 from agents.kit_registry import KITS, KitSpec
+
+GIT_SOURCE_URL = "git+https://github.com/kidboy-man/vibe-engineering.git"
+PYPI_PACKAGE = "vibe-engineering"
+
+
+def _is_pipx() -> bool:
+    return ".local/pipx/venvs" in sys.executable or "/pipx/venvs/" in sys.executable
+
+
+def _run(cmd: list[str]) -> int:
+    print(f"Upgrading: {' '.join(cmd)}")
+    return subprocess.run(cmd, check=False).returncode
+
+
+def cmd_upgrade(_args: argparse.Namespace) -> int:
+    if _is_pipx():
+        return _run(["pipx", "install", "--force", GIT_SOURCE_URL])
+    return _run([sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE])
 
 
 def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentParser:
@@ -15,6 +34,8 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
         description="Install and manage portable engineering kits.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("upgrade", help="Self-upgrade the vibe CLI to the latest version")
 
     kits = sub.add_parser("kits", help="List and manage kits")
     kits_sub = kits.add_subparsers(dest="kits_command", required=True)
@@ -49,6 +70,9 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "upgrade":
+        return cmd_upgrade(args)
 
     if args.command == "kits" and args.kits_command == "list":
         for name in KITS:

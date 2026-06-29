@@ -38,6 +38,9 @@ class CliHelpContractTests(unittest.TestCase):
     def test_main_help(self):
         self._assert_matches_fixture("main_help.txt")
 
+    def test_upgrade_help(self):
+        self._assert_matches_fixture("upgrade_help.txt", "upgrade")
+
     def test_kits_help(self):
         self._assert_matches_fixture("kits_help.txt", "kits")
 
@@ -129,6 +132,9 @@ class CliDispatchContractTests(unittest.TestCase):
         self.assertIn("claude-code", lines)
         self.assertIn("opencode", lines)
         self.assertIn("second-brain", lines)
+        self.assertIn("gemini", lines)
+        self.assertIn("codex", lines)
+        self.assertIn("cursor", lines)
 
     def test_kits_unknown_kit_exits_nonzero(self):
         result = subprocess.run(

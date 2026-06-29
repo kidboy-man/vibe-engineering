@@ -265,6 +265,89 @@ QMD_MCP_SNIPPET_JSON: dict = {
     }
 }
 
+OPENCODE_QMD_MCP_ENTRY: dict = {
+    "type": "local",
+    "command": "qmd",
+    "args": ["mcp"],
+    "enabled": True,
+}
+
+
+def _is_legacy_kit_owned_qmd_mcp(entry: object) -> bool:
+    """Conservative matcher — True when entry looks like kit-installed qmd MCP.
+
+    Catches Claude-format (type=stdio) and OpenCode-format (type=local) entries
+    the kit may have written, while rejecting entries where enabled is not a
+    boolean or the command/args don't match.
+    """
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("command") != "qmd":
+        return False
+    if entry.get("args") != ["mcp"]:
+        return False
+    if entry.get("type") not in (None, "stdio", "local"):
+        return False
+    if "enabled" in entry and not isinstance(entry["enabled"], bool):
+        return False
+    return True
+
+
+def _is_expected_opencode_qmd_mcp(entry: object) -> bool:
+    """True ONLY when entry is an exact match for OPENCODE_QMD_MCP_ENTRY.
+
+    enabled: False, extra keys, missing keys, different type/command/args → False.
+    """
+    return isinstance(entry, dict) and entry == OPENCODE_QMD_MCP_ENTRY
+
+
+def _merge_opencode_qmd_mcp(current: object) -> tuple[object, bool, list[str]]:
+    """Merge qmd MCP entry into parsed opencode.jsonc content.
+
+    Adds ``mcp.qmd`` when absent; preserves custom ``mcp.qmd`` entries;
+    removes legacy kit-owned ``mcpServers.qmd`` entries via the conservative
+    ``_is_legacy_kit_owned_qmd_mcp`` matcher.
+
+    Returns ``(merged, changed, warnings)`` where ``merged`` is the result
+    (same object as ``current`` when unchanged), ``changed`` is True when any
+    mutation occurred, and ``warnings`` collects non-fatal diagnostic messages.
+    """
+    warnings: list[str] = []
+
+    if not isinstance(current, dict):
+        return (current, False, ["opencode.jsonc root is not an object"])
+
+    merged = dict(current)
+    changed = False
+
+    if "mcp" not in merged:
+        merged["mcp"] = {}
+        changed = True
+
+    mcp = merged["mcp"]
+    if not isinstance(mcp, dict):
+        return (current, False, ["existing mcp is not an object"])
+
+    if "qmd" not in mcp:
+        mcp["qmd"] = dict(OPENCODE_QMD_MCP_ENTRY)
+        changed = True
+    elif not _is_expected_opencode_qmd_mcp(mcp["qmd"]):
+        warnings.append("qmd MCP present (custom; not overwritten)")
+    if isinstance(current.get("mcpServers"), dict):
+        qmd_val = current["mcpServers"].get("qmd")
+        if qmd_val is not None and _is_legacy_kit_owned_qmd_mcp(qmd_val):
+            changed = True
+            remaining = {
+                k: v for k, v in current["mcpServers"].items() if k != "qmd"
+            }
+            if remaining:
+                merged["mcpServers"] = remaining
+            else:
+                merged.pop("mcpServers", None)
+
+    return (merged, changed, warnings)
+
+
 CODEX_TOML_SECTION = "[mcp_servers.qmd]"
 CODEX_TOML_BODY = 'type = "stdio"\ncommand = "qmd"\nargs = ["mcp"]\n'
 
@@ -302,12 +385,11 @@ def _merge_opencode_config(paths: KitPaths) -> None:
             print("skipping invalid opencode.jsonc")
             return
 
-    merged, changed = ms.jsonc_defaults_strategy(
-        QMD_MCP_SNIPPET_JSON,
-        current,
-        LOCAL_ONLY_KEYS,
-        is_secret_key,
-    )
+    merged, changed, warnings = _merge_opencode_qmd_mcp(current)
+
+    for w in warnings:
+        print(w)
+
     if not changed:
         return
 
@@ -558,6 +640,34 @@ def doctor(home: str | None = None) -> int:
     )
     _check_config("config.toml", paths.codex_dir / "config.toml", tomllib.loads)
 
+    # OpenCode MCP status (non-fatal warnings)
+    opencode_path = paths.opencode_config_dir / "opencode.jsonc"
+    if opencode_path.exists():
+        try:
+            opencode_config = ms.parse_jsonc(
+                opencode_path.read_text(encoding="utf-8")
+            )
+            if isinstance(opencode_config.get("mcpServers"), dict) and "qmd" in opencode_config["mcpServers"]:
+                if _is_legacy_kit_owned_qmd_mcp(opencode_config["mcpServers"]["qmd"]):
+                    print(
+                        "  opencode.jsonc: legacy mcpServers.qmd found;"
+                        " install/diff will migrate to mcp.qmd"
+                    )
+            mcp = opencode_config.get("mcp")
+            if mcp is not None and not isinstance(mcp, dict):
+                print(
+                    "  opencode.jsonc: mcp is not an object;"
+                    " qmd MCP cannot be added"
+                )
+            elif isinstance(mcp, dict) and "qmd" in mcp:
+                if not _is_expected_opencode_qmd_mcp(mcp["qmd"]):
+                    print(
+                        "  opencode.jsonc: qmd MCP is custom"
+                        " (will not be overwritten)"
+                    )
+        except Exception:
+            pass  # _check_config already reported parse failures
+
     vault_str = str(vault_path)
     if "\\\\wsl$" in vault_str or vault_str.startswith("/mnt/"):
         print("\n⚠ WSL2 detected: paths may behave differently across OS boundaries")
@@ -647,11 +757,49 @@ def diff_kit(home: str | None = None) -> int:
             opencode_config = ms.parse_jsonc(
                 opencode_path.read_text(encoding="utf-8")
             )
-            mcps = opencode_config.get("mcpServers", {})
-            if isinstance(mcps, dict) and "qmd" in mcps:
-                print("  opencode.jsonc: qmd MCP already present")
+            if not isinstance(opencode_config, dict):
+                print(
+                    "  opencode.jsonc: root is not an object"
+                    " (would skip)"
+                )
             else:
-                print("  opencode.jsonc: would add qmd MCP")
+                has_legacy = (
+                    isinstance(opencode_config.get("mcpServers"), dict)
+                    and "qmd" in opencode_config["mcpServers"]
+                    and _is_legacy_kit_owned_qmd_mcp(
+                        opencode_config["mcpServers"]["qmd"]
+                    )
+                )
+                mcp = opencode_config.get("mcp")
+                if mcp is None:
+                    if has_legacy:
+                        print(
+                            "  opencode.jsonc: would migrate legacy"
+                            " mcpServers.qmd to mcp.qmd"
+                        )
+                    else:
+                        print("  opencode.jsonc: would add qmd MCP")
+                elif not isinstance(mcp, dict):
+                    print(
+                        "  opencode.jsonc: mcp is not an object;"
+                        " qmd MCP cannot be added"
+                    )
+                elif "qmd" in mcp:
+                    if _is_expected_opencode_qmd_mcp(mcp["qmd"]):
+                        print("  opencode.jsonc: qmd MCP already present")
+                    else:
+                        print(
+                            "  opencode.jsonc: qmd MCP present"
+                            " (custom; not overwritten)"
+                        )
+                else:
+                    if has_legacy:
+                        print(
+                            "  opencode.jsonc: would migrate legacy"
+                            " mcpServers.qmd to mcp.qmd"
+                        )
+                    else:
+                        print("  opencode.jsonc: would add qmd MCP")
         except (json.JSONDecodeError, ValueError):
             print("  opencode.jsonc: invalid (would skip)")
     else:
@@ -698,6 +846,40 @@ def _strip_qmd_mcp(text: str, parse) -> str | None:
     return json.dumps(config, indent=2) + "\n"
 
 
+def _strip_opencode_qmd_mcp(text: str) -> str | None:
+    """Remove kit-owned qmd MCP entries from opencode.jsonc content.
+
+    Removes new-format ``mcp.qmd`` (via ``_is_expected_opencode_qmd_mcp``)
+    and legacy-format ``mcpServers.qmd`` (via ``_is_legacy_kit_owned_qmd_mcp``).
+    Deletes empty parent objects after removal.
+    Returns new JSONC string or None if nothing was removed.
+    Preserves custom qmd entries, ``mcp.other``, ``mcpServers.other``, etc.
+    """
+    config = ms.parse_jsonc(text)
+    changed = False
+
+    mcp = config.get("mcp")
+    if isinstance(mcp, dict) and "qmd" in mcp:
+        if _is_expected_opencode_qmd_mcp(mcp["qmd"]):
+            del mcp["qmd"]
+            changed = True
+            if not mcp:
+                del config["mcp"]
+
+    mcps = config.get("mcpServers")
+    if isinstance(mcps, dict) and "qmd" in mcps:
+        if _is_legacy_kit_owned_qmd_mcp(mcps["qmd"]):
+            del mcps["qmd"]
+            changed = True
+            if not mcps:
+                del config["mcpServers"]
+
+    if not changed:
+        return None
+
+    return json.dumps(config, indent=2) + "\n"
+
+
 def uninstall(
     home: str | None = None,
     dry_run: bool = False,
@@ -739,13 +921,27 @@ def uninstall(
     opencode_path = paths.opencode_config_dir / "opencode.jsonc"
     if opencode_path.exists():
         try:
-            mcps = ms.parse_jsonc(opencode_path.read_text(encoding="utf-8")).get("mcpServers")
+            config = ms.parse_jsonc(opencode_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, ValueError):
-            mcps = None
-        if isinstance(mcps, dict) and "qmd" in mcps:
+            config = None
+
+        has_new_format = (
+            isinstance(config, dict)
+            and isinstance(config.get("mcp"), dict)
+            and "qmd" in config["mcp"]
+            and _is_expected_opencode_qmd_mcp(config["mcp"]["qmd"])
+        )
+        has_legacy = (
+            isinstance(config, dict)
+            and isinstance(config.get("mcpServers"), dict)
+            and "qmd" in config["mcpServers"]
+            and _is_legacy_kit_owned_qmd_mcp(config["mcpServers"]["qmd"])
+        )
+
+        if has_new_format or has_legacy:
 
             def _mutate_opencode(text: str) -> tuple[str | None, bool]:
-                new = _strip_qmd_mcp(text, ms.parse_jsonc)
+                new = _strip_opencode_qmd_mcp(text)
                 return (None, False) if new is None else (new, False)
 
             specs.append((opencode_path, "qmd MCP from opencode.jsonc", _mutate_opencode))
