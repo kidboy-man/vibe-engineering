@@ -2338,38 +2338,38 @@ class SecondBrainCodexHookInstallTests(unittest.TestCase):
             self.assertEqual(config2.count("[[hooks.SessionStart]]"), 1)
 
 
-class SecondBrainCodexInstructionsSectionTests(unittest.TestCase):
-    """~/.codex/instructions.md marked-section merge during install()."""
+class SecondBrainCodexAgentsSectionTests(unittest.TestCase):
+    """~/.codex/AGENTS.md marked-section merge during install()."""
 
-    def test_install_creates_instructions_md_with_section_when_absent(self):
+    def test_install_creates_agents_md_with_section_when_absent(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             install(home=str(home), dry_run=False, yes=True, setup_deps=False)
-            instructions = (home / ".codex" / "instructions.md").read_text(encoding="utf-8")
-            self.assertIn(CODEX_INSTRUCTIONS_BEGIN_MARKER, instructions)
-            self.assertIn(CODEX_INSTRUCTIONS_END_MARKER, instructions)
-            self.assertIn("Second-Brain Vault", instructions)
+            agents_md = (home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn(CODEX_INSTRUCTIONS_BEGIN_MARKER, agents_md)
+            self.assertIn(CODEX_INSTRUCTIONS_END_MARKER, agents_md)
+            self.assertIn("Second-Brain Vault", agents_md)
 
     def test_install_merges_section_preserving_users_preexisting_content(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             codex_dir = home / ".codex"
             codex_dir.mkdir(parents=True, exist_ok=True)
-            (codex_dir / "instructions.md").write_text("# My Rules\nBe terse.\n", encoding="utf-8")
+            (codex_dir / "AGENTS.md").write_text("# My Rules\nBe terse.\n", encoding="utf-8")
 
             install(home=str(home), dry_run=False, yes=True, setup_deps=False)
 
-            instructions = (codex_dir / "instructions.md").read_text(encoding="utf-8")
-            self.assertIn("# My Rules", instructions)
-            self.assertIn(CODEX_INSTRUCTIONS_BEGIN_MARKER, instructions)
+            agents_md = (codex_dir / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("# My Rules", agents_md)
+            self.assertIn(CODEX_INSTRUCTIONS_BEGIN_MARKER, agents_md)
 
     def test_install_idempotent_reinstall_no_duplicate_section(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             install(home=str(home), dry_run=False, yes=True, setup_deps=False)
             install(home=str(home), dry_run=False, yes=True, setup_deps=False)
-            instructions = (home / ".codex" / "instructions.md").read_text(encoding="utf-8")
-            self.assertEqual(instructions.count(CODEX_INSTRUCTIONS_BEGIN_MARKER), 1)
+            agents_md = (home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertEqual(agents_md.count(CODEX_INSTRUCTIONS_BEGIN_MARKER), 1)
 
     def test_install_updates_stale_section_on_reinstall(self):
         with tempfile.TemporaryDirectory() as home_str:
@@ -2377,19 +2377,19 @@ class SecondBrainCodexInstructionsSectionTests(unittest.TestCase):
             codex_dir = home / ".codex"
             codex_dir.mkdir(parents=True, exist_ok=True)
             stale = CODEX_INSTRUCTIONS_BEGIN_MARKER + "stale old content\n" + CODEX_INSTRUCTIONS_END_MARKER
-            (codex_dir / "instructions.md").write_text(stale, encoding="utf-8")
+            (codex_dir / "AGENTS.md").write_text(stale, encoding="utf-8")
 
             install(home=str(home), dry_run=False, yes=True, setup_deps=False)
 
-            instructions = (codex_dir / "instructions.md").read_text(encoding="utf-8")
-            self.assertNotIn("stale old content", instructions)
-            self.assertIn("Second-Brain Vault", instructions)
+            agents_md = (codex_dir / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertNotIn("stale old content", agents_md)
+            self.assertIn("Second-Brain Vault", agents_md)
 
-    def test_dry_run_writes_no_instructions_md_changes(self):
+    def test_dry_run_writes_no_agents_md_changes(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             install(home=str(home), dry_run=True, yes=True, setup_deps=False)
-            self.assertFalse((home / ".codex" / "instructions.md").exists())
+            self.assertFalse((home / ".codex" / "AGENTS.md").exists())
 
 
 class SecondBrainCursorHookInstallTests(unittest.TestCase):
@@ -2708,13 +2708,32 @@ class SecondBrainMultiAgentUninstallTests(unittest.TestCase):
             self.assertIn("[model_providers.custom]", config)
             self.assertNotIn("[[hooks.SessionStart]]", config)
 
-    def test_uninstall_strips_codex_instructions_section_preserves_user_content(self):
+    def test_uninstall_strips_codex_agents_section_preserves_user_content(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             codex_dir = home / ".codex"
             codex_dir.mkdir(parents=True, exist_ok=True)
-            (codex_dir / "instructions.md").write_text("# My Rules\n", encoding="utf-8")
+            (codex_dir / "AGENTS.md").write_text("# My Rules\n", encoding="utf-8")
             install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            agents_md = (codex_dir / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("# My Rules", agents_md)
+            self.assertNotIn(CODEX_INSTRUCTIONS_BEGIN_MARKER, agents_md)
+
+    def test_uninstall_strips_legacy_codex_instructions_section_preserves_user_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            legacy = (
+                "# My Rules\n"
+                + CODEX_INSTRUCTIONS_BEGIN_MARKER
+                + "legacy second-brain content\n"
+                + CODEX_INSTRUCTIONS_END_MARKER
+            )
+            (codex_dir / "instructions.md").write_text(legacy, encoding="utf-8")
 
             uninstall(home=str(home), dry_run=False, yes=True)
 
@@ -2788,10 +2807,10 @@ class SecondBrainMultiAgentDoctorDiffTests(unittest.TestCase):
                 doctor(home=str(home))
             output = buf.getvalue()
             self.assertIn("SessionStart hook registered in config.toml", output)
-            self.assertIn("instructions.md second-brain section present", output)
+            self.assertIn("AGENTS.md second-brain section present", output)
             self.assertIn("sessionStart hook registered in hooks.json", output)
             self.assertIn("rule file up to date", output)
-            self.assertIn("AGENTS.md second-brain section present", output)
+            self.assertIn("opencode AGENTS.md second-brain section present", output)
 
     @patch("agents.kits.second_brain.installer.shutil.which")
     @patch("agents.kits.second_brain.installer.subprocess.run")
@@ -2825,6 +2844,7 @@ class SecondBrainMultiAgentDoctorDiffTests(unittest.TestCase):
             output = buf.getvalue()
             self.assertEqual(result, 0)
             self.assertIn("config.toml SessionStart hook: would register", output)
+            self.assertIn("AGENTS.md second-brain section: would create", output)
             self.assertIn("hooks.json sessionStart hook: would register", output)
             self.assertIn(f"{CURSOR_RULE_REL}: would create", output)
             self.assertIn("opencode AGENTS.md second-brain section: would create", output)
@@ -2839,6 +2859,7 @@ class SecondBrainMultiAgentDoctorDiffTests(unittest.TestCase):
             output = buf.getvalue()
             self.assertEqual(result, 0)
             self.assertIn("config.toml SessionStart hook: already registered", output)
+            self.assertIn("AGENTS.md second-brain section: already present", output)
             self.assertIn("hooks.json sessionStart hook: already registered", output)
             self.assertIn(f"{CURSOR_RULE_REL}: up to date", output)
             self.assertIn("opencode AGENTS.md second-brain section: already present", output)

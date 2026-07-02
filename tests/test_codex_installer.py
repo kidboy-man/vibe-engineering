@@ -13,7 +13,7 @@ class CodexInstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             rc = install(home=tmp, dry_run=True, yes=True)
             self.assertEqual(rc, 0)
-            self.assertFalse((Path(tmp) / ".codex" / "instructions.md").exists())
+            self.assertFalse((Path(tmp) / ".codex" / "AGENTS.md").exists())
 
     def test_install_dry_run_creates_no_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -27,7 +27,7 @@ class CodexInstallerTests(unittest.TestCase):
 
             self.assertEqual(rc, 0)
             codex_dir = Path(tmp) / ".codex"
-            self.assertTrue((codex_dir / "instructions.md").exists())
+            self.assertTrue((codex_dir / "AGENTS.md").exists())
             self.assertTrue((codex_dir / ".vibe-engineering-manifest.json").exists())
 
     def test_install_accepts_merge_settings_flag(self):
@@ -40,7 +40,7 @@ class CodexInstallerTests(unittest.TestCase):
             self.assertEqual(install(home=tmp, dry_run=False, yes=True), 0)
             self.assertEqual(install(home=tmp, dry_run=False, yes=True), 0)
             codex_dir = Path(tmp) / ".codex"
-            self.assertTrue((codex_dir / "instructions.md").exists())
+            self.assertTrue((codex_dir / "AGENTS.md").exists())
 
     def test_uninstall_removes_unchanged_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -49,23 +49,23 @@ class CodexInstallerTests(unittest.TestCase):
             rc = uninstall(home=tmp, dry_run=False, yes=True)
 
             self.assertEqual(rc, 0)
-            self.assertFalse((Path(tmp) / ".codex" / "instructions.md").exists())
+            self.assertFalse((Path(tmp) / ".codex" / "AGENTS.md").exists())
             self.assertFalse((Path(tmp) / ".codex" / ".vibe-engineering-manifest.json").exists())
 
     def test_uninstall_keeps_modified_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             codex_dir = Path(tmp) / ".codex"
             self.assertEqual(install(home=tmp, dry_run=False, yes=True), 0)
-            instructions = codex_dir / "instructions.md"
-            instructions.write_text(
-                instructions.read_text(encoding="utf-8") + "\nlocal change\n",
+            agents_md = codex_dir / "AGENTS.md"
+            agents_md.write_text(
+                agents_md.read_text(encoding="utf-8") + "\nlocal change\n",
                 encoding="utf-8",
             )
 
             rc = uninstall(home=tmp, dry_run=False, yes=True)
 
             self.assertEqual(rc, 0)
-            self.assertTrue(instructions.exists())
+            self.assertTrue(agents_md.exists())
             self.assertFalse((codex_dir / ".vibe-engineering-manifest.json").exists())
 
     def test_uninstall_dry_run_removes_nothing(self):
@@ -75,7 +75,7 @@ class CodexInstallerTests(unittest.TestCase):
             rc = uninstall(home=tmp, dry_run=True, yes=True)
 
             self.assertEqual(rc, 0)
-            self.assertTrue((Path(tmp) / ".codex" / "instructions.md").exists())
+            self.assertTrue((Path(tmp) / ".codex" / "AGENTS.md").exists())
 
     def test_uninstall_no_manifest_is_noop(self):
         with tempfile.TemporaryDirectory() as tmp:

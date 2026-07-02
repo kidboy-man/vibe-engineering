@@ -14,7 +14,7 @@ overwriting your existing config files. The `second-brain` kit optionally runs
 | `claude-code` | `vibe kits claude-code …` | Persona, rules, agents, commands, skills into `~/.claude` |
 | `opencode` | `vibe kits opencode …` | Same content, adapted to `~/.config/opencode` layout + JSONC merge |
 | `gemini` | `vibe kits gemini …` | Self-contained persona + rules into `~/.gemini/GEMINI.md` |
-| `codex` | `vibe kits codex …` | Self-contained persona + rules into `~/.codex/instructions.md` |
+| `codex` | `vibe kits codex …` | Self-contained persona + rules into `~/.codex/AGENTS.md` |
 | `cursor` | `vibe kits cursor …` | Seven `.mdc` rule files into `~/.cursor/rules/` |
 | `second-brain` | `vibe kits second-brain …` | Local Obsidian/qmd vault scaffold + non-secret AI-agent snippets |
 
@@ -27,7 +27,7 @@ pipx install vibe-kits
 # From GitHub (latest unreleased)
 pipx install git+https://github.com/kidboy-man/vibe-engineering.git
 
-# Self-upgrade
+# Self-upgrade from the stable package channel
 vibe upgrade
 ```
 
@@ -159,7 +159,7 @@ instructions file rather than a rules directory.
 ## Codex CLI Kit
 
 Portable Codex CLI setup for senior backend engineering. Installs a single
-`instructions.md` file with the same comprehensive persona and embedded rules.
+`AGENTS.md` file with the same comprehensive persona and embedded rules.
 
 ### Commands
 
@@ -173,10 +173,9 @@ vibe kits codex uninstall --yes
 
 ### What it installs
 
-`~/.codex/instructions.md` — a single self-contained file with the same
-structure as `GEMINI.md` above, adapted to Codex CLI conventions. If a
-project-level `AGENTS.md` or `.codex/instructions.md` exists, it takes
-priority over the global file.
+`~/.codex/AGENTS.md` — a single self-contained file with the same structure as
+`GEMINI.md` above, adapted to Codex CLI conventions. Project-level `AGENTS.md`
+files take priority over the global file.
 
 ## Cursor IDE Kit
 
@@ -292,7 +291,7 @@ settings are preserved byte-for-byte.
 | Claude Code | JSON | `json_defaults_strategy` | `~/.claude/settings.json`; skips `env` and secret keys |
 | OpenCode | JSONC | `jsonc_defaults_strategy` | `~/.config/opencode/opencode.jsonc`; skips 14 local-only keys + 6 secret substrings |
 | Codex CLI | TOML | `toml_block_merge_strategy` | `~/.codex/config.toml`; inserts/replaces `[mcp_servers.qmd]` block only |
-| Cursor | — | vault sample only | `.mdc` snippet under `wiki/agent-snippets/cursor/`; never writes global `~/.cursor/rules` |
+| Cursor | JSON + MDC | `cursor_hook_merge_strategy` + kit-owned rule copy | `~/.cursor/hooks.json` sessionStart entry + `~/.cursor/rules/second-brain.mdc` |
 | Hermes | — | docs/sample only | No config mutation anywhere; ship docs only |
 
 ### qmd policy

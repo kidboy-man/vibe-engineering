@@ -559,8 +559,8 @@ CLAUDE_PERSONA_SECTION = PersonaSection(
     "CLAUDE.md", lambda p: p.claude_dir / "CLAUDE.md", "claude_md_section.md", CLAUDE_MD_BEGIN_MARKER, CLAUDE_MD_END_MARKER
 )
 CODEX_PERSONA_SECTION = PersonaSection(
-    "instructions.md",
-    lambda p: p.codex_dir / "instructions.md",
+    "AGENTS.md",
+    lambda p: p.codex_dir / "AGENTS.md",
     "codex_instructions_section.md",
     CODEX_INSTRUCTIONS_BEGIN_MARKER,
     CODEX_INSTRUCTIONS_END_MARKER,
@@ -667,7 +667,7 @@ def _merge_claude_md_section(paths: KitPaths) -> None:
 
 
 def _merge_codex_instructions_section(paths: KitPaths) -> None:
-    """Merge the second-brain marked section into ~/.codex/instructions.md."""
+    """Merge the second-brain marked section into ~/.codex/AGENTS.md."""
     _merge_persona_section(paths, CODEX_PERSONA_SECTION)
 
 
@@ -1449,13 +1449,21 @@ def uninstall(
     if codex_hook_script_path.exists():
         specs.append((codex_hook_script_path, "second-brain SessionStart hook script (codex)", None))
 
-    codex_instructions_path = paths.codex_dir / "instructions.md"
-    if _marked_section_present(codex_instructions_path, CODEX_INSTRUCTIONS_BEGIN_MARKER):
+    codex_agents_path = paths.codex_dir / "AGENTS.md"
+    if _marked_section_present(codex_agents_path, CODEX_INSTRUCTIONS_BEGIN_MARKER):
 
-        def _mutate_codex_instructions(text: str) -> tuple[str | None, bool]:
+        def _mutate_codex_agents(text: str) -> tuple[str | None, bool]:
             return ms.strip_marked_section(text, CODEX_INSTRUCTIONS_BEGIN_MARKER, CODEX_INSTRUCTIONS_END_MARKER)
 
-        specs.append((codex_instructions_path, "second-brain section from instructions.md", _mutate_codex_instructions))
+        specs.append((codex_agents_path, "second-brain section from AGENTS.md", _mutate_codex_agents))
+
+    legacy_codex_instructions_path = paths.codex_dir / "instructions.md"
+    if _marked_section_present(legacy_codex_instructions_path, CODEX_INSTRUCTIONS_BEGIN_MARKER):
+
+        def _mutate_legacy_codex_instructions(text: str) -> tuple[str | None, bool]:
+            return ms.strip_marked_section(text, CODEX_INSTRUCTIONS_BEGIN_MARKER, CODEX_INSTRUCTIONS_END_MARKER)
+
+        specs.append((legacy_codex_instructions_path, "legacy second-brain section from instructions.md", _mutate_legacy_codex_instructions))
 
     cursor_hooks_path = paths.cursor_dir / "hooks.json"
     if cursor_hooks_path.exists() and _cursor_hook_already_installed(paths):

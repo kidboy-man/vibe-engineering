@@ -22,3 +22,5 @@ dist/
 #AI assistant
 .omo
 .understand-anything
+.codegraph/
+.cursor/rules/
