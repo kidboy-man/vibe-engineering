@@ -1,2 +1,6 @@
-recursive-include agents/kits/claude-code/templates *
+recursive-include agents/kits/claude_code/templates *
 recursive-include agents/kits/opencode/templates *
+recursive-include agents/kits/second_brain/templates *
+recursive-include agents/kits/codex/templates *
+recursive-include agents/kits/gemini/templates *
+recursive-include agents/kits/cursor/templates *
