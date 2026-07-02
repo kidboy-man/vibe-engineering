@@ -113,6 +113,11 @@ class CliHelpContractTests(unittest.TestCase):
             "kits_second_brain_uninstall_help.txt", "kits", "second-brain", "uninstall"
         )
 
+    def test_kits_second_brain_enable_hook_help(self):
+        self._assert_matches_fixture(
+            "kits_second_brain_enable_hook_help.txt", "kits", "second-brain", "enable-hook"
+        )
+
 
 class CliDispatchContractTests(unittest.TestCase):
     """Characterization tests for CLI argument dispatching.
@@ -139,6 +144,35 @@ class CliDispatchContractTests(unittest.TestCase):
     def test_kits_unknown_kit_exits_nonzero(self):
         result = subprocess.run(
             [sys.executable, "-m", "agents.cli", "kits", "no-such-kit"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+
+class SecondBrainCliEnableHookWiringTests(unittest.TestCase):
+    """Only kits with KitSpec.enable_hook set gain an enable-hook subcommand."""
+
+    def test_second_brain_has_enable_hook_subcommand(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "agents.cli", "kits", "second-brain", "enable-hook", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("enable-hook", result.stdout)
+
+    def test_claude_code_has_no_enable_hook_subcommand(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "agents.cli", "kits", "claude-code", "enable-hook", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_opencode_has_no_enable_hook_subcommand(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "agents.cli", "kits", "opencode", "enable-hook", "--help"],
             capture_output=True,
             text=True,
         )

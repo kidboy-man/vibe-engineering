@@ -38,6 +38,7 @@ from agents.kits.opencode.installer import (
 from agents.kits.second_brain.installer import (
     diff_kit as second_brain_diff,
     doctor as second_brain_doctor,
+    enable_hook as second_brain_enable_hook,
     install as second_brain_install,
     uninstall as second_brain_uninstall,
 )
@@ -51,6 +52,7 @@ class KitSpec:
     diff: Callable
     doctor: Callable
     uninstall: Callable
+    enable_hook: Callable | None = None
 
 
 KITS: dict[str, KitSpec] = {
@@ -77,6 +79,7 @@ KITS: dict[str, KitSpec] = {
         diff=second_brain_diff,
         doctor=second_brain_doctor,
         uninstall=second_brain_uninstall,
+        enable_hook=second_brain_enable_hook,
     ),
     "gemini": KitSpec(
         name="gemini",

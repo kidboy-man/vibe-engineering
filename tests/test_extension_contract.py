@@ -85,6 +85,17 @@ class ExtensionContractTests(unittest.TestCase):
                 rc = main(["kits", "fake-kit", "doctor"])
         self.assertEqual(rc, 0)
 
+    def test_fake_kit_without_enable_hook_has_no_enable_hook_subcommand(self) -> None:
+        """KitSpec.enable_hook defaults to None; such kits gain no extra verb."""
+        fake = _fake_kit_spec()
+        self.assertIsNone(fake.enable_hook)
+        injected: Mapping[str, KitSpec] = {**KITS, "fake-kit": fake}
+        parser = build_parser(kit_specs=injected)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            with self.assertRaises(SystemExit) as cm:
+                parser.parse_args(["kits", "fake-kit", "enable-hook", "--help"])
+            self.assertNotEqual(cm.exception.code, 0)
+
     def test_no_cli_source_edit_required(self) -> None:
         """CLI source must not hard-code kit names; dispatch is registry-driven."""
         cli_source = Path(__file__).resolve().parent.parent / "agents" / "cli.py"

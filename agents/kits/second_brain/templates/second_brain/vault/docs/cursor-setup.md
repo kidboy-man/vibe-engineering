@@ -26,9 +26,9 @@ The root-level `.cursorrules` file was deprecated in Cursor 0.45. Existing files
 
 If you use multiple AI coding tools (Claude Code, OpenCode, Codex, Cursor), place second-brain instructions in the project's `AGENTS.md` file instead. All agents read `AGENTS.md` automatically. This avoids maintaining separate rule files per tool.
 
-## Do Not Use: Global Rules
+## Global Rules
 
-**Never use `~/.cursor/rules`** for vault configuration. Global rules are unstable across Cursor versions and can cause unexpected behavior in unrelated projects. Always scope vault rules to specific projects via `.cursor/rules/`.
+`second-brain install` / `enable-hook` manages exactly one global file, `~/.cursor/rules/second-brain.mdc` (`alwaysApply: true`), plus one `sessionStart` entry in `~/.cursor/hooks.json` that auto-loads `wiki/hot.md` + `wiki/index.md` into every session. Both are idempotent and uninstall-reversible — the rule file is only removed on uninstall if it still matches the template (hand edits are kept). This is a kit-owned exception to the general "avoid ad hoc global rules" guidance above: it's scoped to exactly these two entries and safe to remove at any time via `vibe kits second-brain uninstall`. Do not hand-add your own additional global rules beyond what the kit manages — prefer project-local `.cursor/rules/` for anything else.
 
 ## What the Rule File Does
 
