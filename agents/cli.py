@@ -9,7 +9,6 @@ from typing import Mapping
 
 from agents.kit_registry import KITS, KitSpec
 
-GIT_SOURCE_URL = "git+https://github.com/kidboy-man/vibe-engineering.git"
 PYPI_PACKAGE = "vibe-kits"
 
 
@@ -32,10 +31,9 @@ def _run(cmd: list[str]) -> int:
 def cmd_upgrade(_args: argparse.Namespace) -> int:
     if _is_pipx():
         if _has_pip():
-            # --force-reinstall so pip doesn't skip VCS packages with same version string
-            return _run([sys.executable, "-m", "pip", "install", "--force-reinstall", GIT_SOURCE_URL])
+            return _run([sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE])
         # pipx+uv venvs have no pip — fall back to pipx which manages the venv itself
-        return _run(["pipx", "install", "--force", GIT_SOURCE_URL])
+        return _run(["pipx", "upgrade", PYPI_PACKAGE])
     return _run([sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE])
 
 

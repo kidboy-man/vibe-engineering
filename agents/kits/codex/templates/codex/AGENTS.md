@@ -284,4 +284,4 @@ Final responses should include:
 - assumptions
 - remaining risks or unverified areas
 
-If project-specific `AGENTS.md` or `.codex/instructions.md` files exist, treat them as higher-priority context for that project.
+If project-specific `AGENTS.md` files exist, treat them as higher-priority context for that project.

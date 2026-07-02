@@ -2,6 +2,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -148,6 +149,43 @@ class CliDispatchContractTests(unittest.TestCase):
             text=True,
         )
         self.assertNotEqual(result.returncode, 0)
+
+    def test_upgrade_uses_pip_upgrade_when_pip_available(self):
+        from agents.cli import PYPI_PACKAGE, cmd_upgrade
+
+        with patch("agents.cli._is_pipx", return_value=True), patch(
+            "agents.cli._has_pip", return_value=True
+        ), patch("agents.cli._run", return_value=0) as run:
+            rc = cmd_upgrade(None)
+
+        self.assertEqual(rc, 0)
+        run.assert_called_once_with(
+            [sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE]
+        )
+
+    def test_upgrade_uses_pipx_upgrade_when_pipx_venv_has_no_pip(self):
+        from agents.cli import PYPI_PACKAGE, cmd_upgrade
+
+        with patch("agents.cli._is_pipx", return_value=True), patch(
+            "agents.cli._has_pip", return_value=False
+        ), patch("agents.cli._run", return_value=0) as run:
+            rc = cmd_upgrade(None)
+
+        self.assertEqual(rc, 0)
+        run.assert_called_once_with(["pipx", "upgrade", PYPI_PACKAGE])
+
+    def test_upgrade_uses_pip_upgrade_for_non_pipx_install(self):
+        from agents.cli import PYPI_PACKAGE, cmd_upgrade
+
+        with patch("agents.cli._is_pipx", return_value=False), patch(
+            "agents.cli._run", return_value=0
+        ) as run:
+            rc = cmd_upgrade(None)
+
+        self.assertEqual(rc, 0)
+        run.assert_called_once_with(
+            [sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE]
+        )
 
 
 class SecondBrainCliEnableHookWiringTests(unittest.TestCase):

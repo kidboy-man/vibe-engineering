@@ -1,7 +1,7 @@
 """Safe installer for the portable Codex CLI kit.
 
-Manages only portable files: instructions.md with embedded engineering persona,
-rules, and specialist role descriptions. Never copies API keys, auth tokens, or
+Manages only portable files: AGENTS.md with embedded engineering persona, rules,
+and specialist role descriptions. Never copies API keys, auth tokens, or
 machine-specific configuration.
 """
 

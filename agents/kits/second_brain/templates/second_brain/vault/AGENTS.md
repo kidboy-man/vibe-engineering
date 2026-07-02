@@ -74,7 +74,7 @@ qmd search "your query" --semantic
 ### Codex CLI
 - Symlink skills from `.claude/skills/` into `~/.codex/skills/`.
 - Register qmd MCP in `~/.codex/config.toml`.
-- **Global proactive wiring:** `second-brain install` / `enable-hook` registers a `SessionStart` hook (`[[hooks.SessionStart]]` in `~/.codex/config.toml`) that auto-loads `wiki/hot.md` + `wiki/index.md` into every session, plus a marked section in `~/.codex/instructions.md`. Both idempotent and reversible via `uninstall`.
+- **Global proactive wiring:** `second-brain install` / `enable-hook` registers a `SessionStart` hook (`[[hooks.SessionStart]]` in `~/.codex/config.toml`) that auto-loads `wiki/hot.md` + `wiki/index.md` into every session, plus a marked section in `~/.codex/AGENTS.md`. Both idempotent and reversible via `uninstall`.
 
 ### Hermes
 - Uses filesystem-first access via native file tools. Set `OBSIDIAN_VAULT_PATH` in `.env` or `.bashrc`.
