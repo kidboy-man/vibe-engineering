@@ -421,5 +421,359 @@ class EnvMarkedMergeTests(unittest.TestCase):
         self.assertEqual(remaining, existing)
 
 
+class HookCommandMergeStrategyTests(unittest.TestCase):
+    """SessionStart (or any event) hook command merge.
+
+    ``ms.hook_command_merge_strategy(settings, event, command)`` appends a new
+    ``{"hooks": [{"type": "command", "command": command}]}`` group to
+    ``settings["hooks"][event]`` only if no existing group in that event
+    already contains an entry with that exact ``command`` string. Dedupe key
+    is command-string equality, independent of ``matcher`` presence.
+    """
+
+    EVENT = "SessionStart"
+    COMMAND = 'python3 "/home/user/.claude/hooks/second-brain-context.py"'
+
+    def test_adds_group_when_hooks_key_absent(self):
+        merged, changed = ms.hook_command_merge_strategy({}, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        groups = merged["hooks"][self.EVENT]
+        commands = [h["command"] for g in groups for h in g["hooks"]]
+        self.assertIn(self.COMMAND, commands)
+
+    def test_adds_event_when_hooks_key_present_but_event_absent(self):
+        current = {"hooks": {"PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "other"}]}]}}
+        merged, changed = ms.hook_command_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        self.assertEqual(len(merged["hooks"]["PreToolUse"]), 1)
+        self.assertEqual(merged["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "other")
+        commands = [h["command"] for g in merged["hooks"][self.EVENT] for h in g["hooks"]]
+        self.assertIn(self.COMMAND, commands)
+
+    def test_appends_new_group_preserving_existing_sessionstart_groups(self):
+        current = {
+            "hooks": {
+                self.EVENT: [
+                    {"hooks": [{"type": "command", "command": "node \"/home/user/.claude/hooks/caveman-activate.js\"", "timeout": 5}]}
+                ]
+            }
+        }
+        merged, changed = ms.hook_command_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        groups = merged["hooks"][self.EVENT]
+        self.assertEqual(len(groups), 2)
+        # Original group preserved byte-for-byte (same dict content, same position)
+        self.assertEqual(groups[0], current["hooks"][self.EVENT][0])
+        commands = [h["command"] for g in groups for h in g["hooks"]]
+        self.assertIn("node \"/home/user/.claude/hooks/caveman-activate.js\"", commands)
+        self.assertIn(self.COMMAND, commands)
+
+    def test_idempotent_reinstall_no_duplicate(self):
+        merged1, changed1 = ms.hook_command_merge_strategy({}, self.EVENT, self.COMMAND)
+        self.assertTrue(changed1)
+        merged2, changed2 = ms.hook_command_merge_strategy(merged1, self.EVENT, self.COMMAND)
+        self.assertFalse(changed2)
+        commands = [h["command"] for g in merged2["hooks"][self.EVENT] for h in g["hooks"]]
+        self.assertEqual(commands.count(self.COMMAND), 1)
+
+    def test_tolerates_group_with_matcher_key(self):
+        current = {"hooks": {self.EVENT: [{"matcher": "", "hooks": [{"type": "command", "command": self.COMMAND}]}]}}
+        merged, changed = ms.hook_command_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+
+    def test_tolerates_group_without_matcher_key(self):
+        current = {"hooks": {self.EVENT: [{"hooks": [{"type": "command", "command": self.COMMAND}]}]}}
+        merged, changed = ms.hook_command_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+
+    def test_noop_when_hooks_not_dict(self):
+        current = {"hooks": "not-a-dict"}
+        merged, changed = ms.hook_command_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+        self.assertEqual(merged, current)
+
+    def test_noop_when_event_not_list(self):
+        current = {"hooks": {self.EVENT: "not-a-list"}}
+        merged, changed = ms.hook_command_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+        self.assertEqual(merged, current)
+
+    def test_preserves_other_top_level_keys(self):
+        current = {"model": "opus", "permissions": {"allow": ["Bash"]}}
+        merged, changed = ms.hook_command_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        self.assertEqual(merged["model"], "opus")
+        self.assertEqual(merged["permissions"], {"allow": ["Bash"]})
+
+
+class StripHookCommandTests(unittest.TestCase):
+    EVENT = "SessionStart"
+    COMMAND = 'python3 "/home/user/.claude/hooks/second-brain-context.py"'
+    OTHER_COMMAND = 'node "/home/user/.claude/hooks/caveman-activate.js"'
+
+    def test_removes_only_matching_command_preserves_others_same_event(self):
+        current = {
+            "hooks": {
+                self.EVENT: [
+                    {"hooks": [{"type": "command", "command": self.OTHER_COMMAND}]},
+                    {"hooks": [{"type": "command", "command": self.COMMAND}]},
+                ]
+            }
+        }
+        merged, changed = ms.strip_hook_command(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        groups = merged["hooks"][self.EVENT]
+        commands = [h["command"] for g in groups for h in g["hooks"]]
+        self.assertIn(self.OTHER_COMMAND, commands)
+        self.assertNotIn(self.COMMAND, commands)
+
+    def test_prunes_empty_group_and_event_and_hooks_key(self):
+        current = {"hooks": {self.EVENT: [{"hooks": [{"type": "command", "command": self.COMMAND}]}]}}
+        merged, changed = ms.strip_hook_command(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        self.assertNotIn("hooks", merged)
+
+    def test_preserves_unrelated_events(self):
+        current = {
+            "hooks": {
+                self.EVENT: [{"hooks": [{"type": "command", "command": self.COMMAND}]}],
+                "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "other"}]}],
+            }
+        }
+        merged, changed = ms.strip_hook_command(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        self.assertNotIn(self.EVENT, merged["hooks"])
+        self.assertIn("PreToolUse", merged["hooks"])
+        self.assertEqual(merged["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "other")
+
+    def test_noop_when_command_absent(self):
+        current = {"hooks": {self.EVENT: [{"hooks": [{"type": "command", "command": self.OTHER_COMMAND}]}]}}
+        merged, changed = ms.strip_hook_command(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+        self.assertEqual(merged, current)
+
+    def test_noop_when_hooks_absent(self):
+        current = {"model": "opus"}
+        merged, changed = ms.strip_hook_command(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+        self.assertEqual(merged, current)
+
+
+class CursorHookMergeStrategyTests(unittest.TestCase):
+    """Cursor's flat hooks.json shape.
+
+    ``ms.cursor_hook_merge_strategy(hooks_config, event, command)`` appends a
+    plain ``{"command": command}`` entry to ``hooks_config["hooks"][event]``
+    (no nested groups, unlike Claude/Gemini's shape) only if no existing entry
+    in that event already has that exact ``command`` string.
+    """
+
+    EVENT = "sessionStart"
+    COMMAND = 'python3 "/home/user/.cursor/hooks/second-brain-context.py" --format=cursor'
+
+    def test_adds_entry_when_hooks_key_absent(self):
+        merged, changed = ms.cursor_hook_merge_strategy({}, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        entries = merged["hooks"][self.EVENT]
+        self.assertIn(self.COMMAND, [e["command"] for e in entries])
+
+    def test_sets_version_1_when_creating_hooks_fresh(self):
+        merged, changed = ms.cursor_hook_merge_strategy({}, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        self.assertEqual(merged["version"], 1)
+
+    def test_preserves_existing_version(self):
+        current = {"version": 3, "hooks": {}}
+        merged, changed = ms.cursor_hook_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        self.assertEqual(merged["version"], 3)
+
+    def test_appends_entry_preserving_existing_sessionstart_entries(self):
+        current = {"version": 1, "hooks": {self.EVENT: [{"command": "other-cmd"}]}}
+        merged, changed = ms.cursor_hook_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        entries = merged["hooks"][self.EVENT]
+        self.assertEqual(len(entries), 2)
+        commands = [e["command"] for e in entries]
+        self.assertIn("other-cmd", commands)
+        self.assertIn(self.COMMAND, commands)
+
+    def test_idempotent_reinstall_no_duplicate(self):
+        merged1, changed1 = ms.cursor_hook_merge_strategy({}, self.EVENT, self.COMMAND)
+        self.assertTrue(changed1)
+        merged2, changed2 = ms.cursor_hook_merge_strategy(merged1, self.EVENT, self.COMMAND)
+        self.assertFalse(changed2)
+        entries = merged2["hooks"][self.EVENT]
+        self.assertEqual([e["command"] for e in entries].count(self.COMMAND), 1)
+
+    def test_preserves_unrelated_events(self):
+        current = {"version": 1, "hooks": {"stop": [{"command": "other"}]}}
+        merged, changed = ms.cursor_hook_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        self.assertEqual(merged["hooks"]["stop"], [{"command": "other"}])
+
+    def test_dedupe_ignores_extra_keys_on_existing_entries(self):
+        current = {"hooks": {self.EVENT: [{"command": "other", "type": "prompt"}]}}
+        merged, changed = ms.cursor_hook_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        commands = [e["command"] for e in merged["hooks"][self.EVENT]]
+        self.assertIn(self.COMMAND, commands)
+        self.assertIn("other", commands)
+
+    def test_noop_when_hooks_not_dict(self):
+        current = {"hooks": "not-a-dict"}
+        merged, changed = ms.cursor_hook_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+        self.assertEqual(merged, current)
+
+    def test_noop_when_event_not_list(self):
+        current = {"hooks": {self.EVENT: "not-a-list"}}
+        merged, changed = ms.cursor_hook_merge_strategy(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+        self.assertEqual(merged, current)
+
+
+class StripCursorHookTests(unittest.TestCase):
+    EVENT = "sessionStart"
+    COMMAND = 'python3 "/home/user/.cursor/hooks/second-brain-context.py" --format=cursor'
+    OTHER_COMMAND = "other-cmd"
+
+    def test_removes_only_matching_command_preserves_others_same_event(self):
+        current = {
+            "version": 1,
+            "hooks": {self.EVENT: [{"command": self.OTHER_COMMAND}, {"command": self.COMMAND}]},
+        }
+        merged, changed = ms.strip_cursor_hook(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        commands = [e["command"] for e in merged["hooks"][self.EVENT]]
+        self.assertIn(self.OTHER_COMMAND, commands)
+        self.assertNotIn(self.COMMAND, commands)
+
+    def test_prunes_empty_event_and_hooks_key_preserves_version(self):
+        current = {"version": 1, "hooks": {self.EVENT: [{"command": self.COMMAND}]}}
+        merged, changed = ms.strip_cursor_hook(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        self.assertNotIn("hooks", merged)
+        self.assertEqual(merged["version"], 1)
+
+    def test_preserves_unrelated_events(self):
+        current = {
+            "hooks": {
+                self.EVENT: [{"command": self.COMMAND}],
+                "stop": [{"command": "other"}],
+            }
+        }
+        merged, changed = ms.strip_cursor_hook(current, self.EVENT, self.COMMAND)
+        self.assertTrue(changed)
+        self.assertNotIn(self.EVENT, merged["hooks"])
+        self.assertEqual(merged["hooks"]["stop"], [{"command": "other"}])
+
+    def test_noop_when_command_absent(self):
+        current = {"hooks": {self.EVENT: [{"command": self.OTHER_COMMAND}]}}
+        merged, changed = ms.strip_cursor_hook(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+        self.assertEqual(merged, current)
+
+    def test_noop_when_hooks_absent(self):
+        current = {"version": 1}
+        merged, changed = ms.strip_cursor_hook(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+        self.assertEqual(merged, current)
+
+    def test_noop_when_event_not_list(self):
+        current = {"hooks": {self.EVENT: "not-a-list"}}
+        merged, changed = ms.strip_cursor_hook(current, self.EVENT, self.COMMAND)
+        self.assertFalse(changed)
+        self.assertEqual(merged, current)
+
+
+class CodexHookBlockMergeStrategyTests(unittest.TestCase):
+    """Narrow, literal-substring based merge for Codex's TOML array-of-tables hooks.
+
+    ``ms.codex_hook_block_merge_strategy(block, identity_substring, current)``
+    is intentionally NOT a general TOML array-of-tables parser — it appends an
+    opaque literal *block* of text if *identity_substring* is not already
+    present in *current*.
+    """
+
+    COMMAND = 'python3 "/home/user/.codex/hooks/second-brain-context.py"'
+    IDENTITY = f"command = '{COMMAND}'"
+    BLOCK = (
+        "[[hooks.SessionStart]]\n\n"
+        "[[hooks.SessionStart.hooks]]\n"
+        'type = "command"\n'
+        f"command = '{COMMAND}'\n"
+    )
+
+    def test_creates_file_when_current_none(self):
+        merged, action = ms.codex_hook_block_merge_strategy(self.BLOCK, self.IDENTITY, None)
+        self.assertEqual(action, "create")
+        self.assertEqual(merged, self.BLOCK)
+
+    def test_unchanged_when_identity_substring_present(self):
+        current = "[mcp_servers.qmd]\ntype = \"stdio\"\n\n" + self.BLOCK
+        merged, action = ms.codex_hook_block_merge_strategy(self.BLOCK, self.IDENTITY, current)
+        self.assertEqual(action, "unchanged")
+        self.assertEqual(merged, current)
+
+    def test_appends_block_preserving_existing_content(self):
+        current = '[mcp_servers.qmd]\ntype = "stdio"\ncommand = "qmd"\nargs = ["mcp"]\n'
+        merged, action = ms.codex_hook_block_merge_strategy(self.BLOCK, self.IDENTITY, current)
+        self.assertEqual(action, "merge")
+        self.assertTrue(merged.startswith(current))
+        self.assertIn(self.BLOCK, merged)
+
+    def test_coexists_with_mcp_servers_qmd_toml_section(self):
+        # Regression: appending our AOT block after an existing single-section
+        # block (managed by toml_block_merge_strategy) must not corrupt it.
+        current = '[mcp_servers.qmd]\ntype = "stdio"\ncommand = "qmd"\nargs = ["mcp"]\n'
+        merged, _action = ms.codex_hook_block_merge_strategy(self.BLOCK, self.IDENTITY, current)
+        located = ms._find_toml_section(merged, "[mcp_servers.qmd]")
+        self.assertIsNotNone(located)
+        _before, body, _after = located
+        self.assertIn('command = "qmd"', body)
+
+    def test_blank_line_separation_and_trailing_newline(self):
+        current = "[mcp_servers.qmd]\ntype = \"stdio\"\n"
+        merged, _action = ms.codex_hook_block_merge_strategy(self.BLOCK, self.IDENTITY, current)
+        self.assertTrue(merged.endswith("\n"))
+        self.assertIn(current.rstrip("\n") + "\n\n" + self.BLOCK, merged)
+
+
+class StripCodexHookBlockTests(unittest.TestCase):
+    COMMAND = 'python3 "/home/user/.codex/hooks/second-brain-context.py"'
+    BLOCK = (
+        "[[hooks.SessionStart]]\n\n"
+        "[[hooks.SessionStart.hooks]]\n"
+        'type = "command"\n'
+        f"command = '{COMMAND}'\n"
+    )
+
+    def test_removes_exact_block_leaves_other_content(self):
+        current = '[mcp_servers.qmd]\ntype = "stdio"\n\n' + self.BLOCK
+        remaining, fully_owned = ms.strip_codex_hook_block(current, self.BLOCK)
+        self.assertFalse(fully_owned)
+        self.assertNotIn(self.BLOCK, remaining)
+        self.assertIn('[mcp_servers.qmd]', remaining)
+
+    def test_removing_only_content_returns_none_and_fully_owned(self):
+        remaining, fully_owned = ms.strip_codex_hook_block(self.BLOCK, self.BLOCK)
+        self.assertIsNone(remaining)
+        self.assertTrue(fully_owned)
+
+    def test_noop_when_block_not_found_verbatim(self):
+        current = '[mcp_servers.qmd]\ntype = "stdio"\n'
+        remaining, fully_owned = ms.strip_codex_hook_block(current, self.BLOCK)
+        self.assertEqual(remaining, current)
+        self.assertFalse(fully_owned)
+
+    def test_noop_on_hand_edited_block_no_fuzzy_strip(self):
+        hand_edited = self.BLOCK.replace('type = "command"', 'type = "command"  # edited')
+        current = '[mcp_servers.qmd]\ntype = "stdio"\n\n' + hand_edited
+        remaining, fully_owned = ms.strip_codex_hook_block(current, self.BLOCK)
+        self.assertEqual(remaining, current)
+        self.assertFalse(fully_owned)
+
+
 if __name__ == "__main__":
     unittest.main()

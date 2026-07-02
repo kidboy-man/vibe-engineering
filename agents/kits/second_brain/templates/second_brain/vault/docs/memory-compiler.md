@@ -74,5 +74,5 @@ Memory-compiler writes daily logs and state JSON files. Add these to `.gitignore
 ## Warnings
 
 - **Token cost**: Hooks run on every session start/end. This adds latency and token usage to every Claude Code session.
-- **Claude Code only**: This add-on only works with Claude Code. Other agents (OpenCode, Codex, Hermes, Cursor) do not support these hooks.
+- **Claude Code only**: This add-on only works with Claude Code. Other agents (OpenCode, Codex, Hermes, Cursor) do not support these hooks. (This is separate from vibe-engineering's own proactive-context wiring — `second-brain install` / `enable-hook` — which also supports Codex CLI and Cursor via each agent's own hook mechanism, and OpenCode via an AGENTS.md section with no hook. See `AGENTS.md`'s "Supported AI Agents" section.)
 - **No auto-config**: This kit does not automatically install or configure memory-compiler. Follow the steps above manually if you want it.

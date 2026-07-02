@@ -63,6 +63,7 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
         install_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
         install_parser.add_argument("--no-settings", action="store_true", help="Do not merge the safe settings fragment")
         install_parser.add_argument("--no-setup-deps", action="store_true", help="Do not auto-install qmd or other dependencies")
+        install_parser.add_argument("--no-hooks", action="store_true", help="Skip the proactive SessionStart hook / CLAUDE.md prompt")
 
         diff_parser = kit_sub.add_parser("diff", help="Show file-level differences for managed files")
         diff_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
@@ -74,6 +75,12 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
         uninstall_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
         uninstall_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
         uninstall_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
+
+        if kit.enable_hook is not None:
+            enable_hook_parser = kit_sub.add_parser("enable-hook", help="Enable proactive context wiring (SessionStart hook + persona section) for Claude Code, Codex CLI, Cursor, and OpenCode")
+            enable_hook_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
+            enable_hook_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
+            enable_hook_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
 
     return parser
 
@@ -98,13 +105,15 @@ def main(argv: list[str] | None = None) -> int:
         sub_command_attr = f"{kit.name}_command"
         sub_command = getattr(args, sub_command_attr, None)
         if sub_command == "install":
-            return kit.install(home=args.home, dry_run=args.dry_run, yes=args.yes, merge_settings=not args.no_settings, setup_deps=not args.no_setup_deps)
+            return kit.install(home=args.home, dry_run=args.dry_run, yes=args.yes, merge_settings=not args.no_settings, setup_deps=not args.no_setup_deps, enable_hooks=not args.no_hooks)
         if sub_command == "diff":
             return kit.diff(home=args.home)
         if sub_command == "doctor":
             return kit.doctor(home=args.home)
         if sub_command == "uninstall":
             return kit.uninstall(home=args.home, dry_run=args.dry_run, yes=args.yes)
+        if sub_command == "enable-hook" and kit.enable_hook is not None:
+            return kit.enable_hook(home=args.home, dry_run=args.dry_run, yes=args.yes)
 
     parser.error("unsupported command")
     return 2

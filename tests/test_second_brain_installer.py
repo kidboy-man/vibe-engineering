@@ -25,6 +25,25 @@ try:
         _is_legacy_kit_owned_qmd_mcp,
         _is_expected_opencode_qmd_mcp,
         _merge_opencode_qmd_mcp,
+        _hook_command,
+        _hook_already_installed,
+        _enable_proactive_context,
+        _offer_proactive_context,
+        _codex_hook_command,
+        _codex_hook_already_installed,
+        _cursor_hook_command,
+        _cursor_hook_already_installed,
+        enable_hook,
+        HOOK_SCRIPT_REL,
+        SESSIONSTART_EVENT,
+        CURSOR_SESSIONSTART_EVENT,
+        CURSOR_RULE_REL,
+        CLAUDE_MD_BEGIN_MARKER,
+        CLAUDE_MD_END_MARKER,
+        CODEX_INSTRUCTIONS_BEGIN_MARKER,
+        CODEX_INSTRUCTIONS_END_MARKER,
+        OPENCODE_AGENTS_BEGIN_MARKER,
+        OPENCODE_AGENTS_END_MARKER,
     )
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest(f"second_brain installer unavailable: {exc}") from exc
@@ -85,6 +104,7 @@ class SecondBrainPathsTests(unittest.TestCase):
             self.assertEqual(paths.claude_dir, home / ".claude")
             self.assertEqual(paths.opencode_config_dir, home / ".config" / "opencode")
             self.assertEqual(paths.codex_dir, home / ".codex")
+            self.assertEqual(paths.cursor_dir, home / ".cursor")
 
 
 class SecondBrainDryRunTests(unittest.TestCase):
@@ -1757,6 +1777,1086 @@ class SecondBrainMarkerSafetyTests(unittest.TestCase):
         self.assertNotIn("<!--", raw)
         self.assertNotIn("-->", raw)
         self.assertNotIn("vibe-engineering-kit", raw)
+
+
+class SecondBrainSessionHookInstallTests(unittest.TestCase):
+    """SessionStart hook script + settings.json registration during install()."""
+
+    def test_install_writes_hook_script_and_registers_command(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            script_path = paths.claude_dir / HOOK_SCRIPT_REL
+            self.assertTrue(script_path.is_file(), "hook script not installed")
+            settings = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            commands = [
+                h["command"]
+                for g in settings["hooks"][SESSIONSTART_EVENT]
+                for h in g["hooks"]
+            ]
+            self.assertIn(_hook_command(paths), commands)
+
+    def test_install_idempotent_reinstall_no_duplicate_hook_entry(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            settings = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            commands = [
+                h["command"]
+                for g in settings["hooks"][SESSIONSTART_EVENT]
+                for h in g["hooks"]
+            ]
+            self.assertEqual(commands.count(_hook_command(paths)), 1)
+
+    def test_install_preserves_users_preexisting_sessionstart_hook(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            claude_dir = home / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            other_command = 'node "/home/user/.claude/hooks/caveman-activate.js"'
+            preexisting = {
+                "hooks": {
+                    SESSIONSTART_EVENT: [
+                        {"hooks": [{"type": "command", "command": other_command, "timeout": 5}]}
+                    ]
+                }
+            }
+            (claude_dir / "settings.json").write_text(json.dumps(preexisting), encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            settings = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
+            commands = [
+                h["command"]
+                for g in settings["hooks"][SESSIONSTART_EVENT]
+                for h in g["hooks"]
+            ]
+            self.assertIn(other_command, commands)
+
+    def test_install_preserves_unrelated_events_and_top_level_keys(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            claude_dir = home / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            preexisting = {
+                "model": "opus",
+                "permissions": {"allow": ["Bash"]},
+                "hooks": {"PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "other"}]}]},
+            }
+            (claude_dir / "settings.json").write_text(json.dumps(preexisting), encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            settings = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
+            self.assertEqual(settings["model"], "opus")
+            self.assertEqual(settings["permissions"], {"allow": ["Bash"]})
+            self.assertEqual(settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "other")
+
+    def test_dry_run_writes_no_hook_files_or_settings_changes(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=True, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            self.assertFalse((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+            self.assertFalse((paths.claude_dir / "settings.json").exists())
+
+    def test_install_skips_hook_registration_on_invalid_settings_json(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            claude_dir = home / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            (claude_dir / "settings.json").write_text("{not valid json", encoding="utf-8")
+
+            result = install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            self.assertEqual(result, 1)
+            self.assertEqual(
+                (claude_dir / "settings.json").read_text(encoding="utf-8"), "{not valid json"
+            )
+
+    def test_hook_command_is_absolute_path_stable_across_reinstall(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            settings1 = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            cmd1 = settings1["hooks"][SESSIONSTART_EVENT][-1]["hooks"][0]["command"]
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            settings2 = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            cmd2 = settings2["hooks"][SESSIONSTART_EVENT][-1]["hooks"][0]["command"]
+
+            self.assertEqual(cmd1, cmd2)
+            self.assertIn(str(paths.claude_dir / HOOK_SCRIPT_REL), cmd1)
+
+
+class SecondBrainClaudeMdSectionTests(unittest.TestCase):
+    """~/.claude/CLAUDE.md marked-section merge during install()."""
+
+    def test_install_creates_claude_md_with_section_when_absent(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            claude_md = (home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertIn(CLAUDE_MD_BEGIN_MARKER, claude_md)
+            self.assertIn(CLAUDE_MD_END_MARKER, claude_md)
+            self.assertIn("Second-Brain Vault", claude_md)
+
+    def test_install_merges_section_preserving_users_preexisting_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            claude_dir = home / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            (claude_dir / "CLAUDE.md").write_text("# My Personal Rules\nBe terse.\n", encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            claude_md = (claude_dir / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertIn("# My Personal Rules", claude_md)
+            self.assertIn("Be terse.", claude_md)
+            self.assertIn(CLAUDE_MD_BEGIN_MARKER, claude_md)
+
+    def test_install_idempotent_reinstall_no_duplicate_section(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            claude_md = (home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertEqual(claude_md.count(CLAUDE_MD_BEGIN_MARKER), 1)
+            self.assertEqual(claude_md.count(CLAUDE_MD_END_MARKER), 1)
+
+    def test_install_updates_stale_section_on_reinstall(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            claude_dir = home / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            stale = CLAUDE_MD_BEGIN_MARKER + "stale old content\n" + CLAUDE_MD_END_MARKER
+            (claude_dir / "CLAUDE.md").write_text(stale, encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            claude_md = (claude_dir / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertNotIn("stale old content", claude_md)
+            self.assertIn("Second-Brain Vault", claude_md)
+
+    def test_dry_run_writes_no_claude_md_changes(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=True, yes=True, setup_deps=False)
+            self.assertFalse((home / ".claude" / "CLAUDE.md").exists())
+
+
+class SecondBrainHookPromptTests(unittest.TestCase):
+    """Interactive accept/decline behavior for the hook + CLAUDE.md offer."""
+
+    def test_declines_skips_wiring_and_prints_hint(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            paths = _paths(home=str(home))
+            paths.claude_dir.mkdir(parents=True, exist_ok=True)
+            buf = io.StringIO()
+            with patch("agents.kits.second_brain.installer._confirm", return_value=False):
+                with redirect_stdout(buf):
+                    from agents.kits.second_brain.installer import _offer_proactive_context
+                    _offer_proactive_context(paths, yes=False)
+            output = buf.getvalue()
+            self.assertIn("enable-hook", output)
+            self.assertFalse((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+            self.assertFalse((paths.claude_dir / "CLAUDE.md").exists())
+
+    def test_accepts_enables_wiring(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            paths = _paths(home=str(home))
+            paths.claude_dir.mkdir(parents=True, exist_ok=True)
+            with patch("agents.kits.second_brain.installer._confirm", return_value=True):
+                from agents.kits.second_brain.installer import _offer_proactive_context
+                _offer_proactive_context(paths, yes=False)
+            self.assertTrue((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.claude_dir / "CLAUDE.md").exists())
+
+    def test_yes_bypasses_prompt_and_enables(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            paths = _paths(home=str(home))
+            paths.claude_dir.mkdir(parents=True, exist_ok=True)
+            with patch("agents.kits.second_brain.installer._confirm") as mock_confirm:
+                from agents.kits.second_brain.installer import _offer_proactive_context
+                _offer_proactive_context(paths, yes=True)
+                mock_confirm.assert_not_called()
+            self.assertTrue((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+
+    def test_already_installed_is_silent_no_prompt(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            with patch("agents.kits.second_brain.installer._confirm") as mock_confirm:
+                from agents.kits.second_brain.installer import _offer_proactive_context
+                _offer_proactive_context(paths, yes=False)
+                mock_confirm.assert_not_called()
+
+    def test_no_hooks_flag_skips_prompt_entirely(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            with patch("agents.kits.second_brain.installer.core.confirm", return_value=True):
+                with patch("agents.kits.second_brain.installer._confirm") as mock_confirm:
+                    install(home=str(home), dry_run=False, yes=False, setup_deps=False, enable_hooks=False)
+                    mock_confirm.assert_not_called()
+            paths = _paths(home=str(home))
+            self.assertFalse((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+
+    def test_install_prints_fresh_vs_existing_state(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            self.assertIn("fresh install", buf.getvalue())
+
+            buf2 = io.StringIO()
+            with redirect_stdout(buf2):
+                install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            self.assertIn("existing installation detected", buf2.getvalue())
+
+
+class SecondBrainEnableHookCommandTests(unittest.TestCase):
+    """Standalone enable_hook() verb — independent of vault install."""
+
+    def test_enable_hook_works_without_vault_installed(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            result = enable_hook(home=str(home), dry_run=False, yes=True)
+            self.assertEqual(result, 0)
+            paths = _paths(home=str(home))
+            self.assertTrue((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.claude_dir / "CLAUDE.md").exists())
+
+    def test_enable_hook_idempotent(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            enable_hook(home=str(home), dry_run=False, yes=True)
+            enable_hook(home=str(home), dry_run=False, yes=True)
+            paths = _paths(home=str(home))
+            claude_md = (paths.claude_dir / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertEqual(claude_md.count(CLAUDE_MD_BEGIN_MARKER), 1)
+
+    def test_enable_hook_dry_run_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            result = enable_hook(home=str(home), dry_run=True, yes=True)
+            self.assertEqual(result, 0)
+            paths = _paths(home=str(home))
+            self.assertFalse((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+
+    def test_enable_hook_respects_yes_false_decline(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            with patch("agents.kits.second_brain.installer._confirm", return_value=False):
+                result = enable_hook(home=str(home), dry_run=False, yes=False)
+            self.assertEqual(result, 0)
+            paths = _paths(home=str(home))
+            self.assertFalse((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+
+
+class SecondBrainUninstallProactiveWiringTests(unittest.TestCase):
+    """uninstall() strips only kit-owned hook/CLAUDE.md wiring."""
+
+    def test_uninstall_strips_only_kit_hook_command_from_settings_json(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            claude_dir = home / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            other_command = 'node "/home/user/.claude/hooks/caveman-activate.js"'
+            preexisting = {
+                "hooks": {
+                    SESSIONSTART_EVENT: [
+                        {"hooks": [{"type": "command", "command": other_command}]}
+                    ]
+                }
+            }
+            (claude_dir / "settings.json").write_text(json.dumps(preexisting), encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            settings = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
+            commands = [
+                h["command"]
+                for g in settings.get("hooks", {}).get(SESSIONSTART_EVENT, [])
+                for h in g["hooks"]
+            ]
+            self.assertIn(other_command, commands)
+            paths = _paths(home=str(home))
+            self.assertNotIn(_hook_command(paths), commands)
+
+    def test_uninstall_removes_hook_script_file(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            self.assertTrue((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            self.assertFalse((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+
+    def test_uninstall_strips_claude_md_section_preserves_user_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            claude_dir = home / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            (claude_dir / "CLAUDE.md").write_text("# My Rules\nBe terse.\n", encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            claude_md = (claude_dir / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertIn("# My Rules", claude_md)
+            self.assertNotIn(CLAUDE_MD_BEGIN_MARKER, claude_md)
+            self.assertNotIn("Second-Brain Vault", claude_md)
+
+    def test_uninstall_deletes_claude_md_when_it_was_entirely_kit_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            claude_md_path = paths.claude_dir / "CLAUDE.md"
+            self.assertTrue(claude_md_path.exists())
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            self.assertFalse(claude_md_path.exists())
+
+    def test_uninstall_never_touches_vault_content_git_or_seed_pages(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            vault = home / "second-brain"
+            user_file = vault / "wiki" / "entities" / "projects" / "note.md"
+            user_file.parent.mkdir(parents=True, exist_ok=True)
+            user_file.write_text("# note\n", encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            self.assertTrue(vault.exists())
+            self.assertTrue(user_file.exists())
+            self.assertTrue((vault / ".git").is_dir())
+            self.assertTrue((vault / "wiki" / "index.md").exists())
+
+    def test_uninstall_dry_run_reports_without_modifying(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            hook_script = paths.claude_dir / HOOK_SCRIPT_REL
+            claude_md = paths.claude_dir / "CLAUDE.md"
+            before_hook = hook_script.read_bytes()
+            before_claude_md = claude_md.read_bytes()
+
+            uninstall(home=str(home), dry_run=True, yes=True)
+
+            self.assertEqual(hook_script.read_bytes(), before_hook)
+            self.assertEqual(claude_md.read_bytes(), before_claude_md)
+
+
+class SecondBrainDoctorProactiveWiringTests(unittest.TestCase):
+    """doctor() reports hook/CLAUDE.md state read-only."""
+
+    def _which_returns_qmd(self, cmd):
+        if cmd in ("qmd", "git"):
+            return f"/fake/{cmd}"
+        return None
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_reports_hook_present(self, mock_run, mock_which):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+            mock_run.return_value = subprocess.CompletedProcess([], 0, f"  {wiki_path}\n", "")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertIn("SessionStart hook script:", output)
+            self.assertIn("SessionStart hook registered", output)
+            self.assertIn("CLAUDE.md second-brain section present", output)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_reports_hook_absent_as_info_not_failure(self, mock_run, mock_which):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            with patch("agents.kits.second_brain.installer.core.confirm", return_value=True):
+                with patch("agents.kits.second_brain.installer._confirm", return_value=False):
+                    install(home=str(home), dry_run=False, yes=False, setup_deps=False)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+            mock_run.return_value = subprocess.CompletedProcess([], 0, f"  {wiki_path}\n", "")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("not installed", output)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_never_executes_the_hook_script(self, mock_run, mock_which):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+            mock_run.return_value = subprocess.CompletedProcess([], 0, f"  {wiki_path}\n", "")
+            doctor(home=str(home))
+            for call in mock_run.call_args_list:
+                args = call.args[0] if call.args else call.kwargs.get("args", [])
+                self.assertNotIn(HOOK_SCRIPT_REL, " ".join(str(a) for a in args))
+
+
+class SecondBrainDiffProactiveWiringTests(unittest.TestCase):
+    """diff_kit() reports planned hook/CLAUDE.md state, never writes."""
+
+    def test_diff_reports_would_create_hook_and_section_on_fresh_install(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            vault = home / "second-brain"
+            for d in VAULT_DIRS:
+                (vault / d).mkdir(parents=True, exist_ok=True)
+            (vault / ".gitignore").write_text("", encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn(f"{HOOK_SCRIPT_REL}: would create", output)
+            self.assertIn("settings.json SessionStart hook: would register", output)
+            self.assertIn("CLAUDE.md second-brain section: would create", output)
+
+    def test_diff_reports_already_present_after_install(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn(f"{HOOK_SCRIPT_REL}: up to date", output)
+            self.assertIn("settings.json SessionStart hook: already registered", output)
+            self.assertIn("CLAUDE.md second-brain section: already present", output)
+
+    def test_diff_never_writes_anything(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            before_hook = (paths.claude_dir / HOOK_SCRIPT_REL).read_bytes()
+            before_claude_md = (paths.claude_dir / "CLAUDE.md").read_bytes()
+
+            diff_kit(home=str(home))
+
+            self.assertEqual((paths.claude_dir / HOOK_SCRIPT_REL).read_bytes(), before_hook)
+            self.assertEqual((paths.claude_dir / "CLAUDE.md").read_bytes(), before_claude_md)
+
+
+class SecondBrainCodexHookInstallTests(unittest.TestCase):
+    """SessionStart hook script + config.toml array-of-tables registration."""
+
+    def test_install_writes_hook_script_and_registers_block(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            script_path = paths.codex_dir / HOOK_SCRIPT_REL
+            self.assertTrue(script_path.is_file(), "codex hook script not installed")
+            config = (paths.codex_dir / "config.toml").read_text(encoding="utf-8")
+            self.assertIn(f"command = '{_codex_hook_command(paths)}'", config)
+            self.assertIn("[[hooks.SessionStart]]", config)
+
+    def test_install_idempotent_reinstall_no_duplicate_block(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            config = (paths.codex_dir / "config.toml").read_text(encoding="utf-8")
+            self.assertEqual(config.count("[[hooks.SessionStart]]"), 1)
+
+    def test_install_preserves_unrelated_config_toml_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            (codex_dir / "config.toml").write_text(
+                '[model_providers.custom]\nname = "custom"\n', encoding="utf-8"
+            )
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            config = (codex_dir / "config.toml").read_text(encoding="utf-8")
+            self.assertIn("[model_providers.custom]", config)
+            self.assertIn("[[hooks.SessionStart]]", config)
+
+    def test_install_coexists_with_qmd_mcp_section(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            config = (paths.codex_dir / "config.toml").read_text(encoding="utf-8")
+            self.assertIn("[mcp_servers.qmd]", config)
+            self.assertIn("[[hooks.SessionStart]]", config)
+
+    def test_dry_run_writes_no_hook_files_or_config_changes(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=True, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            self.assertFalse((paths.codex_dir / HOOK_SCRIPT_REL).exists())
+            self.assertFalse((paths.codex_dir / "config.toml").exists())
+
+    def test_hook_command_is_absolute_path_stable_across_reinstall(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            identity1 = _codex_hook_command(paths)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            identity2 = _codex_hook_command(paths)
+            config2 = (paths.codex_dir / "config.toml").read_text(encoding="utf-8")
+
+            self.assertEqual(identity1, identity2)
+            self.assertIn(str(paths.codex_dir / HOOK_SCRIPT_REL), identity1)
+            self.assertIn(f"command = '{identity2}'", config2)
+            self.assertEqual(config2.count("[[hooks.SessionStart]]"), 1)
+
+
+class SecondBrainCodexInstructionsSectionTests(unittest.TestCase):
+    """~/.codex/instructions.md marked-section merge during install()."""
+
+    def test_install_creates_instructions_md_with_section_when_absent(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            instructions = (home / ".codex" / "instructions.md").read_text(encoding="utf-8")
+            self.assertIn(CODEX_INSTRUCTIONS_BEGIN_MARKER, instructions)
+            self.assertIn(CODEX_INSTRUCTIONS_END_MARKER, instructions)
+            self.assertIn("Second-Brain Vault", instructions)
+
+    def test_install_merges_section_preserving_users_preexisting_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            (codex_dir / "instructions.md").write_text("# My Rules\nBe terse.\n", encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            instructions = (codex_dir / "instructions.md").read_text(encoding="utf-8")
+            self.assertIn("# My Rules", instructions)
+            self.assertIn(CODEX_INSTRUCTIONS_BEGIN_MARKER, instructions)
+
+    def test_install_idempotent_reinstall_no_duplicate_section(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            instructions = (home / ".codex" / "instructions.md").read_text(encoding="utf-8")
+            self.assertEqual(instructions.count(CODEX_INSTRUCTIONS_BEGIN_MARKER), 1)
+
+    def test_install_updates_stale_section_on_reinstall(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            stale = CODEX_INSTRUCTIONS_BEGIN_MARKER + "stale old content\n" + CODEX_INSTRUCTIONS_END_MARKER
+            (codex_dir / "instructions.md").write_text(stale, encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            instructions = (codex_dir / "instructions.md").read_text(encoding="utf-8")
+            self.assertNotIn("stale old content", instructions)
+            self.assertIn("Second-Brain Vault", instructions)
+
+    def test_dry_run_writes_no_instructions_md_changes(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=True, yes=True, setup_deps=False)
+            self.assertFalse((home / ".codex" / "instructions.md").exists())
+
+
+class SecondBrainCursorHookInstallTests(unittest.TestCase):
+    """sessionStart hook script + flat hooks.json registration."""
+
+    def test_install_writes_hook_script_and_registers_command(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            script_path = paths.cursor_dir / HOOK_SCRIPT_REL
+            self.assertTrue(script_path.is_file(), "cursor hook script not installed")
+            hooks_config = json.loads((paths.cursor_dir / "hooks.json").read_text(encoding="utf-8"))
+            commands = [e["command"] for e in hooks_config["hooks"][CURSOR_SESSIONSTART_EVENT]]
+            self.assertIn(_cursor_hook_command(paths), commands)
+            self.assertNotIn("groups", str(hooks_config["hooks"][CURSOR_SESSIONSTART_EVENT][0]))
+
+    def test_command_uses_cursor_output_format(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            paths = _paths(home=str(home))
+            self.assertIn("--format=cursor", _cursor_hook_command(paths))
+
+    def test_install_idempotent_reinstall_no_duplicate_entry(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            hooks_config = json.loads((paths.cursor_dir / "hooks.json").read_text(encoding="utf-8"))
+            commands = [e["command"] for e in hooks_config["hooks"][CURSOR_SESSIONSTART_EVENT]]
+            self.assertEqual(commands.count(_cursor_hook_command(paths)), 1)
+
+    def test_install_preserves_users_preexisting_sessionstart_entry(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            cursor_dir = home / ".cursor"
+            cursor_dir.mkdir(parents=True, exist_ok=True)
+            preexisting = {"version": 1, "hooks": {CURSOR_SESSIONSTART_EVENT: [{"command": "other-cmd"}]}}
+            (cursor_dir / "hooks.json").write_text(json.dumps(preexisting), encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            hooks_config = json.loads((cursor_dir / "hooks.json").read_text(encoding="utf-8"))
+            commands = [e["command"] for e in hooks_config["hooks"][CURSOR_SESSIONSTART_EVENT]]
+            self.assertIn("other-cmd", commands)
+
+    def test_install_preserves_unrelated_events_and_version(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            cursor_dir = home / ".cursor"
+            cursor_dir.mkdir(parents=True, exist_ok=True)
+            preexisting = {"version": 2, "hooks": {"stop": [{"command": "other"}]}}
+            (cursor_dir / "hooks.json").write_text(json.dumps(preexisting), encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            hooks_config = json.loads((cursor_dir / "hooks.json").read_text(encoding="utf-8"))
+            self.assertEqual(hooks_config["version"], 2)
+            self.assertEqual(hooks_config["hooks"]["stop"], [{"command": "other"}])
+
+    def test_dry_run_writes_no_hook_files_or_hooks_json_changes(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=True, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            self.assertFalse((paths.cursor_dir / HOOK_SCRIPT_REL).exists())
+            self.assertFalse((paths.cursor_dir / "hooks.json").exists())
+
+    def test_install_skips_hook_registration_on_invalid_hooks_json_without_blocking_others(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            cursor_dir = home / ".cursor"
+            cursor_dir.mkdir(parents=True, exist_ok=True)
+            (cursor_dir / "hooks.json").write_text("{not valid json", encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            self.assertEqual((cursor_dir / "hooks.json").read_text(encoding="utf-8"), "{not valid json")
+            paths = _paths(home=str(home))
+            # Claude Code's hook wiring must still succeed despite Cursor's broken config.
+            self.assertTrue((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+
+
+class SecondBrainCursorRuleFileTests(unittest.TestCase):
+    """Fully kit-owned ~/.cursor/rules/second-brain.mdc file."""
+
+    def test_install_creates_rule_file(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            rule_path = paths.cursor_dir / CURSOR_RULE_REL
+            self.assertTrue(rule_path.is_file())
+            content = rule_path.read_text(encoding="utf-8")
+            self.assertIn("alwaysApply: true", content)
+            self.assertIn("Second-Brain Vault", content)
+
+    def test_install_updates_stale_rule_file(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            paths = _paths(home=str(home))
+            rule_path = paths.cursor_dir / CURSOR_RULE_REL
+            rule_path.parent.mkdir(parents=True, exist_ok=True)
+            rule_path.write_text("stale content", encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            self.assertNotEqual(rule_path.read_text(encoding="utf-8"), "stale content")
+            self.assertIn("Second-Brain Vault", rule_path.read_text(encoding="utf-8"))
+
+    def test_uninstall_removes_unchanged_rule_file(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            rule_path = paths.cursor_dir / CURSOR_RULE_REL
+            self.assertTrue(rule_path.exists())
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            self.assertFalse(rule_path.exists())
+
+    def test_uninstall_keeps_hand_edited_rule_file(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            rule_path = paths.cursor_dir / CURSOR_RULE_REL
+            rule_path.write_text("hand-edited content", encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            self.assertTrue(rule_path.exists())
+            self.assertEqual(rule_path.read_text(encoding="utf-8"), "hand-edited content")
+
+
+class SecondBrainOpenCodeAgentsSectionTests(unittest.TestCase):
+    """OpenCode AGENTS.md marked-section merge (no hook — no session-start API)."""
+
+    def test_install_creates_agents_md_with_section_when_absent(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            agents_md = (paths.opencode_config_dir / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn(OPENCODE_AGENTS_BEGIN_MARKER, agents_md)
+            self.assertIn(OPENCODE_AGENTS_END_MARKER, agents_md)
+            self.assertIn("Second-Brain Vault", agents_md)
+
+    def test_install_idempotent_reinstall_no_duplicate_section(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            agents_md = (paths.opencode_config_dir / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertEqual(agents_md.count(OPENCODE_AGENTS_BEGIN_MARKER), 1)
+
+    def test_dry_run_writes_no_agents_md_changes(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=True, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            self.assertFalse((paths.opencode_config_dir / "AGENTS.md").exists())
+
+    def test_marker_coexists_with_opencode_kit_own_persona_section(self):
+        """Second-brain's AGENTS.md merge must coexist with the `opencode` kit's own."""
+        from agents.kits.opencode.installer import AGENTS_BEGIN_MARKER as OC_KIT_BEGIN_MARKER
+        from agents.kits.opencode.installer import AGENTS_END_MARKER as OC_KIT_END_MARKER
+        from agents.kits.opencode.installer import install as opencode_kit_install
+
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            # The opencode kit's own `home` param is its config base dir
+            # (like $XDG_CONFIG_HOME), not $HOME — pass home/".config" so it
+            # writes into the same AGENTS.md second-brain targets.
+            opencode_kit_install(home=str(home / ".config"), dry_run=False, yes=True)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            paths = _paths(home=str(home))
+            agents_md_path = paths.opencode_config_dir / "AGENTS.md"
+            agents_md = agents_md_path.read_text(encoding="utf-8")
+            self.assertIn(OC_KIT_BEGIN_MARKER, agents_md)
+            self.assertIn(OPENCODE_AGENTS_BEGIN_MARKER, agents_md)
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+            after_second_brain_uninstall = agents_md_path.read_text(encoding="utf-8")
+            self.assertIn(OC_KIT_BEGIN_MARKER, after_second_brain_uninstall)
+            self.assertNotIn(OPENCODE_AGENTS_BEGIN_MARKER, after_second_brain_uninstall)
+
+
+class SecondBrainPartialConfigFailureTests(unittest.TestCase):
+    """One agent's invalid config must not block proactive wiring for the others."""
+
+    def test_invalid_settings_json_does_not_block_codex_or_cursor(self):
+        # Uses enable_hook() (not install()) — install() has its own
+        # top-level _validate_configs preflight that intentionally aborts
+        # the whole install on invalid settings.json (existing, tested
+        # behavior, unrelated to this feature). enable_hook() has no such
+        # gate: each agent's config is isolated inside its own install_fn.
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            claude_dir = home / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            (claude_dir / "settings.json").write_text("{not valid json", encoding="utf-8")
+
+            result = enable_hook(home=str(home), dry_run=False, yes=True)
+
+            self.assertEqual(result, 0)
+            self.assertEqual((claude_dir / "settings.json").read_text(encoding="utf-8"), "{not valid json")
+            paths = _paths(home=str(home))
+            self.assertTrue((paths.codex_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.cursor_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.opencode_config_dir / "AGENTS.md").exists())
+
+    def test_invalid_cursor_hooks_json_does_not_block_claude_or_codex(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            cursor_dir = home / ".cursor"
+            cursor_dir.mkdir(parents=True, exist_ok=True)
+            (cursor_dir / "hooks.json").write_text("{not valid json", encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            paths = _paths(home=str(home))
+            self.assertTrue((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.codex_dir / HOOK_SCRIPT_REL).exists())
+
+
+class SecondBrainMultiAgentEnableHookTests(unittest.TestCase):
+    """enable_hook() wires Claude, Codex, Cursor, and OpenCode in one shot."""
+
+    def test_enable_hook_wires_all_agents_in_one_shot(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            result = enable_hook(home=str(home), dry_run=False, yes=True)
+            self.assertEqual(result, 0)
+            paths = _paths(home=str(home))
+            self.assertTrue((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.codex_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.cursor_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.cursor_dir / CURSOR_RULE_REL).exists())
+            self.assertTrue((paths.opencode_config_dir / "AGENTS.md").exists())
+
+    def test_enable_hook_idempotent_across_all_agents(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            enable_hook(home=str(home), dry_run=False, yes=True)
+            enable_hook(home=str(home), dry_run=False, yes=True)
+            paths = _paths(home=str(home))
+            config = (paths.codex_dir / "config.toml").read_text(encoding="utf-8")
+            self.assertEqual(config.count("[[hooks.SessionStart]]"), 1)
+            hooks_config = json.loads((paths.cursor_dir / "hooks.json").read_text(encoding="utf-8"))
+            commands = [e["command"] for e in hooks_config["hooks"][CURSOR_SESSIONSTART_EVENT]]
+            self.assertEqual(commands.count(_cursor_hook_command(paths)), 1)
+
+    def test_enable_hook_partial_state_resumes_correctly(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            paths = _paths(home=str(home))
+            paths.claude_dir.mkdir(parents=True, exist_ok=True)
+            # Pre-wire only Claude Code; Codex/Cursor/OpenCode remain absent.
+            from agents.kits.second_brain.installer import _install_session_hook, _merge_claude_md_section
+            _install_session_hook(paths)
+            _merge_claude_md_section(paths)
+
+            with patch("agents.kits.second_brain.installer._confirm") as mock_confirm:
+                _offer_proactive_context(paths, yes=False)
+                # Not fully installed yet (only Claude) -> must still prompt.
+                mock_confirm.assert_called_once()
+
+            # Now finish via --yes, and confirm the already-wired Claude side
+            # is left untouched (still exactly one CLAUDE.md section) while
+            # the remaining three agents get wired.
+            _offer_proactive_context(paths, yes=True)
+            claude_md = (paths.claude_dir / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertEqual(claude_md.count(CLAUDE_MD_BEGIN_MARKER), 1)
+            self.assertTrue((paths.codex_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.cursor_dir / HOOK_SCRIPT_REL).exists())
+            self.assertTrue((paths.opencode_config_dir / "AGENTS.md").exists())
+
+
+class SecondBrainMultiAgentUninstallTests(unittest.TestCase):
+    """uninstall() strips Codex/Cursor/OpenCode kit-owned wiring."""
+
+    def test_uninstall_strips_codex_hook_block(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            config_path = paths.codex_dir / "config.toml"
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            # config.toml is entirely kit-owned in the default fixture (qmd
+            # MCP section + hook block) so uninstall deletes it, matching the
+            # existing fully-owned-file deletion behavior used for CLAUDE.md.
+            if config_path.exists():
+                self.assertNotIn("[[hooks.SessionStart]]", config_path.read_text(encoding="utf-8"))
+            self.assertFalse((paths.codex_dir / HOOK_SCRIPT_REL).exists())
+
+    def test_uninstall_preserves_unrelated_codex_config_toml_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            (codex_dir / "config.toml").write_text(
+                '[model_providers.custom]\nname = "custom"\n', encoding="utf-8"
+            )
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            config = (codex_dir / "config.toml").read_text(encoding="utf-8")
+            self.assertIn("[model_providers.custom]", config)
+            self.assertNotIn("[[hooks.SessionStart]]", config)
+
+    def test_uninstall_strips_codex_instructions_section_preserves_user_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            (codex_dir / "instructions.md").write_text("# My Rules\n", encoding="utf-8")
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            instructions = (codex_dir / "instructions.md").read_text(encoding="utf-8")
+            self.assertIn("# My Rules", instructions)
+            self.assertNotIn(CODEX_INSTRUCTIONS_BEGIN_MARKER, instructions)
+
+    def test_uninstall_strips_cursor_hook_entry_preserves_others(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            cursor_dir = home / ".cursor"
+            cursor_dir.mkdir(parents=True, exist_ok=True)
+            preexisting = {"version": 1, "hooks": {CURSOR_SESSIONSTART_EVENT: [{"command": "other-cmd"}]}}
+            (cursor_dir / "hooks.json").write_text(json.dumps(preexisting), encoding="utf-8")
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            hooks_config = json.loads((cursor_dir / "hooks.json").read_text(encoding="utf-8"))
+            commands = [e["command"] for e in hooks_config["hooks"][CURSOR_SESSIONSTART_EVENT]]
+            self.assertIn("other-cmd", commands)
+            paths = _paths(home=str(home))
+            self.assertNotIn(_cursor_hook_command(paths), commands)
+            self.assertFalse((paths.cursor_dir / HOOK_SCRIPT_REL).exists())
+
+    def test_uninstall_strips_opencode_agents_section_preserves_user_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            opencode_dir = home / ".config" / "opencode"
+            opencode_dir.mkdir(parents=True, exist_ok=True)
+            (opencode_dir / "AGENTS.md").write_text("# My Rules\n", encoding="utf-8")
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            agents_md = (opencode_dir / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("# My Rules", agents_md)
+            self.assertNotIn(OPENCODE_AGENTS_BEGIN_MARKER, agents_md)
+
+    def test_uninstall_never_touches_vault_content(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            vault = home / "second-brain"
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            self.assertTrue(vault.exists())
+            self.assertTrue((vault / ".git").is_dir())
+
+
+class SecondBrainMultiAgentDoctorDiffTests(unittest.TestCase):
+    """doctor()/diff_kit() report Codex/Cursor/OpenCode wiring state, read-only."""
+
+    def _which_returns_qmd(self, cmd):
+        if cmd in ("qmd", "git"):
+            return f"/fake/{cmd}"
+        return None
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_reports_codex_cursor_opencode_present(self, mock_run, mock_which):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+            mock_run.return_value = subprocess.CompletedProcess([], 0, f"  {wiki_path}\n", "")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertIn("SessionStart hook registered in config.toml", output)
+            self.assertIn("instructions.md second-brain section present", output)
+            self.assertIn("sessionStart hook registered in hooks.json", output)
+            self.assertIn("rule file up to date", output)
+            self.assertIn("AGENTS.md second-brain section present", output)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_reports_absence_as_info_not_failure(self, mock_run, mock_which):
+        mock_which.side_effect = self._which_returns_qmd
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            with patch("agents.kits.second_brain.installer.core.confirm", return_value=True):
+                with patch("agents.kits.second_brain.installer._confirm", return_value=False):
+                    install(home=str(home), dry_run=False, yes=False, setup_deps=False)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+            mock_run.return_value = subprocess.CompletedProcess([], 0, f"  {wiki_path}\n", "")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("not registered in config.toml", output)
+            self.assertIn("not registered in hooks.json", output)
+
+    def test_diff_reports_would_create_for_new_agents_on_fresh_install(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            vault = home / "second-brain"
+            for d in VAULT_DIRS:
+                (vault / d).mkdir(parents=True, exist_ok=True)
+            (vault / ".gitignore").write_text("", encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("config.toml SessionStart hook: would register", output)
+            self.assertIn("hooks.json sessionStart hook: would register", output)
+            self.assertIn(f"{CURSOR_RULE_REL}: would create", output)
+            self.assertIn("opencode AGENTS.md second-brain section: would create", output)
+
+    def test_diff_reports_already_present_after_install(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                result = diff_kit(home=str(home))
+            output = buf.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("config.toml SessionStart hook: already registered", output)
+            self.assertIn("hooks.json sessionStart hook: already registered", output)
+            self.assertIn(f"{CURSOR_RULE_REL}: up to date", output)
+            self.assertIn("opencode AGENTS.md second-brain section: already present", output)
+
+    def test_diff_never_writes_anything_for_new_agents(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            paths = _paths(home=str(home))
+            before_config = (paths.codex_dir / "config.toml").read_bytes()
+            before_hooks_json = (paths.cursor_dir / "hooks.json").read_bytes()
+            before_rule = (paths.cursor_dir / CURSOR_RULE_REL).read_bytes()
+
+            diff_kit(home=str(home))
+
+            self.assertEqual((paths.codex_dir / "config.toml").read_bytes(), before_config)
+            self.assertEqual((paths.cursor_dir / "hooks.json").read_bytes(), before_hooks_json)
+            self.assertEqual((paths.cursor_dir / CURSOR_RULE_REL).read_bytes(), before_rule)
 
 
 if __name__ == "__main__":

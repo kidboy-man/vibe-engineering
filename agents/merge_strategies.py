@@ -39,6 +39,242 @@ def json_defaults_strategy(
     return merged, changed
 
 
+def hook_command_merge_strategy(
+    settings: dict,
+    event: str,
+    command: str,
+    *,
+    hook_type: str = "command",
+) -> tuple[dict, bool]:
+    """Add a kit-owned command to ``settings["hooks"][event]`` if absent.
+
+    Dedupe key is exact string equality of an existing entry's ``command``
+    field within *event*'s hook groups — independent of ``matcher``
+    presence, since real Claude Code installs often omit it. Existing
+    groups/events/commands are left untouched; a new group is appended
+    only when no existing group in *event* already contains *command*.
+
+    Returns ``(merged, changed)``. No-ops (returns ``(settings, False)``)
+    when ``hooks`` or ``hooks[event]`` exists but isn't the expected type.
+    """
+    hooks = settings.get("hooks", {})
+    if "hooks" in settings and not isinstance(hooks, dict):
+        return settings, False
+
+    event_groups = hooks.get(event, [])
+    if event in hooks and not isinstance(event_groups, list):
+        return settings, False
+
+    for group in event_groups:
+        if not isinstance(group, dict):
+            continue
+        for entry in group.get("hooks", []):
+            if isinstance(entry, dict) and entry.get("command") == command:
+                return settings, False
+
+    merged = dict(settings)
+    merged_hooks = dict(hooks)
+    merged_hooks[event] = list(event_groups) + [
+        {"hooks": [{"type": hook_type, "command": command}]}
+    ]
+    merged["hooks"] = merged_hooks
+    return merged, True
+
+
+def strip_hook_command(
+    settings: dict,
+    event: str,
+    command: str,
+) -> tuple[dict, bool]:
+    """Remove only the kit-owned *command* from ``settings["hooks"][event]``.
+
+    Prunes an emptied hook group, then an emptied event list, then an
+    emptied ``hooks`` key. All other events/groups/commands are untouched.
+
+    Returns ``(merged, changed)``.
+    """
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict) or event not in hooks:
+        return settings, False
+
+    event_groups = hooks[event]
+    if not isinstance(event_groups, list):
+        return settings, False
+
+    new_groups = []
+    changed = False
+    for group in event_groups:
+        if not isinstance(group, dict):
+            new_groups.append(group)
+            continue
+        entries = group.get("hooks", [])
+        new_entries = [
+            e for e in entries
+            if not (isinstance(e, dict) and e.get("command") == command)
+        ]
+        if len(new_entries) != len(entries):
+            changed = True
+        if new_entries:
+            new_group = dict(group)
+            new_group["hooks"] = new_entries
+            new_groups.append(new_group)
+        # else: group is now empty, drop it (pruned)
+
+    if not changed:
+        return settings, False
+
+    merged = dict(settings)
+    merged_hooks = dict(hooks)
+    if new_groups:
+        merged_hooks[event] = new_groups
+    else:
+        del merged_hooks[event]
+
+    if merged_hooks:
+        merged["hooks"] = merged_hooks
+    else:
+        del merged["hooks"]
+
+    return merged, True
+
+
+def cursor_hook_merge_strategy(
+    hooks_config: dict,
+    event: str,
+    command: str,
+) -> tuple[dict, bool]:
+    """Add a kit-owned command to ``hooks_config["hooks"][event]`` (Cursor's flat shape).
+
+    Cursor's ``hooks.json`` entries are plain ``{"command": ...}`` objects
+    directly in the event's list — no nested ``matcher``/groups wrapper,
+    unlike Claude/Gemini's shape. Dedupe key is exact string equality of an
+    existing entry's ``command`` field. Sets ``"version": 1`` only when the
+    ``hooks`` key is being created fresh; an existing ``version`` is left
+    untouched.
+
+    Returns ``(merged, changed)``. No-ops (returns ``(hooks_config, False)``)
+    when ``hooks`` or ``hooks_config["hooks"][event]`` exists but isn't the
+    expected type.
+    """
+    hooks = hooks_config.get("hooks", {})
+    if "hooks" in hooks_config and not isinstance(hooks, dict):
+        return hooks_config, False
+
+    entries = hooks.get(event, [])
+    if event in hooks and not isinstance(entries, list):
+        return hooks_config, False
+
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("command") == command:
+            return hooks_config, False
+
+    merged = dict(hooks_config)
+    if "hooks" not in merged:
+        merged.setdefault("version", 1)
+    merged_hooks = dict(hooks)
+    merged_hooks[event] = list(entries) + [{"command": command}]
+    merged["hooks"] = merged_hooks
+    return merged, True
+
+
+def strip_cursor_hook(
+    hooks_config: dict,
+    event: str,
+    command: str,
+) -> tuple[dict, bool]:
+    """Remove only the kit-owned *command* entry from ``hooks_config["hooks"][event]``.
+
+    Prunes an emptied event list, then an emptied ``hooks`` key. ``version``
+    and other events/entries are left untouched.
+
+    Returns ``(merged, changed)``.
+    """
+    hooks = hooks_config.get("hooks")
+    if not isinstance(hooks, dict) or event not in hooks:
+        return hooks_config, False
+
+    entries = hooks[event]
+    if not isinstance(entries, list):
+        return hooks_config, False
+
+    new_entries = [
+        e for e in entries if not (isinstance(e, dict) and e.get("command") == command)
+    ]
+    if len(new_entries) == len(entries):
+        return hooks_config, False
+
+    merged = dict(hooks_config)
+    merged_hooks = dict(hooks)
+    if new_entries:
+        merged_hooks[event] = new_entries
+    else:
+        del merged_hooks[event]
+
+    if merged_hooks:
+        merged["hooks"] = merged_hooks
+    else:
+        del merged["hooks"]
+
+    return merged, True
+
+
+def codex_hook_block_merge_strategy(
+    block: str,
+    identity_substring: str,
+    current: str | None,
+) -> tuple[str, str]:
+    """Append a kit-owned literal Codex hooks TOML block if not already present.
+
+    Does NOT parse TOML array-of-tables syntax — *block* is opaque literal
+    text. Dedupe is a plain substring check of *identity_substring* (e.g. the
+    exact ``command = '...'`` line, byte-stable per install path) within
+    *current*. This is intentionally narrow: a general array-of-tables-aware
+    TOML merger is out of scope.
+
+    - *current* is ``None`` -> create a file containing just *block*.
+    - *identity_substring* in *current* -> unchanged (returns *current*
+      unmodified).
+    - otherwise -> append *block*, blank-line separated, at end of file.
+
+    Returns ``(merged_content, action)`` where *action* is one of
+    ``"create"``, ``"merge"``, or ``"unchanged"``.
+    """
+    if current is None:
+        return block, "create"
+
+    if identity_substring in current:
+        return current, "unchanged"
+
+    merged = current.rstrip("\n") + "\n\n" + block
+    if not merged.endswith("\n"):
+        merged += "\n"
+    return merged, "merge"
+
+
+def strip_codex_hook_block(
+    existing: str,
+    block: str,
+) -> tuple[str | None, bool]:
+    """Remove the kit-owned literal hook block via exact substring match of *block*.
+
+    If *block* (verbatim) is not found — e.g. the user hand-edited it — this
+    no-ops, returning ``(existing, False)``, rather than attempting a fuzzy
+    repair that risks corrupting unrelated TOML content.
+
+    Returns ``(remaining_content, fully_owned)``; *remaining_content* is
+    ``None`` only when stripping the block empties the file entirely.
+    """
+    if block not in existing:
+        return existing, False
+
+    remaining = existing.replace(block, "", 1).strip()
+    if not remaining:
+        return None, True
+    if not remaining.endswith("\n"):
+        remaining += "\n"
+    return remaining, False
+
+
 def strip_jsonc_comments(text: str) -> str:
     """Strip ``//`` and ``/* */`` comments and trailing commas from a JSONC text.
 

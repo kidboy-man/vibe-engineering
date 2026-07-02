@@ -51,6 +51,20 @@ GITIGNORE_ENTRIES = [
     ".claude/settings.local.json",
 ]
 
+HOOK_SCRIPT_REL = "hooks/second-brain-context.py"
+SESSIONSTART_EVENT = "SessionStart"
+CURSOR_SESSIONSTART_EVENT = "sessionStart"
+CURSOR_RULE_REL = "rules/second-brain.mdc"
+
+CLAUDE_MD_BEGIN_MARKER = "<!-- vibe-engineering second-brain:begin -->\n"
+CLAUDE_MD_END_MARKER = "<!-- vibe-engineering second-brain:end -->\n"
+
+CODEX_INSTRUCTIONS_BEGIN_MARKER = "<!-- vibe-engineering second-brain (codex):begin -->\n"
+CODEX_INSTRUCTIONS_END_MARKER = "<!-- vibe-engineering second-brain (codex):end -->\n"
+
+OPENCODE_AGENTS_BEGIN_MARKER = "<!-- vibe-engineering second-brain (opencode):begin -->\n"
+OPENCODE_AGENTS_END_MARKER = "<!-- vibe-engineering second-brain (opencode):end -->\n"
+
 
 @dataclass(frozen=True)
 class KitPaths:
@@ -61,6 +75,7 @@ class KitPaths:
     claude_dir: Path
     opencode_config_dir: Path
     codex_dir: Path
+    cursor_dir: Path
 
 
 def _template_dir() -> Path:
@@ -83,6 +98,7 @@ def _paths(home: str | None = None) -> KitPaths:
         claude_dir=home_path / ".claude",
         opencode_config_dir=home_path / ".config" / "opencode",
         codex_dir=home_path / ".codex",
+        cursor_dir=home_path / ".cursor",
     )
 
 
@@ -418,6 +434,356 @@ def _merge_codex_config(paths: KitPaths) -> None:
         print("merged qmd MCP into config.toml")
 
 
+@dataclass(frozen=True)
+class HookAgent:
+    """A SessionStart-equivalent hook target (Claude Code, Codex CLI, Cursor)."""
+
+    label: str
+    event_label: str
+    registered_where: str
+    script_dir_fn: Callable[[KitPaths], Path]
+    already_installed_fn: Callable[[KitPaths], bool]
+
+
+@dataclass(frozen=True)
+class PersonaSection:
+    """A marked-section merge target (persona/instructions file)."""
+
+    label: str
+    path_fn: Callable[[KitPaths], Path]
+    fragment_name: str
+    begin_marker: str
+    end_marker: str
+
+
+def _install_hook_script_file(script_dir: Path, template: Path) -> None:
+    """Copy the context-injector script into *script_dir* if changed."""
+    script_src = template / HOOK_SCRIPT_REL
+    script_dst = script_dir / HOOK_SCRIPT_REL
+    script_dst.parent.mkdir(parents=True, exist_ok=True)
+    content = script_src.read_text(encoding="utf-8")
+    if not script_dst.exists() or script_dst.read_text(encoding="utf-8") != content:
+        script_dst.write_text(content, encoding="utf-8")
+        print(f"installed {script_dst}")
+
+
+def _json_hook_already_installed(
+    config_path: Path,
+    merge_fn: Callable[[dict, str, str], tuple[dict, bool]],
+    event: str,
+    command: str,
+) -> bool:
+    """Read-only check shared by JSON-shaped hook configs (Claude, Cursor)."""
+    if not config_path.exists():
+        return False
+    try:
+        current = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+    _, changed = merge_fn(current, event, command)
+    return not changed
+
+
+def _merge_persona_section(paths: KitPaths, spec: PersonaSection) -> None:
+    path = spec.path_fn(paths)
+    fragment = (paths.template / spec.fragment_name).read_text(encoding="utf-8")
+    existing = path.read_text(encoding="utf-8") if path.exists() else None
+    merged, action = ms.marked_section_strategy(fragment, existing, spec.begin_marker, spec.end_marker)
+    if action == "unchanged":
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(merged, encoding="utf-8")
+    verb = "created" if action == "create" else "merged"
+    print(f"{verb} second-brain section in {spec.label}")
+
+
+def _hook_command(paths: KitPaths) -> str:
+    """Byte-stable command string for the kit-owned SessionStart hook entry."""
+    return f'python3 "{paths.claude_dir / HOOK_SCRIPT_REL}"'
+
+
+def _codex_hook_command(paths: KitPaths) -> str:
+    """Byte-stable command string for the kit-owned Codex SessionStart hook entry."""
+    return f'python3 "{paths.codex_dir / HOOK_SCRIPT_REL}"'
+
+
+def _cursor_hook_command(paths: KitPaths) -> str:
+    """Byte-stable command string for the kit-owned Cursor sessionStart hook entry."""
+    return f'python3 "{paths.cursor_dir / HOOK_SCRIPT_REL}" --format=cursor'
+
+
+def _hook_already_installed(paths: KitPaths) -> bool:
+    """Read-only check: is our SessionStart hook already registered?"""
+    return _json_hook_already_installed(
+        paths.claude_dir / "settings.json", ms.hook_command_merge_strategy, SESSIONSTART_EVENT, _hook_command(paths)
+    )
+
+
+def _codex_hook_block(paths: KitPaths) -> str:
+    """Literal Codex config.toml array-of-tables block for our SessionStart hook."""
+    return (
+        "[[hooks.SessionStart]]\n\n"
+        "[[hooks.SessionStart.hooks]]\n"
+        'type = "command"\n'
+        f"command = '{_codex_hook_command(paths)}'\n"
+    )
+
+
+def _codex_hook_identity(paths: KitPaths) -> str:
+    return f"command = '{_codex_hook_command(paths)}'"
+
+
+def _codex_hook_already_installed(paths: KitPaths) -> bool:
+    """Read-only check: is our SessionStart hook block already in config.toml?
+
+    config.toml is never parsed — dedupe is a literal substring check,
+    matching the existing qmd MCP TOML-block merge in this same file.
+    """
+    config_path = paths.codex_dir / "config.toml"
+    if not config_path.exists():
+        return False
+    return _codex_hook_identity(paths) in config_path.read_text(encoding="utf-8")
+
+
+def _cursor_hook_already_installed(paths: KitPaths) -> bool:
+    """Read-only check: is our sessionStart hook already registered?"""
+    return _json_hook_already_installed(
+        paths.cursor_dir / "hooks.json",
+        ms.cursor_hook_merge_strategy,
+        CURSOR_SESSIONSTART_EVENT,
+        _cursor_hook_command(paths),
+    )
+
+
+CLAUDE_PERSONA_SECTION = PersonaSection(
+    "CLAUDE.md", lambda p: p.claude_dir / "CLAUDE.md", "claude_md_section.md", CLAUDE_MD_BEGIN_MARKER, CLAUDE_MD_END_MARKER
+)
+CODEX_PERSONA_SECTION = PersonaSection(
+    "instructions.md",
+    lambda p: p.codex_dir / "instructions.md",
+    "codex_instructions_section.md",
+    CODEX_INSTRUCTIONS_BEGIN_MARKER,
+    CODEX_INSTRUCTIONS_END_MARKER,
+)
+OPENCODE_PERSONA_SECTION = PersonaSection(
+    "opencode AGENTS.md",
+    lambda p: p.opencode_config_dir / "AGENTS.md",
+    "opencode_agents_section.md",
+    OPENCODE_AGENTS_BEGIN_MARKER,
+    OPENCODE_AGENTS_END_MARKER,
+)
+PERSONA_SECTIONS = [CLAUDE_PERSONA_SECTION, CODEX_PERSONA_SECTION, OPENCODE_PERSONA_SECTION]
+
+CLAUDE_HOOK_AGENT = HookAgent(
+    "Claude Code", "SessionStart", "settings.json", lambda p: p.claude_dir, _hook_already_installed
+)
+CODEX_HOOK_AGENT = HookAgent(
+    "Codex CLI", "SessionStart", "config.toml", lambda p: p.codex_dir, _codex_hook_already_installed
+)
+CURSOR_HOOK_AGENT = HookAgent(
+    "Cursor", "sessionStart", "hooks.json", lambda p: p.cursor_dir, _cursor_hook_already_installed
+)
+HOOK_AGENTS = [CLAUDE_HOOK_AGENT, CODEX_HOOK_AGENT, CURSOR_HOOK_AGENT]
+
+
+def _install_session_hook(paths: KitPaths) -> None:
+    """Copy the SessionStart context-injector script and register it.
+
+    Idempotent: identical script content is not rewritten; an already
+    registered command is not duplicated.
+    """
+    _install_hook_script_file(paths.claude_dir, paths.template)
+    settings_path = paths.claude_dir / "settings.json"
+    current: dict = {}
+    if settings_path.exists():
+        try:
+            current = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print("skipping invalid settings.json (hook not registered)")
+            return
+    merged, changed = ms.hook_command_merge_strategy(current, SESSIONSTART_EVENT, _hook_command(paths))
+    if changed:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+        print("registered SessionStart hook in settings.json")
+
+
+def _install_codex_hook(paths: KitPaths) -> None:
+    """Copy the SessionStart context-injector script and register it in config.toml.
+
+    Idempotent: identical script content is not rewritten; an already
+    registered command is not duplicated.
+    """
+    _install_hook_script_file(paths.codex_dir, paths.template)
+    config_path = paths.codex_dir / "config.toml"
+    current = config_path.read_text(encoding="utf-8") if config_path.exists() else None
+    merged, action = ms.codex_hook_block_merge_strategy(_codex_hook_block(paths), _codex_hook_identity(paths), current)
+    if action == "unchanged":
+        return
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(merged, encoding="utf-8")
+    if action == "create":
+        print(f"created {config_path} with SessionStart hook")
+    else:
+        print("registered SessionStart hook in config.toml")
+
+
+def _install_cursor_hook(paths: KitPaths) -> None:
+    """Copy the sessionStart context-injector script and register it in hooks.json.
+
+    Idempotent: identical script content is not rewritten; an already
+    registered command is not duplicated.
+    """
+    _install_hook_script_file(paths.cursor_dir, paths.template)
+    hooks_path = paths.cursor_dir / "hooks.json"
+    current: dict = {}
+    if hooks_path.exists():
+        try:
+            current = json.loads(hooks_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print("skipping invalid hooks.json (hook not registered)")
+            return
+    merged, changed = ms.cursor_hook_merge_strategy(current, CURSOR_SESSIONSTART_EVENT, _cursor_hook_command(paths))
+    if changed:
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        hooks_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+        print("registered sessionStart hook in hooks.json")
+
+
+def _install_cursor_rule(paths: KitPaths) -> None:
+    """Install the fully kit-owned Cursor rule file (create/update-if-differs)."""
+    rule_src = paths.template / CURSOR_RULE_REL
+    rule_dst = paths.cursor_dir / CURSOR_RULE_REL
+    content = rule_src.read_text(encoding="utf-8")
+    if not rule_dst.exists() or rule_dst.read_text(encoding="utf-8") != content:
+        rule_dst.parent.mkdir(parents=True, exist_ok=True)
+        rule_dst.write_text(content, encoding="utf-8")
+        print(f"installed {rule_dst}")
+
+
+def _merge_claude_md_section(paths: KitPaths) -> None:
+    """Merge the second-brain marked section into ~/.claude/CLAUDE.md."""
+    _merge_persona_section(paths, CLAUDE_PERSONA_SECTION)
+
+
+def _merge_codex_instructions_section(paths: KitPaths) -> None:
+    """Merge the second-brain marked section into ~/.codex/instructions.md."""
+    _merge_persona_section(paths, CODEX_PERSONA_SECTION)
+
+
+def _merge_opencode_agents_section(paths: KitPaths) -> None:
+    """Merge the second-brain marked section into OpenCode's AGENTS.md.
+
+    Uses a marker distinct from the ``opencode`` kit's own persona-section
+    marker, so both kits' merges coexist in the same file.
+    """
+    _merge_persona_section(paths, OPENCODE_PERSONA_SECTION)
+
+
+def _marked_section_present(path: Path, begin_marker: str) -> bool:
+    return path.exists() and begin_marker in path.read_text(encoding="utf-8")
+
+
+def _section_dry_run_label(path: Path, begin_marker: str) -> str:
+    return "already present" if _marked_section_present(path, begin_marker) else "would create/merge"
+
+
+def _cursor_rule_up_to_date(paths: KitPaths) -> bool:
+    rule_dst = paths.cursor_dir / CURSOR_RULE_REL
+    if not rule_dst.exists():
+        return False
+    rule_src = paths.template / CURSOR_RULE_REL
+    return rule_dst.read_text(encoding="utf-8") == rule_src.read_text(encoding="utf-8")
+
+
+def _all_proactive_context_installed(paths: KitPaths) -> bool:
+    """True only when every supported agent's hook/section is already wired."""
+    return (
+        all(agent.already_installed_fn(paths) for agent in HOOK_AGENTS)
+        and all(_marked_section_present(spec.path_fn(paths), spec.begin_marker) for spec in PERSONA_SECTIONS)
+        and _cursor_rule_up_to_date(paths)
+    )
+
+
+def _enable_proactive_context(paths: KitPaths, dry_run: bool = False) -> int:
+    """Install hook + persona-section wiring for all supported agents (idempotent).
+
+    Claude Code, Codex CLI, and Cursor each get a SessionStart-equivalent
+    hook plus a persona/instructions section; OpenCode gets an AGENTS.md
+    section only (no session-start context-injection API is documented for
+    OpenCode). Each agent's config is handled independently — one agent's
+    invalid config never blocks the others.
+    """
+    if dry_run:
+        for agent, spec in ((CLAUDE_HOOK_AGENT, CLAUDE_PERSONA_SECTION), (CODEX_HOOK_AGENT, CODEX_PERSONA_SECTION)):
+            hook_state = "already registered" if agent.already_installed_fn(paths) else "would register"
+            print(f"{agent.label} {agent.event_label} hook: {hook_state}")
+            print(f"{spec.label} second-brain section: {_section_dry_run_label(spec.path_fn(paths), spec.begin_marker)}")
+
+        cursor_hook_state = "already registered" if CURSOR_HOOK_AGENT.already_installed_fn(paths) else "would register"
+        print(f"{CURSOR_HOOK_AGENT.label} {CURSOR_HOOK_AGENT.event_label} hook: {cursor_hook_state}")
+        print(f"Cursor rule file: {'up to date' if _cursor_rule_up_to_date(paths) else 'would create/update'}")
+
+        print(
+            f"{OPENCODE_PERSONA_SECTION.label} second-brain section: "
+            + _section_dry_run_label(OPENCODE_PERSONA_SECTION.path_fn(paths), OPENCODE_PERSONA_SECTION.begin_marker)
+        )
+        return 0
+
+    _install_session_hook(paths)
+    _merge_claude_md_section(paths)
+
+    _install_codex_hook(paths)
+    _merge_codex_instructions_section(paths)
+
+    _install_cursor_hook(paths)
+    _install_cursor_rule(paths)
+
+    _merge_opencode_agents_section(paths)
+    return 0
+
+
+def _offer_proactive_context(paths: KitPaths, yes: bool) -> None:
+    """Detect current hook state and prompt (unless already installed/``yes``)."""
+    if _all_proactive_context_installed(paths):
+        print("hook: already installed")
+        _enable_proactive_context(paths)
+        return
+    print("hook: not installed")
+    prompt = (
+        "Enable proactive second-brain context? Adds a SessionStart-equivalent "
+        "hook (auto-loads hot.md/index.md every session) plus a persona-file "
+        "section for Claude Code, Codex CLI, and Cursor, and an AGENTS.md "
+        "section for OpenCode (no hook API is available for OpenCode)."
+    )
+    if not yes and not _confirm(f"{prompt} [y/N] "):
+        print("skipped hook/context wiring; enable later via: vibe kits second-brain enable-hook")
+        return
+    _enable_proactive_context(paths)
+
+
+def enable_hook(
+    home: str | None = None,
+    dry_run: bool = False,
+    yes: bool = False,
+    **kwargs,
+) -> int:
+    """Standalone verb: enable proactive context wiring for all supported agents.
+
+    Works independently of vault install/presence — hook scripts tolerate a
+    missing vault at runtime. Each agent's config is validated independently
+    inside its own install function; one agent's invalid config never blocks
+    the others.
+    """
+    paths = _paths(home)
+
+    if dry_run:
+        return _enable_proactive_context(paths, dry_run=True)
+
+    _offer_proactive_context(paths, yes=yes)
+    return 0
+
+
 def _manifest_state(managed_files: list[str]) -> dict:
     return core.manifest_state(KIT_NAME, managed_files)
 
@@ -428,6 +794,7 @@ def install(
     yes: bool = False,
     merge_settings: bool = True,
     setup_deps: bool = True,
+    enable_hooks: bool = True,
     **kwargs,
 ) -> int:
     paths = _paths(home)
@@ -436,11 +803,21 @@ def install(
     if not _validate_configs(paths):
         return 1
 
+    print(
+        "second-brain: "
+        + ("existing installation detected, updating" if paths.manifest.exists() else "fresh install")
+    )
+    print(f"hook: {'already installed' if _all_proactive_context_installed(paths) else 'not installed'}")
+
     if dry_run:
         _print_dry_run(paths)
         if merge_settings:
             print("would merge qmd MCP into agent configs (Claude, OpenCode, Codex)")
             print("  Cursor and Hermes: no config mutation")
+        if enable_hooks:
+            _enable_proactive_context(paths, dry_run=True)
+        else:
+            print("hooks: skipped (--no-hooks)")
         return 0
 
     # Warn when vault exists with foreign files (no manifest = not our vault).
@@ -488,6 +865,10 @@ def install(
         _merge_claude_config(paths)
         _merge_opencode_config(paths)
         _merge_codex_config(paths)
+        if enable_hooks:
+            _offer_proactive_context(paths, yes=yes)
+        else:
+            print("hooks: skipped (--no-hooks)")
 
     if setup_deps:
         _setup_qmd(paths.vault, yes=yes)
@@ -608,6 +989,7 @@ def doctor(home: str | None = None) -> int:
         ("claude", "Claude Code"),
         ("opencode", "OpenCode"),
         ("codex", "Codex CLI"),
+        ("cursor", "Cursor"),
     ]:
         found = shutil.which(binary)
         if found:
@@ -617,7 +999,6 @@ def doctor(home: str | None = None) -> int:
 
     print("\n-- other agents --")
     print("ℹ hermes: config path unverified (docs/sample only)")
-    print("ℹ cursor: project-local .cursor/rules/*.mdc recommended")
 
     def _check_config(label: str, path: Path, parse) -> None:
         nonlocal problems
@@ -639,6 +1020,7 @@ def doctor(home: str | None = None) -> int:
         ms.parse_jsonc,
     )
     _check_config("config.toml", paths.codex_dir / "config.toml", tomllib.loads)
+    _check_config("hooks.json", paths.cursor_dir / "hooks.json", json.loads)
 
     # OpenCode MCP status (non-fatal warnings)
     opencode_path = paths.opencode_config_dir / "opencode.jsonc"
@@ -667,6 +1049,47 @@ def doctor(home: str | None = None) -> int:
                     )
         except Exception:
             pass  # _check_config already reported parse failures
+
+    def _doctor_print_hook(agent: HookAgent) -> None:
+        script_path = agent.script_dir_fn(paths) / HOOK_SCRIPT_REL
+        if script_path.is_file():
+            print(f"✓ {agent.event_label} hook script: {script_path}")
+        else:
+            print(f"ℹ {agent.event_label} hook script: not installed (optional; enable via 'vibe kits second-brain enable-hook')")
+        if agent.already_installed_fn(paths):
+            print(f"✓ {agent.event_label} hook registered in {agent.registered_where}")
+        else:
+            print(f"ℹ {agent.event_label} hook: not registered in {agent.registered_where}")
+
+    def _doctor_print_section(spec: PersonaSection) -> None:
+        path = spec.path_fn(paths)
+        if _marked_section_present(path, spec.begin_marker):
+            print(f"✓ {spec.label} second-brain section present")
+        elif path.exists():
+            print(f"⚠ {spec.label} exists but second-brain section is missing (fix: vibe kits second-brain enable-hook)")
+        else:
+            print(f"ℹ {spec.label}: absent (second-brain section not installed)")
+
+    print("\n-- proactive context (Claude Code) --")
+    _doctor_print_hook(CLAUDE_HOOK_AGENT)
+    _doctor_print_section(CLAUDE_PERSONA_SECTION)
+
+    print("\n-- proactive context (Codex CLI) --")
+    _doctor_print_hook(CODEX_HOOK_AGENT)
+    _doctor_print_section(CODEX_PERSONA_SECTION)
+
+    print("\n-- proactive context (Cursor) --")
+    _doctor_print_hook(CURSOR_HOOK_AGENT)
+    if _cursor_rule_up_to_date(paths):
+        print(f"✓ rule file up to date: {paths.cursor_dir / CURSOR_RULE_REL}")
+    elif (paths.cursor_dir / CURSOR_RULE_REL).exists():
+        print("⚠ rule file present but stale (fix: vibe kits second-brain enable-hook)")
+    else:
+        print("ℹ rule file: not installed (optional)")
+
+    print("\n-- proactive context (OpenCode) --")
+    print("ℹ OpenCode has no session-start context-injection API; AGENTS.md section only, no hook")
+    _doctor_print_section(OPENCODE_PERSONA_SECTION)
 
     vault_str = str(vault_path)
     if "\\\\wsl$" in vault_str or vault_str.startswith("/mnt/"):
@@ -817,6 +1240,45 @@ def diff_kit(home: str | None = None) -> int:
         print("  config.toml: would create with qmd MCP section")
     print()
 
+    # Proactive context: SessionStart-equivalent hooks + persona sections
+    def _diff_print_hook(agent: HookAgent, script_prefix: str = "") -> None:
+        script_path = agent.script_dir_fn(paths) / HOOK_SCRIPT_REL
+        template_content = (paths.template / HOOK_SCRIPT_REL).read_text(encoding="utf-8")
+        if script_path.is_file():
+            status = "up to date" if script_path.read_text(encoding="utf-8") == template_content else "present, would update (content differs from template)"
+        else:
+            status = "would create"
+        print(f"  {script_prefix}{HOOK_SCRIPT_REL}: {status}")
+        state = "already registered" if agent.already_installed_fn(paths) else "would register"
+        print(f"  {agent.registered_where} {agent.event_label} hook: {state}")
+
+    def _diff_print_section(spec: PersonaSection) -> None:
+        path = spec.path_fn(paths)
+        if _marked_section_present(path, spec.begin_marker):
+            print(f"  {spec.label} second-brain section: already present")
+        elif path.exists():
+            print(f"  {spec.label} second-brain section: would create file (existing content preserved)")
+        else:
+            print(f"  {spec.label} second-brain section: would create file")
+
+    print("proactive context:")
+    _diff_print_hook(CLAUDE_HOOK_AGENT)
+    _diff_print_section(CLAUDE_PERSONA_SECTION)
+
+    _diff_print_hook(CODEX_HOOK_AGENT, "codex ")
+    _diff_print_section(CODEX_PERSONA_SECTION)
+
+    _diff_print_hook(CURSOR_HOOK_AGENT, "cursor ")
+    if _cursor_rule_up_to_date(paths):
+        print(f"  {CURSOR_RULE_REL}: up to date")
+    elif (paths.cursor_dir / CURSOR_RULE_REL).exists():
+        print(f"  {CURSOR_RULE_REL}: present, would update (content differs from template)")
+    else:
+        print(f"  {CURSOR_RULE_REL}: would create")
+
+    _diff_print_section(OPENCODE_PERSONA_SECTION)
+    print()
+
     # Manifest
     manifest = paths.manifest
     if manifest.exists():
@@ -950,16 +1412,98 @@ def uninstall(
     if codex_path.exists() and CODEX_TOML_SECTION in codex_path.read_text(encoding="utf-8"):
         specs.append((codex_path, "qmd MCP section", _strip_codex))
 
+    if settings_path.exists() and _hook_already_installed(paths):
+
+        def _mutate_claude_hooks(text: str) -> tuple[str | None, bool]:
+            current = json.loads(text)
+            merged, changed = ms.strip_hook_command(
+                current, SESSIONSTART_EVENT, _hook_command(paths)
+            )
+            if not changed:
+                return None, False
+            return json.dumps(merged, indent=2) + "\n", False
+
+        specs.append((settings_path, "SessionStart hook from settings.json", _mutate_claude_hooks))
+
+    hook_script_path = paths.claude_dir / HOOK_SCRIPT_REL
+    if hook_script_path.exists():
+        specs.append((hook_script_path, "second-brain SessionStart hook script", None))
+
+    claude_md_path = paths.claude_dir / "CLAUDE.md"
+    if claude_md_path.exists() and CLAUDE_MD_BEGIN_MARKER in claude_md_path.read_text(encoding="utf-8"):
+
+        def _mutate_claude_md(text: str) -> tuple[str | None, bool]:
+            return ms.strip_marked_section(text, CLAUDE_MD_BEGIN_MARKER, CLAUDE_MD_END_MARKER)
+
+        specs.append((claude_md_path, "second-brain section from CLAUDE.md", _mutate_claude_md))
+
+    codex_config_path = paths.codex_dir / "config.toml"
+    if codex_config_path.exists() and _codex_hook_already_installed(paths):
+
+        def _mutate_codex_hook(text: str) -> tuple[str | None, bool]:
+            return ms.strip_codex_hook_block(text, _codex_hook_block(paths))
+
+        specs.append((codex_config_path, "SessionStart hook from config.toml", _mutate_codex_hook))
+
+    codex_hook_script_path = paths.codex_dir / HOOK_SCRIPT_REL
+    if codex_hook_script_path.exists():
+        specs.append((codex_hook_script_path, "second-brain SessionStart hook script (codex)", None))
+
+    codex_instructions_path = paths.codex_dir / "instructions.md"
+    if _marked_section_present(codex_instructions_path, CODEX_INSTRUCTIONS_BEGIN_MARKER):
+
+        def _mutate_codex_instructions(text: str) -> tuple[str | None, bool]:
+            return ms.strip_marked_section(text, CODEX_INSTRUCTIONS_BEGIN_MARKER, CODEX_INSTRUCTIONS_END_MARKER)
+
+        specs.append((codex_instructions_path, "second-brain section from instructions.md", _mutate_codex_instructions))
+
+    cursor_hooks_path = paths.cursor_dir / "hooks.json"
+    if cursor_hooks_path.exists() and _cursor_hook_already_installed(paths):
+
+        def _mutate_cursor_hooks(text: str) -> tuple[str | None, bool]:
+            current = json.loads(text)
+            merged, changed = ms.strip_cursor_hook(
+                current, CURSOR_SESSIONSTART_EVENT, _cursor_hook_command(paths)
+            )
+            if not changed:
+                return None, False
+            return json.dumps(merged, indent=2) + "\n", False
+
+        specs.append((cursor_hooks_path, "sessionStart hook from hooks.json", _mutate_cursor_hooks))
+
+    cursor_hook_script_path = paths.cursor_dir / HOOK_SCRIPT_REL
+    if cursor_hook_script_path.exists():
+        specs.append((cursor_hook_script_path, "second-brain sessionStart hook script (cursor)", None))
+
+    opencode_agents_path = paths.opencode_config_dir / "AGENTS.md"
+    if _marked_section_present(opencode_agents_path, OPENCODE_AGENTS_BEGIN_MARKER):
+
+        def _mutate_opencode_agents(text: str) -> tuple[str | None, bool]:
+            return ms.strip_marked_section(text, OPENCODE_AGENTS_BEGIN_MARKER, OPENCODE_AGENTS_END_MARKER)
+
+        specs.append((opencode_agents_path, "second-brain section from OpenCode AGENTS.md", _mutate_opencode_agents))
+
     if paths.manifest.exists():
         specs.append((paths.manifest, "kit manifest", None))
 
-    if not specs:
+    # Cursor's rule file is handled separately: unlike the other kit-owned
+    # snippets above (which are merged into shared user files), this file is
+    # fully kit-owned but may still have been hand-edited — delete only if it
+    # still matches the template, matching every other kit's copy-style
+    # uninstall (core.uninstall_unchanged_file). A hand-edited file is kept.
+    cursor_rule_dst = paths.cursor_dir / CURSOR_RULE_REL
+    cursor_rule_src = paths.template / CURSOR_RULE_REL
+    remove_cursor_rule = cursor_rule_dst.exists()
+
+    if not specs and not remove_cursor_rule:
         print("nothing to uninstall")
         return 0
 
     if dry_run:
         for _path, label, _fn in specs:
             print(f"would remove {label}")
+        if remove_cursor_rule:
+            print(f"would remove {CURSOR_RULE_REL} (if unchanged from template)")
         print("dry run: no files modified")
         return 0
 
@@ -981,4 +1525,11 @@ def uninstall(
             else:
                 path.write_text(new_text or "", encoding="utf-8")
                 print(f"stripped {label}")
+
+    if remove_cursor_rule:
+        if core.uninstall_unchanged_file(cursor_rule_src, cursor_rule_dst):
+            print(f"removed {CURSOR_RULE_REL}")
+        else:
+            print(f"kept modified file {CURSOR_RULE_REL}")
+
     return 0

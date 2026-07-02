@@ -1,11 +1,15 @@
-usage: vibe kits second-brain [-h] {install,diff,doctor,uninstall} ...
+usage: vibe kits second-brain [-h]
+                              {install,diff,doctor,uninstall,enable-hook} ...
 
 positional arguments:
-  {install,diff,doctor,uninstall}
+  {install,diff,doctor,uninstall,enable-hook}
     install             Install or update the second-brain kit
     diff                Show file-level differences for managed files
     doctor              Check second-brain kit installation status
     uninstall           Remove files managed by this kit
+    enable-hook         Enable proactive context wiring (SessionStart hook +
+                        persona section) for Claude Code, Codex CLI, Cursor,
+                        and OpenCode
 
 options:
   -h, --help            show this help message and exit
