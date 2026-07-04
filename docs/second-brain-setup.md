@@ -223,6 +223,20 @@ yes | hermes mcp add qmd --command qmd --args mcp
 hermes mcp list
 ```
 
+**Cursor** — edit `~/.cursor/mcp.json` (global scope):
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "type": "stdio",
+      "command": "qmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+`vibe kits second-brain install`/`enable-hook` automate this step.
+
 **OpenCode** — edit `~/.config/opencode/opencode.jsonc`:
 ```jsonc
 {

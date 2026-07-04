@@ -25,6 +25,8 @@ try:
         _is_legacy_kit_owned_qmd_mcp,
         _is_expected_opencode_qmd_mcp,
         _merge_opencode_qmd_mcp,
+        _merge_cursor_config,
+        QMD_MCP_SNIPPET_JSON,
         _hook_command,
         _hook_already_installed,
         _enable_proactive_context,
@@ -1457,6 +1459,166 @@ class SecondBrainOpenCodeMcpTests(unittest.TestCase):
             output = buf.getvalue()
 
             self.assertIn("root is not an object", output)
+
+
+class SecondBrainCursorMcpTests(unittest.TestCase):
+    """_merge_cursor_config wires qmd MCP into ~/.cursor/mcp.json, matching Claude's pattern."""
+
+    def test_install_merges_qmd_mcp_into_cursor_config(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            mcp_path = home / ".cursor" / "mcp.json"
+            self.assertTrue(mcp_path.exists())
+            config = json.loads(mcp_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                config["mcpServers"]["qmd"], QMD_MCP_SNIPPET_JSON["mcpServers"]["qmd"]
+            )
+
+    def test_install_preserves_existing_cursor_mcp_entries(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            cursor_dir = home / ".cursor"
+            cursor_dir.mkdir(parents=True, exist_ok=True)
+            preexisting = {"mcpServers": {"other": {"command": "keep-me"}}}
+            (cursor_dir / "mcp.json").write_text(
+                json.dumps(preexisting), encoding="utf-8"
+            )
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            config = json.loads((cursor_dir / "mcp.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["mcpServers"]["other"], {"command": "keep-me"})
+            self.assertEqual(
+                config["mcpServers"]["qmd"], QMD_MCP_SNIPPET_JSON["mcpServers"]["qmd"]
+            )
+
+    def test_install_does_not_overwrite_custom_cursor_qmd_entry(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            cursor_dir = home / ".cursor"
+            cursor_dir.mkdir(parents=True, exist_ok=True)
+            custom = {"command": "my-own-qmd", "args": ["mcp"]}
+            (cursor_dir / "mcp.json").write_text(
+                json.dumps({"mcpServers": {"qmd": custom}}), encoding="utf-8"
+            )
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            config = json.loads((cursor_dir / "mcp.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["mcpServers"]["qmd"], custom)
+
+    def test_install_skips_invalid_cursor_mcp_json(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            cursor_dir = home / ".cursor"
+            cursor_dir.mkdir(parents=True, exist_ok=True)
+            (cursor_dir / "mcp.json").write_text("{not valid json", encoding="utf-8")
+
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+
+            self.assertEqual(
+                (cursor_dir / "mcp.json").read_text(encoding="utf-8"), "{not valid json"
+            )
+
+    def test_merge_cursor_config_direct_call_creates_file(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            paths = _paths(home=home_str)
+            _merge_cursor_config(paths)
+            mcp_path = paths.cursor_dir / "mcp.json"
+            self.assertTrue(mcp_path.exists())
+            config = json.loads(mcp_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                config["mcpServers"]["qmd"], QMD_MCP_SNIPPET_JSON["mcpServers"]["qmd"]
+            )
+
+    def test_uninstall_removes_cursor_qmd_mcp_preserves_other(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            mcp_path = home / ".cursor" / "mcp.json"
+            config = json.loads(mcp_path.read_text(encoding="utf-8"))
+            config["mcpServers"]["other"] = {"command": "keep-me"}
+            mcp_path.write_text(json.dumps(config), encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            result = json.loads(mcp_path.read_text(encoding="utf-8"))
+            self.assertNotIn("qmd", result.get("mcpServers", {}))
+            self.assertEqual(result["mcpServers"]["other"], {"command": "keep-me"})
+
+    def test_uninstall_removes_qmd_entry_matching_claude_behavior(self):
+        """uninstall's shared _strip_qmd_mcp removes any qmd entry regardless of
+        shape, matching Claude's existing (shape-agnostic) uninstall behavior."""
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            mcp_path = home / ".cursor" / "mcp.json"
+            config = json.loads(mcp_path.read_text(encoding="utf-8"))
+            config["mcpServers"]["qmd"] = {"command": "my-own", "args": ["mcp"]}
+            mcp_path.write_text(json.dumps(config), encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            result = json.loads(mcp_path.read_text(encoding="utf-8"))
+            self.assertNotIn("qmd", result.get("mcpServers", {}))
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_reports_cursor_qmd_mcp_registered(self, mock_run, mock_which):
+        def _which(cmd):
+            return f"/fake/{cmd}" if cmd in ("qmd", "git") else None
+
+        mock_which.side_effect = _which
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+            mock_run.return_value = subprocess.CompletedProcess([], 0, f"  {wiki_path}\n", "")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertIn("qmd MCP", output)
+            self.assertIn("Cursor", output)
+
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    def test_doctor_reports_cursor_qmd_mcp_absent(self, mock_run, mock_which):
+        def _which(cmd):
+            return f"/fake/{cmd}" if cmd in ("qmd", "git") else None
+
+        mock_which.side_effect = _which
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(
+                home=str(home),
+                dry_run=False,
+                yes=True,
+                setup_deps=False,
+                merge_settings=False,
+            )
+            wiki_path = str(home.resolve() / "second-brain" / "wiki")
+            mock_run.return_value = subprocess.CompletedProcess([], 0, f"  {wiki_path}\n", "")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                doctor(home=str(home))
+            output = buf.getvalue()
+            self.assertIn("qmd MCP", output)
+
+    def test_diff_reports_cursor_mcp_would_merge_on_fresh_install(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            vault = home / "second-brain"
+            for d in VAULT_DIRS:
+                (vault / d).mkdir(parents=True, exist_ok=True)
+            (vault / ".gitignore").write_text("", encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                install(home=str(home), dry_run=True, yes=True)
+            output = buf.getvalue()
+            self.assertIn("Claude, OpenCode, Codex, Cursor", output)
 
 
 class SecondBrainSecretKeySafetyTests(unittest.TestCase):
