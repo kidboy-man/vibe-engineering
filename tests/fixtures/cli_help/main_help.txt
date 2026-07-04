@@ -1,4 +1,4 @@
-usage: vibe [-h] {upgrade,kits} ...
+usage: vibe [-h] [--version] {upgrade,kits} ...
 
 Install and manage portable engineering kits.
 
@@ -9,3 +9,4 @@ positional arguments:
 
 options:
   -h, --help      show this help message and exit
+  --version, -V   show program's version number and exit

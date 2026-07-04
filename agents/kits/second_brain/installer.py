@@ -414,6 +414,39 @@ def _merge_opencode_config(paths: KitPaths) -> None:
     print("merged qmd MCP into opencode.jsonc")
 
 
+def _merge_cursor_config(paths: KitPaths) -> None:
+    """Merge qmd MCP entry into ~/.cursor/mcp.json.
+
+    Nested merge (not json_defaults_strategy's shallow top-level merge):
+    an existing unrelated mcpServers.* entry must not block adding qmd.
+    """
+    config_path = paths.cursor_dir / "mcp.json"
+    current: dict = {}
+    if config_path.exists():
+        try:
+            current = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print("skipping invalid mcp.json")
+            return
+
+    if not isinstance(current, dict):
+        print("skipping mcp.json: root is not an object")
+        return
+
+    mcps = current.get("mcpServers")
+    if not isinstance(mcps, dict):
+        mcps = {}
+    if "qmd" in mcps:
+        return
+
+    merged = dict(current)
+    merged["mcpServers"] = {**mcps, "qmd": dict(QMD_MCP_SNIPPET_JSON["mcpServers"]["qmd"])}
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+    print("merged qmd MCP into mcp.json")
+
+
 def _merge_codex_config(paths: KitPaths) -> None:
     config_path = paths.codex_dir / "config.toml"
     current: str | None = None
@@ -812,8 +845,8 @@ def install(
     if dry_run:
         _print_dry_run(paths)
         if merge_settings:
-            print("would merge qmd MCP into agent configs (Claude, OpenCode, Codex)")
-            print("  Cursor and Hermes: no config mutation")
+            print("would merge qmd MCP into agent configs (Claude, OpenCode, Codex, Cursor)")
+            print("  Hermes: no config mutation")
         if enable_hooks:
             _enable_proactive_context(paths, dry_run=True)
         else:
@@ -865,6 +898,7 @@ def install(
         _merge_claude_config(paths)
         _merge_opencode_config(paths)
         _merge_codex_config(paths)
+        _merge_cursor_config(paths)
         if enable_hooks:
             _offer_proactive_context(paths, yes=yes)
         else:
@@ -1049,6 +1083,46 @@ def doctor(home: str | None = None) -> int:
                     )
         except Exception:
             pass  # _check_config already reported parse failures
+
+    def _has_qmd_entry(entries: object) -> bool:
+        return isinstance(entries, dict) and "qmd" in entries
+
+    print("\n-- qmd MCP registration --")
+
+    claude_has_qmd = False
+    claude_settings_path = paths.claude_dir / "settings.json"
+    if claude_settings_path.exists():
+        try:
+            claude_has_qmd = _has_qmd_entry(
+                json.loads(claude_settings_path.read_text(encoding="utf-8")).get("mcpServers")
+            )
+        except json.JSONDecodeError:
+            pass
+    print(f"{'✓' if claude_has_qmd else 'ℹ'} Claude Code: {'registered' if claude_has_qmd else 'not registered'} (settings.json)")
+
+    codex_config_path = paths.codex_dir / "config.toml"
+    codex_has_qmd = codex_config_path.exists() and CODEX_TOML_SECTION in codex_config_path.read_text(encoding="utf-8")
+    print(f"{'✓' if codex_has_qmd else 'ℹ'} Codex CLI: {'registered' if codex_has_qmd else 'not registered'} (config.toml)")
+
+    cursor_mcp_path = paths.cursor_dir / "mcp.json"
+    cursor_has_qmd = False
+    if cursor_mcp_path.exists():
+        try:
+            cursor_has_qmd = _has_qmd_entry(
+                json.loads(cursor_mcp_path.read_text(encoding="utf-8")).get("mcpServers")
+            )
+        except json.JSONDecodeError:
+            pass
+    print(f"{'✓' if cursor_has_qmd else 'ℹ'} Cursor: {'registered' if cursor_has_qmd else 'not registered'} (mcp.json)")
+
+    opencode_has_qmd = False
+    if opencode_path.exists():
+        try:
+            oc_config = ms.parse_jsonc(opencode_path.read_text(encoding="utf-8"))
+            opencode_has_qmd = _has_qmd_entry(oc_config.get("mcp")) or _has_qmd_entry(oc_config.get("mcpServers"))
+        except Exception:
+            pass
+    print(f"{'✓' if opencode_has_qmd else 'ℹ'} OpenCode: {'registered' if opencode_has_qmd else 'not registered'} (opencode.jsonc)")
 
     def _doctor_print_hook(agent: HookAgent) -> None:
         script_path = agent.script_dir_fn(paths) / HOOK_SCRIPT_REL
@@ -1478,6 +1552,20 @@ def uninstall(
             return json.dumps(merged, indent=2) + "\n", False
 
         specs.append((cursor_hooks_path, "sessionStart hook from hooks.json", _mutate_cursor_hooks))
+
+    cursor_mcp_path = paths.cursor_dir / "mcp.json"
+    if cursor_mcp_path.exists():
+        try:
+            mcps = json.loads(cursor_mcp_path.read_text(encoding="utf-8")).get("mcpServers")
+        except json.JSONDecodeError:
+            mcps = None
+        if isinstance(mcps, dict) and "qmd" in mcps:
+
+            def _mutate_cursor_mcp(text: str) -> tuple[str | None, bool]:
+                new = _strip_qmd_mcp(text, json.loads)
+                return (None, False) if new is None else (new, False)
+
+            specs.append((cursor_mcp_path, "qmd MCP from mcp.json", _mutate_cursor_mcp))
 
     cursor_hook_script_path = paths.cursor_dir / HOOK_SCRIPT_REL
     if cursor_hook_script_path.exists():

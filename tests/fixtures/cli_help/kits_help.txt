@@ -1,5 +1,6 @@
 usage: vibe kits [-h]
-                 {list,claude-code,opencode,second-brain,gemini,codex,cursor} ...
+                 {list,claude-code,opencode,second-brain,gemini,codex,cursor}
+                 ...
 
 positional arguments:
   {list,claude-code,opencode,second-brain,gemini,codex,cursor}

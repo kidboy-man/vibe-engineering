@@ -21,13 +21,9 @@ overwriting your existing config files. The `second-brain` kit optionally runs
 ## Install
 
 ```bash
-# From PyPI (recommended)
 pipx install vibe-kits
 
-# From GitHub (latest unreleased)
-pipx install git+https://github.com/kidboy-man/vibe-engineering.git
-
-# Self-upgrade from the stable package channel
+# Self-upgrade to the latest released version
 vibe upgrade
 ```
 
@@ -291,7 +287,7 @@ settings are preserved byte-for-byte.
 | Claude Code | JSON | `json_defaults_strategy` | `~/.claude/settings.json`; skips `env` and secret keys |
 | OpenCode | JSONC | `jsonc_defaults_strategy` | `~/.config/opencode/opencode.jsonc`; skips 14 local-only keys + 6 secret substrings |
 | Codex CLI | TOML | `toml_block_merge_strategy` | `~/.codex/config.toml`; inserts/replaces `[mcp_servers.qmd]` block only |
-| Cursor | JSON + MDC | `cursor_hook_merge_strategy` + kit-owned rule copy | `~/.cursor/hooks.json` sessionStart entry + `~/.cursor/rules/second-brain.mdc` |
+| Cursor | JSON + MDC | `cursor_hook_merge_strategy` + kit-owned rule copy + `_merge_cursor_config` | `~/.cursor/hooks.json` sessionStart entry + `~/.cursor/rules/second-brain.mdc` + `~/.cursor/mcp.json` `mcpServers.qmd` entry |
 | Hermes | — | docs/sample only | No config mutation anywhere; ship docs only |
 
 ### qmd policy
