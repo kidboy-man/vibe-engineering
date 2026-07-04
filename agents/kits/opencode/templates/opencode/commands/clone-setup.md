@@ -15,7 +15,7 @@ vibe kits opencode install --yes
 If `vibe` is not on PATH, install the kit first:
 
 ```bash
-pipx install git+https://github.com/kidboy-man/vibe-engineering.git
+pipx install vibe-kits
 vibe kits opencode install --yes
 ```
 

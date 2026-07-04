@@ -155,7 +155,9 @@ class CliDispatchContractTests(unittest.TestCase):
 
         with patch("agents.cli._is_pipx", return_value=True), patch(
             "agents.cli._has_pip", return_value=True
-        ), patch("agents.cli._run", return_value=0) as run:
+        ), patch("agents.cli._run", return_value=0) as run, patch(
+            "agents.cli._installed_version", return_value="0.3.1"
+        ):
             rc = cmd_upgrade(None)
 
         self.assertEqual(rc, 0)
@@ -168,7 +170,9 @@ class CliDispatchContractTests(unittest.TestCase):
 
         with patch("agents.cli._is_pipx", return_value=True), patch(
             "agents.cli._has_pip", return_value=False
-        ), patch("agents.cli._run", return_value=0) as run:
+        ), patch("agents.cli._run", return_value=0) as run, patch(
+            "agents.cli.shutil.which", return_value="/usr/bin/pipx"
+        ), patch("agents.cli._installed_version", return_value="0.3.1"):
             rc = cmd_upgrade(None)
 
         self.assertEqual(rc, 0)
@@ -179,13 +183,69 @@ class CliDispatchContractTests(unittest.TestCase):
 
         with patch("agents.cli._is_pipx", return_value=False), patch(
             "agents.cli._run", return_value=0
-        ) as run:
+        ) as run, patch("agents.cli._installed_version", return_value="0.3.1"):
             rc = cmd_upgrade(None)
 
         self.assertEqual(rc, 0)
         run.assert_called_once_with(
             [sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE]
         )
+
+    def test_upgrade_reports_missing_pipx_binary_without_crashing(self):
+        from agents.cli import cmd_upgrade
+
+        with patch("agents.cli._is_pipx", return_value=True), patch(
+            "agents.cli._has_pip", return_value=False
+        ), patch("agents.cli.shutil.which", return_value=None), patch(
+            "agents.cli._run"
+        ) as run:
+            rc = cmd_upgrade(None)
+
+        self.assertNotEqual(rc, 0)
+        run.assert_not_called()
+
+    def test_upgrade_prints_recovery_hint_on_nonzero_exit(self):
+        from agents.cli import cmd_upgrade
+
+        with patch("agents.cli._is_pipx", return_value=False), patch(
+            "agents.cli._run", return_value=1
+        ), patch("agents.cli._installed_version", return_value="0.3.1"), patch(
+            "builtins.print"
+        ) as mock_print:
+            rc = cmd_upgrade(None)
+
+        self.assertEqual(rc, 1)
+        printed = " ".join(str(call.args[0]) for call in mock_print.call_args_list)
+        self.assertIn("recover", printed.lower())
+
+    def test_upgrade_reports_already_latest_when_version_unchanged(self):
+        from agents.cli import cmd_upgrade
+
+        with patch("agents.cli._is_pipx", return_value=False), patch(
+            "agents.cli._run", return_value=0
+        ), patch("agents.cli._installed_version", return_value="0.3.1"), patch(
+            "builtins.print"
+        ) as mock_print:
+            rc = cmd_upgrade(None)
+
+        self.assertEqual(rc, 0)
+        printed = " ".join(str(call.args[0]) for call in mock_print.call_args_list)
+        self.assertIn("already", printed.lower())
+
+    def test_upgrade_reports_new_version_when_changed(self):
+        from agents.cli import cmd_upgrade
+
+        versions = iter(["0.3.0", "0.3.1"])
+        with patch("agents.cli._is_pipx", return_value=False), patch(
+            "agents.cli._run", return_value=0
+        ), patch("agents.cli._installed_version", side_effect=lambda: next(versions)), patch(
+            "builtins.print"
+        ) as mock_print:
+            rc = cmd_upgrade(None)
+
+        self.assertEqual(rc, 0)
+        printed = " ".join(str(call.args[0]) for call in mock_print.call_args_list)
+        self.assertIn("0.3.1", printed)
 
 
 class SecondBrainCliEnableHookWiringTests(unittest.TestCase):

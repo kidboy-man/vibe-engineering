@@ -21,13 +21,9 @@ overwriting your existing config files. The `second-brain` kit optionally runs
 ## Install
 
 ```bash
-# From PyPI (recommended)
 pipx install vibe-kits
 
-# From GitHub (latest unreleased)
-pipx install git+https://github.com/kidboy-man/vibe-engineering.git
-
-# Self-upgrade from the stable package channel
+# Self-upgrade to the latest released version
 vibe upgrade
 ```
 

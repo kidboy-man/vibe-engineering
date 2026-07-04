@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
+from importlib import metadata
 from typing import Mapping
 
 from agents.kit_registry import KITS, KitSpec
@@ -28,19 +30,57 @@ def _run(cmd: list[str]) -> int:
     return subprocess.run(cmd, check=False).returncode
 
 
+def _installed_version() -> str | None:
+    try:
+        return metadata.version(PYPI_PACKAGE)
+    except metadata.PackageNotFoundError:
+        return None
+
+
 def cmd_upgrade(_args: argparse.Namespace) -> int:
-    if _is_pipx():
-        if _has_pip():
-            return _run([sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE])
-        # pipx+uv venvs have no pip — fall back to pipx which manages the venv itself
-        return _run(["pipx", "upgrade", PYPI_PACKAGE])
-    return _run([sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE])
+    # pipx+uv venvs have no pip — fall back to pipx which manages the venv itself
+    use_pipx = _is_pipx() and not _has_pip()
+
+    if use_pipx:
+        if shutil.which("pipx") is None:
+            print(
+                "pipx not found on PATH — cannot self-upgrade this way. "
+                f"Reinstall manually with: pipx install --force {PYPI_PACKAGE}"
+            )
+            return 1
+        cmd = ["pipx", "upgrade", PYPI_PACKAGE]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", PYPI_PACKAGE]
+
+    before = _installed_version()
+    rc = _run(cmd)
+    if rc != 0:
+        recovery = (
+            f"pipx install --force {PYPI_PACKAGE}"
+            if use_pipx
+            else f"pip install --force-reinstall {PYPI_PACKAGE}"
+        )
+        print(f"Upgrade failed (exit {rc}). To recover, try: {recovery}")
+        return rc
+
+    after = _installed_version()
+    if before is not None and before == after:
+        print(f"Already on the latest installed version ({after}).")
+    elif after is not None:
+        print(f"Upgraded to {after}.")
+    return rc
 
 
 def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vibe",
         description="Install and manage portable engineering kits.",
+    )
+    parser.add_argument(
+        "--version",
+        "-V",
+        action="version",
+        version=f"vibe {_installed_version() or 'unknown'}",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
