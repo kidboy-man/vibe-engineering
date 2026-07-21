@@ -219,6 +219,10 @@ before registering the collection. Pass
 `--no-setup-deps` to skip; all other network commands (`qmd`, `pip`,
 `git clone`, etc.) are never run.
 
+The install also adds the portable `second-brain` umbrella skill plus named
+wiki skills (`wiki`, `wiki-ingest`, `wiki-query`, `wiki-lint`, and related
+workflows) to `$HOME/.agents/skills` and `~/.claude/skills`.
+
 ### Vault location
 
 - Default: `~/second-brain`
@@ -341,7 +345,7 @@ The `second-brain` kit additionally guarantees:
 - **No symlinks**: never creates cross-directory symlinks
 - **No plugin or Obsidian installs**: `obsidian` is checked by `doctor` but never installed
 - **No memory-compiler hooks**: never mutates `.claude/settings.json` for memory-compiler hooks
-- **No third-party skill redistribution**: `claude-obsidian` is referenced as install commands only; its skill files are not copied into the repo
+- **Attributed portable wiki skills**: the kit adapts the MIT-licensed `claude-obsidian` v1.9.2 workflow names to its own qmd vault contract; it does not install the upstream plugin, scripts, or dependencies
 - **Vault data is sacred**: `uninstall` never deletes the vault directory, `.git`, seed pages, `.gitignore`, or any user content under `raw/`, `wiki/`, `output/`. It removes only kit-owned non-secret agent config snippets and the runtime manifest
 
 ## Adding a new kit

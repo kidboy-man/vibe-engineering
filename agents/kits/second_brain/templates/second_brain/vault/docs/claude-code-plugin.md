@@ -1,8 +1,8 @@
 # Optional Claude Code Plugin — claude-obsidian
 
-The second-brain kit already installs its own portable `second-brain` skill for
-proactive retrieval, automatic inbox drafts, and requested curation. This plugin
-is optional for Claude-specific slash commands and additional workflows.
+The second-brain kit already installs portable `second-brain` and named wiki
+skills for proactive retrieval, capture, ingestion, querying, and maintenance.
+This plugin is optional only for Claude-specific slash commands.
 
 Repository: [https://github.com/AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian)
 
@@ -32,9 +32,10 @@ Invoked with `/` prefix in Claude Code:
 | `/canvas` | Add content to an Obsidian canvas file |
 | `/autoresearch` | Run autonomous research loop |
 
-### Agent Skills (~12+)
+### Portable Agent Skills
 
-Triggered by **natural language**, not slash commands. Say the phrase and the skill activates:
+The kit installs the named workflows below for compatible agents. Trigger them
+with natural language (or `$wiki` in Codex), not a slash command.
 
 | Skill | Trigger Phrases |
 |-------|----------------|
@@ -64,6 +65,6 @@ You **cannot** type `/wiki-lint`. That returns "Unknown command." Instead, say "
 
 ## Built-in vs Plugin Skills
 
-The kit's `second-brain` skill is installed globally for compatible agents. The
-plugin manages its own separate skills under `~/.claude/`; do not copy plugin
+The kit's `second-brain` and wiki skills are installed globally for compatible
+agents. The plugin manages separate Claude slash commands; do not copy plugin
 files into this vault or any project.

@@ -55,7 +55,7 @@ HOOK_SCRIPT_REL = "hooks/second-brain-context.py"
 SESSIONSTART_EVENT = "SessionStart"
 CURSOR_SESSIONSTART_EVENT = "sessionStart"
 CURSOR_RULE_REL = "rules/second-brain.mdc"
-SKILL_REL = "skills/second-brain/SKILL.md"
+SKILL_ROOT_REL = "skills"
 QMD_MIN_NODE_MAJOR = 22
 QMD_COLLECTION_NAME = "second-brain"
 
@@ -359,35 +359,73 @@ def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
     return 0
 
 
+def _skill_source_dirs(paths: KitPaths) -> list[Path]:
+    root = paths.template / SKILL_ROOT_REL
+    return sorted(path.parent for path in root.glob("*/SKILL.md"))
+
+
+def _skill_root_targets(paths: KitPaths) -> list[Path]:
+    return [paths.home_root / ".agents" / "skills", paths.claude_dir / "skills"]
+
+
 def _skill_targets(paths: KitPaths) -> list[Path]:
     return [
-        paths.home_root / ".agents" / SKILL_REL,
-        paths.claude_dir / SKILL_REL,
+        root / source_dir.name / "SKILL.md"
+        for root in _skill_root_targets(paths)
+        for source_dir in _skill_source_dirs(paths)
     ]
 
 
+def _skill_source_for_target(paths: KitPaths, target: Path) -> Path:
+    return paths.template / SKILL_ROOT_REL / target.parent.name
+
+
+def _skill_dir_status(paths: KitPaths, source_dir: Path, target_dir: Path) -> str:
+    if not target_dir.exists():
+        return "missing"
+    expected = {
+        source.relative_to(source_dir)
+        for source in source_dir.rglob("*")
+        if source.is_file()
+    }
+    actual = {
+        target.relative_to(target_dir)
+        for target in target_dir.rglob("*")
+        if target.is_file()
+    }
+    if actual - expected:
+        return "modified"
+    for source in source_dir.rglob("*"):
+        if source.is_file():
+            target = target_dir / source.relative_to(source_dir)
+            if not target.exists():
+                return "incomplete"
+            if target.read_text(encoding="utf-8") != source.read_text(encoding="utf-8"):
+                return "modified"
+    return "up to date"
+
+
 def _install_skill(paths: KitPaths) -> None:
-    """Install the portable skill without overwriting a user-modified copy."""
-    source = paths.template / SKILL_REL
-    content = source.read_text(encoding="utf-8")
-    for target in _skill_targets(paths):
-        if target.exists():
-            if target.read_text(encoding="utf-8") == content:
+    """Install portable skill directories without overwriting user changes."""
+    for root in _skill_root_targets(paths):
+        for source_dir in _skill_source_dirs(paths):
+            target_dir = root / source_dir.name
+            status = _skill_dir_status(paths, source_dir, target_dir)
+            if status == "up to date":
                 continue
-            print(f"kept modified second-brain skill: {target}")
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        print(f"installed second-brain skill: {target}")
+            if status != "missing":
+                print(f"kept {status} second-brain skill: {target_dir}")
+                continue
+            for source in source_dir.rglob("*"):
+                if source.is_file():
+                    target = target_dir / source.relative_to(source_dir)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            print(f"installed second-brain skill: {target_dir / 'SKILL.md'}")
 
 
 def _skill_status(paths: KitPaths, target: Path) -> str:
-    if not target.exists():
-        return "missing"
-    source = paths.template / SKILL_REL
-    if target.read_text(encoding="utf-8") == source.read_text(encoding="utf-8"):
-        return "up to date"
-    return "modified"
+    return _skill_dir_status(paths, _skill_source_for_target(paths, target), target.parent)
 
 
 QMD_MCP_SNIPPET_JSON: dict = {
@@ -1768,10 +1806,14 @@ def uninstall(
     cursor_rule_dst = paths.cursor_dir / CURSOR_RULE_REL
     cursor_rule_src = paths.template / CURSOR_RULE_REL
     remove_cursor_rule = cursor_rule_dst.exists()
-    skill_source = paths.template / SKILL_REL
-    skill_targets = [target for target in _skill_targets(paths) if target.exists()]
+    skill_dirs = [
+        (source_dir, root / source_dir.name)
+        for root in _skill_root_targets(paths)
+        for source_dir in _skill_source_dirs(paths)
+        if (root / source_dir.name).exists()
+    ]
 
-    if not specs and not remove_cursor_rule and not skill_targets:
+    if not specs and not remove_cursor_rule and not skill_dirs:
         print("nothing to uninstall")
         return 0
 
@@ -1780,8 +1822,8 @@ def uninstall(
             print(f"would remove {label}")
         if remove_cursor_rule:
             print(f"would remove {CURSOR_RULE_REL} (if unchanged from template)")
-        for target in skill_targets:
-            print(f"would remove second-brain skill {target} (if unchanged from template)")
+        for _source_dir, target_dir in skill_dirs:
+            print(f"would remove second-brain skill {target_dir / 'SKILL.md'} (if unchanged from template)")
         print("dry run: no files modified")
         return 0
 
@@ -1810,10 +1852,17 @@ def uninstall(
         else:
             print(f"kept modified file {CURSOR_RULE_REL}")
 
-    for target in skill_targets:
-        if core.uninstall_unchanged_file(skill_source, target):
-            print(f"removed second-brain skill {target}")
-        else:
-            print(f"kept modified second-brain skill {target}")
+    for source_dir, target_dir in skill_dirs:
+        if _skill_dir_status(paths, source_dir, target_dir) != "up to date":
+            print(f"kept modified second-brain skill {target_dir}")
+            continue
+        for source in source_dir.rglob("*"):
+            if source.is_file():
+                (target_dir / source.relative_to(source_dir)).unlink()
+        for path in sorted(target_dir.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+            if path.is_dir():
+                path.rmdir()
+        target_dir.rmdir()
+        print(f"removed second-brain skill {target_dir / 'SKILL.md'}")
 
     return 0
