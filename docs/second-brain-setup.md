@@ -136,54 +136,28 @@ tags: [domain, subdomain]
 ---
 ```
 
-### 4. Optional: Install the Claude Code Plugin (`claude-obsidian`)
+### 4. Portable Wiki Skills
 
-The kit installs its own portable `second-brain` skill for proactive retrieval,
-automatic inbox drafts, and requested curation. This plugin is optional and adds
-Claude-specific slash commands and extra workflows.
+`vibe kits second-brain install` installs the `second-brain` umbrella skill and
+15 named workflows: `wiki`, `wiki-ingest`, `wiki-query`, `wiki-lint`,
+`wiki-fold`, `wiki-retrieve`, `wiki-mode`, `wiki-cli`, `save`, `autoresearch`,
+`canvas`, `defuddle`, `obsidian-markdown`, `obsidian-bases`, and `think`.
 
-The repo: `https://github.com/AgriciDaniel/claude-obsidian`
+They are invoked by natural language (or `$wiki` in Codex), not `/wiki-lint`.
+They use this kit's `raw/`, `inbox/`, `wiki/`, and qmd contract; no plugin,
+symlink, external script, or additional retrieval engine is required.
 
-```bash
-# Step 1: add the marketplace
-claude plugin marketplace add AgriciDaniel/claude-obsidian
-
-# Step 2: install the plugin
-claude plugin install claude-obsidian@agricidaniel-claude-obsidian
-
-# Verify
-claude plugin list
-```
-
-**What you get:**
-
-| Type | Count | Names | How to invoke |
-|------|-------|-------|---------------|
-| Slash commands | 4 | `/wiki`, `/save`, `/canvas`, `/autoresearch` | Prefix with `/` |
-| Agent skills | ~12 | wiki, wiki-ingest, wiki-query, wiki-lint, wiki-fold, wiki-retrieve, wiki-mode, wiki-cli, save, autoresearch, canvas, defuddle, obsidian-markdown, obsidian-bases, think | Natural language ("lint the wiki", "ingest this", "what do I know about X") |
-
-**Slash commands vs agent skills — the key distinction:**
-
-| | Slash command | Agent skill |
-|---|---|---|
-| Declared in | `commands/*.md` | `skills/<name>/SKILL.md` |
-| Invoked by | `/name` prefix | Natural language trigger phrases in `description:` field |
-| Supported on | Claude Code | Claude Code, Codex, OpenCode (Agent Skills spec) |
-| Example | `/wiki` — no alternatives | "lint the wiki", "health check", "find orphans" — all trigger wiki-lint |
-
-You **cannot** type `/wiki-lint`. That fails with "Unknown command." Instead, say "lint the wiki" or "health check my vault."
+The MIT-licensed upstream `claude-obsidian` plugin remains optional if you
+specifically want Claude-only slash commands. It is not installed or managed by
+this kit.
 
 ### 5. Wire Multi-Agent Access
 
 All agents share the same plain Markdown files on disk. The wiring just tells each agent where to look.
 
-**Claude Code** (already wired by step 4):
-- Plugin is installed globally
-- Start any session in `~/second-brain/` and it reads `CLAUDE.md` automatically
-
-**Codex CLI and OpenCode** — the kit installs `second-brain/SKILL.md` into
-`~/.agents/skills/` and a Claude-compatible copy under `~/.claude/skills/`.
-No symlinks or plugin installation are required for the core workflow.
+**Claude Code, Codex CLI, and OpenCode** — the kit installs `second-brain` and
+the named wiki skills into `~/.agents/skills/` plus a Claude-compatible copy
+under `~/.claude/skills/`. No symlinks or plugin installation are required.
 
 **Hermes Agent** — activate its built-in `obsidian` skill (filesystem-first, uses native file tools):
 ```bash
@@ -375,8 +349,9 @@ ls ~/second-brain/wiki/hot.md    && echo "OK: hot.md"    || echo "MISSING: hot.m
 # 2. qmd
 qmd ls | grep wiki               && echo "OK: qmd collection"  || echo "MISSING: qmd collection"
 
-# 3. First-party skill
-test -f ~/.agents/skills/second-brain/SKILL.md && echo "OK: skill" || echo "MISSING: skill"
+# 3. Wiki skills
+test -f ~/.agents/skills/wiki/SKILL.md && echo "OK: wiki skill" || echo "MISSING: wiki skill"
+test -f ~/.agents/skills/wiki-ingest/SKILL.md && echo "OK: ingest skill" || echo "MISSING: ingest skill"
 
 # 4. qmd MCP in Claude Code
 claude mcp list | grep qmd               && echo "OK: qmd MCP"  || echo "MISSING: qmd MCP"

@@ -2111,6 +2111,24 @@ class SecondBrainIncompleteInstallDoctorTests(unittest.TestCase):
 class SecondBrainSkillInstallTests(unittest.TestCase):
     """The kit ships a discoverable first-party second-brain skill."""
 
+    WIKI_SKILL_NAMES = {
+        "autoresearch",
+        "canvas",
+        "defuddle",
+        "obsidian-bases",
+        "obsidian-markdown",
+        "save",
+        "think",
+        "wiki",
+        "wiki-cli",
+        "wiki-fold",
+        "wiki-ingest",
+        "wiki-lint",
+        "wiki-mode",
+        "wiki-query",
+        "wiki-retrieve",
+    }
+
     def test_skill_allows_hybrid_retrieval_but_keeps_bulk_indexing_explicit(self):
         skill = (
             Path(__file__).resolve().parent.parent
@@ -2134,6 +2152,39 @@ class SecondBrainSkillInstallTests(unittest.TestCase):
                 content = path.read_text(encoding="utf-8")
                 self.assertIn("name: second-brain", content)
                 self.assertIn("inbox/", content)
+
+    def test_install_copies_portable_wiki_skill_suite_to_both_discovery_roots(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+
+            rc = install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+
+            self.assertEqual(rc, 0)
+            for root in (home / ".agents" / "skills", home / ".claude" / "skills"):
+                installed = {
+                    path.parent.name
+                    for path in root.glob("*/SKILL.md")
+                }
+                self.assertTrue(self.WIKI_SKILL_NAMES <= installed)
+                for name in self.WIKI_SKILL_NAMES:
+                    content = (root / name / "SKILL.md").read_text(encoding="utf-8")
+                    self.assertIn(f"name: {name}", content)
+
+    def test_portable_wiki_skill_suite_uses_current_vault_contract(self):
+        skills_root = (
+            Path(__file__).resolve().parent.parent
+            / "agents/kits/second_brain/templates/second_brain/skills"
+        )
+        for name in self.WIKI_SKILL_NAMES:
+            content = (skills_root / name / "SKILL.md").read_text(encoding="utf-8")
+            self.assertNotIn(".raw/", content)
+            self.assertNotIn(".vault-meta", content)
+            self.assertNotIn("Ollama", content)
+            self.assertNotIn("scripts/", content)
+
+        notice = (skills_root / "NOTICE-claude-obsidian.md").read_text(encoding="utf-8")
+        self.assertIn("MIT License", notice)
+        self.assertIn("00213b720cdc9bb00ec8b3f88f9cc408721c37f9", notice)
 
     def test_dry_run_reports_skill_without_creating_it(self):
         with tempfile.TemporaryDirectory() as home_str:
@@ -2168,6 +2219,9 @@ class SecondBrainSkillInstallTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertFalse((home / ".agents" / "skills" / "second-brain" / "SKILL.md").exists())
             self.assertFalse((home / ".claude" / "skills" / "second-brain" / "SKILL.md").exists())
+            for root in (home / ".agents" / "skills", home / ".claude" / "skills"):
+                for name in self.WIKI_SKILL_NAMES:
+                    self.assertFalse((root / name / "SKILL.md").exists())
 
     def test_uninstall_keeps_modified_skill_file(self):
         with tempfile.TemporaryDirectory() as home_str:

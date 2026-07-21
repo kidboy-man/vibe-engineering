@@ -67,18 +67,18 @@ retrieval is the default agent path.
 ## Supported AI Agents
 
 ### Claude Code
-- `second-brain install` installs the first-party `second-brain` skill under global Agent Skills and Claude-compatible paths.
-- The optional `claude-obsidian` plugin adds Claude-specific slash commands; see `docs/claude-code-plugin.md`.
+- `second-brain install` installs the `second-brain` umbrella plus portable `wiki*` skills under global Agent Skills and Claude-compatible paths.
+- The optional `claude-obsidian` plugin is only needed for Claude-specific slash commands; see `docs/claude-code-plugin.md`.
 - Start sessions in the vault root so this vault-local `CLAUDE.md`/`AGENTS.md` is read automatically — this covers ingest/query behavior *when working inside the vault*.
 - **Global proactive wiring (works in any project, not just the vault):** `second-brain install` offers (interactive prompt, or `vibe kits second-brain enable-hook` standalone) to register a `SessionStart` hook that auto-loads `wiki/hot.md` + `wiki/index.md` into every Claude Code session, plus a marked section in `~/.claude/CLAUDE.md` that tells the agent when to proactively query the vault via the `qmd` MCP tools and when to file learnings back — even outside the vault directory. Both are idempotent and reversible via `uninstall`.
 
 ### OpenCode
-- Discovers the kit's global `.agents/skills/second-brain` skill automatically.
+- Discovers the kit's global `.agents/skills/` second-brain and wiki skills automatically.
 - Register qmd MCP in `opencode.jsonc`.
 - **Global proactive wiring:** `second-brain install` / `enable-hook` merges a marked section into `~/.config/opencode/AGENTS.md` describing the vault and qmd tools. There is no session-start context-injection hook for OpenCode (no documented API for it), so `wiki/hot.md`/`wiki/index.md` are not auto-loaded — read them yourself at session start if needed.
 
 ### Codex CLI
-- Discovers the kit's global `.agents/skills/second-brain` skill automatically.
+- Discovers the kit's global `.agents/skills/` second-brain and wiki skills automatically.
 - Register qmd MCP in `~/.codex/config.toml`.
 - **Global proactive wiring:** `second-brain install` / `enable-hook` registers a `SessionStart` hook (`[[hooks.SessionStart]]` in `~/.codex/config.toml`) that auto-loads `wiki/hot.md` + `wiki/index.md` into every session, plus a marked section in `~/.codex/AGENTS.md`. Both idempotent and reversible via `uninstall`.
 
