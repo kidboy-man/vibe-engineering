@@ -34,7 +34,8 @@ When asked to ingest a source:
 When asked a knowledge question:
 
 1. Read `wiki/hot.md` for recent context (if it exists).
-2. Read `wiki/index.md` to find relevant pages.
+2. Use qmd MCP hybrid `query` when it is available; its first use may download
+   local models and temporarily use the GPU.
 3. Read the 3-5 most relevant pages.
 4. Synthesize an answer with citations to wiki pages.
 5. Ask if the answer should be filed as a new wiki page.
@@ -55,7 +56,13 @@ qmd search "your query"
 
 # Semantic search (requires embeddings — run `qmd embed` first)
 qmd vsearch "your query"
+
+# Hybrid search (may download local query/reranking models on first use)
+qmd query "your query"
 ```
+
+Do not run bulk `qmd pull` or `qmd embed` unless the user asks. Hybrid MCP
+retrieval is the default agent path.
 
 ## Supported AI Agents
 

@@ -55,7 +55,7 @@ The key promise: **every session can become a source, every answer can become a 
 
 | Tool | Why | Check |
 |------|-----|-------|
-| **Node.js 20+** | qmd search engine + Claude Code plugin installs | `node --version` |
+| **Node.js 22+** | qmd search engine + Claude Code plugin installs | `node --version` |
 | **npm 9+** | install qmd globally | `npm --version` |
 | **git** | version-control the vault (plain text, trivial backup) | `git --version` |
 | **uv** (Python package manager) | dependency management for memory-compiler hooks | `uv --version` |
@@ -103,7 +103,17 @@ qmd update                                               # initial index
 qmd search "test"                                        # smoke test
 ```
 
-**When to use `qmd embed`**: after you cross ~15-20 pages and want semantic ("what was I reading about X") in addition to keyword search. The first run downloads a ~333 MB embedding model and reindexes all docs (~30s for 20 pages).
+**Hybrid retrieval is the default agent path**: `qmd query` combines keyword,
+semantic, and reranking locally. Its first use may download local models and
+temporarily use GPU compute/VRAM. Run bulk `qmd embed` only when you explicitly
+want vector indexing; it is best done while not gaming.
+
+**GPU diagnostics**: run `qmd doctor`. CPU mode still supports indexing and
+keyword search. On WSL with NVIDIA, install the CUDA toolkit user-space
+libraries inside WSL—never a Linux NVIDIA display driver—then verify with
+`QMD_LLAMA_GPU=cuda qmd doctor`. A read-only QMD SQLite cache inside an AI
+sandbox can be a sandbox restriction; rerun the check from your normal WSL
+shell before changing permissions.
 
 ### 3. Seed the Wiki
 

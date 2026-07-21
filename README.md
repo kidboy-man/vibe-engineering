@@ -301,13 +301,18 @@ to run `npm install -g @tobilu/qmd` first. Pass `--yes` to skip the prompt; pass
 commands below). `doctor` returns `1` if `qmd` is missing or its
 `collection list` does not point at `<vault>/wiki`.
 
-To install manually:
+To install manually (Node.js 22+):
 
 ```bash
-npm install -g @tobilu/qmd                  # Node >= 20
+npm install -g @tobilu/qmd
 qmd collection add <vault>/wiki --name second-brain
 qmd update                                  # build the initial index
+qmd doctor                                  # runtime, model-cache, and GPU diagnostics
 ```
+
+Hybrid agent retrieval may download local QMD models and temporarily use GPU
+compute/VRAM. CPU mode still supports indexing and keyword search; `qmd embed`
+and `qmd pull` are never run automatically by this kit.
 
 ### Obsidian and memory compiler
 

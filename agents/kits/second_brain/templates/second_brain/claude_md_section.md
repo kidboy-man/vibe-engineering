@@ -21,6 +21,10 @@ Skip querying for trivial, purely local, or time-sensitive tasks, and never
 block on the vault or qmd being unavailable — treat it as best-effort context,
 not a hard dependency.
 
+Hybrid `qmd` retrieval is allowed by default. Its first use may download local
+QMD models and temporarily use available GPU resources; do not run bulk
+`qmd pull` or `qmd embed` unless the user explicitly asks.
+
 ### Automatic durable capture
 
 After resolving a nontrivial bug, adopting a project convention, or reaching a

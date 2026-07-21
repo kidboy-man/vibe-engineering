@@ -54,20 +54,42 @@ qmd search "authentication middleware"
 
 ### Semantic (vector) — optional
 
-Run after you have enough pages for conceptual recall. This downloads local models.
+Run after you have enough pages for conceptual recall. This downloads a local
+embedding model and builds vectors; run it when you are not gaming.
 
 ```bash
 qmd embed        # downloads model, builds vectors (~30s for 20 pages)
 qmd vsearch "how do I handle session expiry"
 ```
 
-### Hybrid (BM25 + semantic + rerank) — optional
+### Hybrid (BM25 + semantic + rerank) — default agent retrieval
 
-Combines keyword and vector results with LLM reranking for best precision.
+Combines keyword and vector results with LLM reranking for best precision. The
+first request may download local query or reranking models and temporarily use
+available GPU compute and VRAM. Nothing is sent to a cloud service.
 
 ```bash
 qmd query "session management patterns"
 ```
+
+## Runtime Health and GPU
+
+```bash
+qmd doctor
+```
+
+GPU acceleration is optional: BM25 indexing and retrieval work on CPU. On WSL
+with an NVIDIA GPU, `nvidia-smi` can confirm driver visibility, but QMD also
+needs the CUDA toolkit user-space libraries. Install the CUDA toolkit inside
+WSL, never a Linux NVIDIA display driver, then verify:
+
+```bash
+QMD_LLAMA_GPU=cuda qmd doctor
+```
+
+If QMD reports a read-only SQLite cache from an AI sandbox, rerun the command
+from your normal host shell. Do not delete the cache or change permissions
+unless the same error occurs there.
 
 ## Maintenance
 

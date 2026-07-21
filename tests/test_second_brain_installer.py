@@ -1797,7 +1797,7 @@ class SecondBrainDoctorDepTests(unittest.TestCase):
 
     @patch("agents.kits.second_brain.installer.subprocess.run")
     @patch("agents.kits.second_brain.installer.shutil.which")
-    def test_doctor_fails_on_old_node_version(self, mock_which, mock_run):
+    def test_doctor_fails_on_node_20_when_qmd_is_absent(self, mock_which, mock_run):
         def _which(cmd):
             if cmd in ("git", "node", "npm"):
                 return f"/fake/{cmd}"
@@ -1807,7 +1807,7 @@ class SecondBrainDoctorDepTests(unittest.TestCase):
 
         def _run(cmd, **kw):
             if "node" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, "v18.12.0\n", "")
+                return subprocess.CompletedProcess(cmd, 0, "v20.19.0\n", "")
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
         mock_run.side_effect = _run
@@ -1819,7 +1819,54 @@ class SecondBrainDoctorDepTests(unittest.TestCase):
                 result = doctor(home=str(home))
             output = buf.getvalue()
             self.assertEqual(result, 1)
-            self.assertIn("node", output)
+            self.assertIn("node: major version 20 < 22", output)
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_doctor_surfaces_qmd_runtime_cpu_warning_without_failing(self, mock_which, mock_run):
+        mock_which.side_effect = lambda cmd: f"/fake/{cmd}" if cmd in {"git", "qmd"} else None
+
+        with tempfile.TemporaryDirectory() as home_str:
+            install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+            wiki_path = str(Path(home_str) / "second-brain" / "wiki")
+
+            def _run(cmd, **kwargs):
+                if cmd == ["qmd", "collection", "show", "second-brain"]:
+                    return subprocess.CompletedProcess(cmd, 0, f"Path: {wiki_path}\n", "")
+                self.assertEqual(cmd, ["qmd", "doctor"])
+                return subprocess.CompletedProcess(cmd, 0, "⚠ device probe: running on CPU\n", "")
+
+            mock_run.side_effect = _run
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = doctor(home=home_str)
+
+        self.assertEqual(result, 0)
+        self.assertIn("-- qmd runtime --", output.getvalue())
+        self.assertIn("running on CPU", output.getvalue())
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_doctor_warns_when_qmd_runtime_probe_fails_without_failing(self, mock_which, mock_run):
+        mock_which.side_effect = lambda cmd: f"/fake/{cmd}" if cmd in {"git", "qmd"} else None
+
+        with tempfile.TemporaryDirectory() as home_str:
+            install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+            wiki_path = str(Path(home_str) / "second-brain" / "wiki")
+
+            def _run(cmd, **kwargs):
+                if cmd == ["qmd", "collection", "show", "second-brain"]:
+                    return subprocess.CompletedProcess(cmd, 0, f"Path: {wiki_path}\n", "")
+                self.assertEqual(cmd, ["qmd", "doctor"])
+                return subprocess.CompletedProcess(cmd, 1, "", "GPU probe unavailable")
+
+            mock_run.side_effect = _run
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = doctor(home=home_str)
+
+        self.assertEqual(result, 0)
+        self.assertIn("qmd runtime unavailable", output.getvalue())
 
 
 class SecondBrainQmdAutoInstallTests(unittest.TestCase):
@@ -1871,10 +1918,33 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
         self.assertEqual(
             [call.args[0] for call in mock_run.call_args_list],
             [
-                ["qmd", "collection", "list"],
+                ["qmd", "collection", "show", "second-brain"],
                 ["qmd", "collection", "add", str(vault / "wiki"), "--name", "second-brain"],
                 ["qmd", "update"],
             ],
+        )
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_existing_named_qmd_collection_is_detected_via_show(self, mock_which, mock_run):
+        mock_which.side_effect = lambda cmd: "/fake/qmd" if cmd == "qmd" else None
+        vault = Path("/tmp/second-brain")
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(
+                [],
+                0,
+                f"Collection: second-brain\n  Path:     {vault / 'wiki'}\n",
+                "",
+            ),
+            subprocess.CompletedProcess([], 0, "", ""),
+        ]
+
+        rc = _setup_qmd(vault, yes=True)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            [call.args[0] for call in mock_run.call_args_list],
+            [["qmd", "collection", "show", "second-brain"], ["qmd", "update"]],
         )
 
     @patch("agents.kits.second_brain.installer.subprocess.run")
@@ -1900,12 +1970,12 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
     @patch("agents.kits.second_brain.installer.shutil.which")
     def test_setup_qmd_prompts_when_yes_false(self, mock_which, mock_run):
         def _which(cmd):
-            if cmd in ("npm",):
+            if cmd in ("node", "npm"):
                 return f"/fake/{cmd}"
             return None
 
         mock_which.side_effect = _which
-        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "v22.0.0\n", "")
         with tempfile.TemporaryDirectory() as home_str:
             with patch("agents.kits.second_brain.installer._confirm", return_value=False) as mock_confirm:
                 _setup_qmd(Path(home_str) / "wiki", yes=False)
@@ -1915,12 +1985,12 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
     @patch("agents.kits.second_brain.installer.shutil.which")
     def test_install_yes_bypasses_npm_prompt(self, mock_which, mock_run):
         def _which(cmd):
-            if cmd in ("git", "npm"):
+            if cmd in ("git", "node", "npm"):
                 return f"/fake/{cmd}"
             return None
 
         mock_which.side_effect = _which
-        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "v22.0.0\n", "")
         with tempfile.TemporaryDirectory() as home_str:
             with patch("agents.kits.second_brain.installer._confirm") as mock_confirm:
                 rc = install(home=home_str, dry_run=False, yes=True, setup_deps=True)
@@ -1944,6 +2014,20 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
             state = json.loads(manifest.read_text(encoding="utf-8"))
             self.assertEqual(state["status"], "incomplete")
             self.assertEqual(state["phase"], "qmd")
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_setup_qmd_rejects_node_20_before_npm_install(self, mock_which, mock_run):
+        mock_which.side_effect = lambda cmd: f"/fake/{cmd}" if cmd in {"node", "npm"} else None
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "v20.19.0\n", "")
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            rc = _setup_qmd(Path("/tmp/second-brain"), yes=True)
+
+        self.assertEqual(rc, 1)
+        self.assertIn("Node.js 22+", output.getvalue())
+        self.assertEqual(mock_run.call_args_list, [unittest.mock.call(["node", "--version"], capture_output=True, text=True, timeout=5)])
 
 
 class SecondBrainIncompleteInstallDoctorTests(unittest.TestCase):
@@ -2026,6 +2110,15 @@ class SecondBrainIncompleteInstallDoctorTests(unittest.TestCase):
 
 class SecondBrainSkillInstallTests(unittest.TestCase):
     """The kit ships a discoverable first-party second-brain skill."""
+
+    def test_skill_allows_hybrid_retrieval_but_keeps_bulk_indexing_explicit(self):
+        skill = (
+            Path(__file__).resolve().parent.parent
+            / "agents/kits/second_brain/templates/second_brain/skills/second-brain/SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("may download local QMD models", skill)
+        self.assertIn("Do not run `qmd pull` or `qmd embed` unless the user explicitly asks", skill)
 
     def test_install_copies_skill_to_agent_and_claude_locations(self):
         with tempfile.TemporaryDirectory() as home_str:

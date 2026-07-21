@@ -33,5 +33,6 @@ After resolving a nontrivial bug, adopting a project convention, or reaching a
 durable decision, automatically write one concise, secret-free draft to
 `inbox/YYYY-MM-DD-HHMM-<slug>.md`. Do not add inbox drafts to `wiki/` or run
 `qmd update`. Promote one draft at a time only when the user asks, then update
-the wiki meta pages and run `qmd update`. Do not download models or embed
-without explicit user approval.
+the wiki meta pages and run `qmd update`. Hybrid `qmd` retrieval is allowed and
+may download local QMD models or temporarily use the GPU; do not run bulk
+`qmd pull` or `qmd embed` without explicit user approval.

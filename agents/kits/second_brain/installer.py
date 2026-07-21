@@ -56,6 +56,8 @@ SESSIONSTART_EVENT = "SessionStart"
 CURSOR_SESSIONSTART_EVENT = "sessionStart"
 CURSOR_RULE_REL = "rules/second-brain.mdc"
 SKILL_REL = "skills/second-brain/SKILL.md"
+QMD_MIN_NODE_MAJOR = 22
+QMD_COLLECTION_NAME = "second-brain"
 
 CLAUDE_MD_BEGIN_MARKER = "<!-- vibe-engineering second-brain:begin -->\n"
 CLAUDE_MD_END_MARKER = "<!-- vibe-engineering second-brain:end -->\n"
@@ -270,13 +272,51 @@ def _check_min_version(binary: str, args: list[str], min_major: int) -> tuple[bo
     return True, ""
 
 
+def _qmd_collection_status(vault_path: Path) -> tuple[bool, str | None]:
+    """Return whether qmd's managed collection points at this vault's wiki.
+
+    qmd 2.5+ prints only a virtual URI from `collection list`; `collection show`
+    is its stable physical-path interface. Older qmd versions fall back to the
+    legacy list output.
+    """
+    wiki_path = (vault_path / "wiki").resolve()
+    shown = subprocess.run(
+        ["qmd", "collection", "show", QMD_COLLECTION_NAME],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if shown.returncode == 0:
+        match = re.search(r"^\s*Path:\s*(.+?)\s*$", shown.stdout, re.MULTILINE)
+        if match:
+            return Path(match.group(1)).expanduser().resolve() == wiki_path, None
+        return str(wiki_path) in shown.stdout, None
+
+    listed = subprocess.run(
+        ["qmd", "collection", "list"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if listed.returncode != 0:
+        return False, (listed.stderr or shown.stderr).strip() or "qmd collection inspection failed"
+    return str(wiki_path) in listed.stdout, None
+
+
 def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
     """Ensure qmd, the vault collection, and its BM25 index are ready."""
     if not shutil.which("qmd"):
+        ok_node, msg_node = _check_min_version("node", ["--version"], QMD_MIN_NODE_MAJOR)
+        if not ok_node:
+            print(f"[second-brain] {msg_node}")
+            print(f"  Install Node.js {QMD_MIN_NODE_MAJOR}+ before installing qmd.")
+            return 1
         npm = shutil.which("npm")
         if not npm:
             print("[second-brain] qmd not found and npm not available.")
-            print("  Install Node.js 20+, then: npm install -g @tobilu/qmd")
+            print(f"  Install Node.js {QMD_MIN_NODE_MAJOR}+, then: npm install -g @tobilu/qmd")
             return 1
         print("[second-brain] qmd not found (required for search).")
         print("  Install now? Runs 'npm install -g @tobilu/qmd' (network + global install).")
@@ -288,19 +328,16 @@ def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
             print("[second-brain] npm install failed. Run manually: npm install -g @tobilu/qmd")
             return 1
 
-    listed = subprocess.run(
-        ["qmd", "collection", "list"], check=False, capture_output=True, text=True
-    )
-    if listed.returncode != 0:
-        print("[second-brain] qmd collection list failed.")
-        if listed.stderr:
-            print(f"  {listed.stderr.strip()}")
+    collection_match, collection_error = _qmd_collection_status(vault_path)
+    if collection_error:
+        print("[second-brain] qmd collection inspection failed.")
+        print(f"  {collection_error}")
         return 1
 
     wiki_path = (vault_path / "wiki").resolve()
-    if str(wiki_path) not in listed.stdout:
+    if not collection_match:
         added = subprocess.run(
-            ["qmd", "collection", "add", str(wiki_path), "--name", "second-brain"],
+            ["qmd", "collection", "add", str(wiki_path), "--name", QMD_COLLECTION_NAME],
             check=False,
             capture_output=True,
             text=True,
@@ -1077,39 +1114,52 @@ def doctor(home: str | None = None) -> int:
     qmd_path = shutil.which("qmd")
     collection_match = False
     if not qmd_path:
-        ok_node, msg_node = _check_min_version("node", ["--version"], 20)
+        ok_node, msg_node = _check_min_version("node", ["--version"], QMD_MIN_NODE_MAJOR)
         if not ok_node:
             print(f"✗ {msg_node}")
-            print("  fix: install Node.js 20+ via nvm or https://nodejs.org")
+            print(f"  fix: install Node.js {QMD_MIN_NODE_MAJOR}+ via nvm or https://nodejs.org")
             return 1
         ok_npm, msg_npm = _check_min_version("npm", ["--version"], 9)
         if not ok_npm:
             print(f"✗ {msg_npm}")
-            print("  fix: upgrade Node.js (npm is bundled); nvm: nvm install 20")
+            print(f"  fix: upgrade Node.js (npm is bundled); nvm: nvm install {QMD_MIN_NODE_MAJOR}")
             return 1
         print("✗ qmd not found")
         print("  fix: npm install -g @tobilu/qmd")
     else:
         print(f"✓ qmd: {qmd_path}")
         try:
-            result = subprocess.run(
-                ["qmd", "collection", "list"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode != 0:
-                print("✗ qmd collection list failed")
-                print(f"  stderr: {(result.stderr or '').strip()}")
+            collection_match, collection_error = _qmd_collection_status(vault_path)
+            if collection_error:
+                print("✗ qmd collection inspection failed")
+                print(f"  stderr: {collection_error}")
             else:
-                wiki_collection_str = str(vault_path / "wiki")
-                if wiki_collection_str in result.stdout:
-                    print(f"✓ qmd collection matches {wiki_collection_str}")
-                    collection_match = True
+                wiki_collection_path = (vault_path / "wiki").resolve()
+                if collection_match:
+                    print(f"✓ qmd collection matches {wiki_collection_path}")
                 else:
-                    print(f"✗ no qmd collection matches {wiki_collection_str}")
+                    print(f"✗ no qmd collection matches {wiki_collection_path}")
         except Exception as exc:
-            print(f"✗ qmd collection list error: {exc}")
+            print(f"✗ qmd collection inspection error: {exc}")
+
+        print("\n-- qmd runtime --")
+        try:
+            runtime = subprocess.run(
+                ["qmd", "doctor"], capture_output=True, text=True, timeout=30
+            )
+            details = "\n".join(
+                part.strip() for part in (runtime.stdout, runtime.stderr) if part.strip()
+            )
+            if runtime.returncode != 0:
+                print("⚠ qmd runtime unavailable")
+            if details:
+                print(details)
+                if "readonly database" in details.lower():
+                    print("  note: re-run qmd doctor from your normal host shell if an AI sandbox mounts its cache read-only")
+            elif runtime.returncode == 0:
+                print("✓ qmd runtime diagnostics completed")
+        except Exception as exc:
+            print(f"⚠ qmd runtime unavailable: {exc}")
 
     if not qmd_path or not collection_match:
         wiki_path = vault_path / "wiki"

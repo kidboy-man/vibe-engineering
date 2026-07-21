@@ -12,10 +12,10 @@ The vault is at `$VIBE_SECOND_BRAIN_PATH` or `~/second-brain`.
 
 For a nontrivial task, before researching externally or recreating a past
 decision, search the vault when prior work may help. Use `qmd` MCP `query` with
-an explicit intent and lexical terms; add semantic queries only when vector
-search is available. Retrieve the full relevant pages with `get` or
-`multi_get` before relying on a result. Cite vault paths when they inform the
-answer.
+an explicit intent and lexical terms. Hybrid retrieval is allowed by default;
+its first use may download local QMD models and temporarily use available GPU
+resources. Retrieve the full relevant pages with `get` or `multi_get` before
+relying on a result. Cite vault paths when they inform the answer.
 
 Skip retrieval for trivial, local, or time-sensitive work. If qmd is unavailable
 or has no useful result, continue normally and do not block the task.
@@ -64,5 +64,6 @@ When asked to review or promote an inbox draft, handle one draft at a time:
 3. Update `wiki/index.md`, append `wiki/log.md`, and refresh `wiki/hot.md`.
 4. Run `qmd update` after the approved wiki change. Report any failure.
 
-Do not download models, run `qmd pull`, or run `qmd embed` unless the user
-explicitly asks for semantic indexing.
+Do not run `qmd pull` or `qmd embed` unless the user explicitly asks for
+semantic indexing. Those are bulk operations; normal MCP `query` retrieval is
+allowed.
