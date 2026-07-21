@@ -61,6 +61,13 @@ class PackageDataGlobTests(unittest.TestCase):
         )
 
 
+class ManifestCacheExclusionTests(unittest.TestCase):
+    def test_manifest_excludes_python_cache_files(self) -> None:
+        manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+        self.assertIn("global-exclude __pycache__", manifest)
+        self.assertIn("global-exclude *.py[cod]", manifest)
+
+
 class ManifestSurfaceTests(unittest.TestCase):
     def _assert_manifest_surface(self, installer_module, kit_name: str) -> None:
         template_dir = installer_module._template_dir()

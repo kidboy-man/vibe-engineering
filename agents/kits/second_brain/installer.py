@@ -55,6 +55,9 @@ HOOK_SCRIPT_REL = "hooks/second-brain-context.py"
 SESSIONSTART_EVENT = "SessionStart"
 CURSOR_SESSIONSTART_EVENT = "sessionStart"
 CURSOR_RULE_REL = "rules/second-brain.mdc"
+SKILL_REL = "skills/second-brain/SKILL.md"
+QMD_MIN_NODE_MAJOR = 22
+QMD_COLLECTION_NAME = "second-brain"
 
 CLAUDE_MD_BEGIN_MARKER = "<!-- vibe-engineering second-brain:begin -->\n"
 CLAUDE_MD_END_MARKER = "<!-- vibe-engineering second-brain:end -->\n"
@@ -102,25 +105,42 @@ def _paths(home: str | None = None) -> KitPaths:
     )
 
 
-def _validate_configs(paths: KitPaths) -> bool:
-    """Preflight: parse existing agent configs to catch invalid JSON/JSONC early."""
-    settings_json = paths.claude_dir / "settings.json"
-    if settings_json.exists():
-        try:
-            json.loads(settings_json.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            print("invalid settings.json")
-            return False
+def _validate_configs(
+    paths: KitPaths, merge_settings: bool, enable_hooks: bool
+) -> bool:
+    """Preflight every config this install would modify before writing anything."""
+    targets: list[tuple[Path, Callable[[str], object]]] = []
+    if merge_settings:
+        targets.extend(
+            [
+                (paths.claude_dir / "settings.json", json.loads),
+                (paths.opencode_config_dir / "opencode.jsonc", ms.parse_jsonc),
+                (paths.codex_dir / "config.toml", tomllib.loads),
+                (paths.cursor_dir / "mcp.json", json.loads),
+            ]
+        )
+    if enable_hooks:
+        targets.extend(
+            [
+                (paths.claude_dir / "settings.json", json.loads),
+                (paths.codex_dir / "config.toml", tomllib.loads),
+                (paths.cursor_dir / "hooks.json", json.loads),
+            ]
+        )
 
-    opencode_jsonc = paths.opencode_config_dir / "opencode.jsonc"
-    if opencode_jsonc.exists():
-        from agents.merge_strategies import parse_jsonc
+    checked: set[Path] = set()
+    for path, parse in targets:
+        if path in checked or not path.exists():
+            continue
+        checked.add(path)
         try:
-            parse_jsonc(opencode_jsonc.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, ValueError):
-            print("invalid opencode.jsonc")
+            value = parse(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError, tomllib.TOMLDecodeError):
+            print(f"invalid {path.name}")
             return False
-
+        if not isinstance(value, dict):
+            print(f"invalid {path.name}: root is not an object")
+            return False
     return True
 
 
@@ -156,6 +176,11 @@ def _print_dry_run(paths: KitPaths) -> None:
         print(f"would git init in {paths.vault}")
     else:
         print("git already initialized")
+    print()
+    print("second-brain skill:")
+    for target in _skill_targets(paths):
+        status = _skill_status(paths, target)
+        print(f"  {target} [{'would install' if status == 'missing' else status}]")
     print()
     print(f"would write manifest: {paths.manifest}")
     print()
@@ -247,28 +272,122 @@ def _check_min_version(binary: str, args: list[str], min_major: int) -> tuple[bo
     return True, ""
 
 
+def _qmd_collection_status(vault_path: Path) -> tuple[bool, str | None]:
+    """Return whether qmd's managed collection points at this vault's wiki.
+
+    qmd 2.5+ prints only a virtual URI from `collection list`; `collection show`
+    is its stable physical-path interface. Older qmd versions fall back to the
+    legacy list output.
+    """
+    wiki_path = (vault_path / "wiki").resolve()
+    shown = subprocess.run(
+        ["qmd", "collection", "show", QMD_COLLECTION_NAME],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if shown.returncode == 0:
+        match = re.search(r"^\s*Path:\s*(.+?)\s*$", shown.stdout, re.MULTILINE)
+        if match:
+            return Path(match.group(1)).expanduser().resolve() == wiki_path, None
+        return str(wiki_path) in shown.stdout, None
+
+    listed = subprocess.run(
+        ["qmd", "collection", "list"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if listed.returncode != 0:
+        return False, (listed.stderr or shown.stderr).strip() or "qmd collection inspection failed"
+    return str(wiki_path) in listed.stdout, None
+
+
 def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
-    """Install qmd via npm if absent, then register the wiki collection."""
-    if shutil.which("qmd"):
-        return 0  # already installed — silent
-    npm = shutil.which("npm")
-    if not npm:
-        print("[second-brain] qmd not found and npm not available.")
-        print("  Install Node.js 20+, then: npm install -g @tobilu/qmd")
+    """Ensure qmd, the vault collection, and its BM25 index are ready."""
+    if not shutil.which("qmd"):
+        ok_node, msg_node = _check_min_version("node", ["--version"], QMD_MIN_NODE_MAJOR)
+        if not ok_node:
+            print(f"[second-brain] {msg_node}")
+            print(f"  Install Node.js {QMD_MIN_NODE_MAJOR}+ before installing qmd.")
+            return 1
+        npm = shutil.which("npm")
+        if not npm:
+            print("[second-brain] qmd not found and npm not available.")
+            print(f"  Install Node.js {QMD_MIN_NODE_MAJOR}+, then: npm install -g @tobilu/qmd")
+            return 1
+        print("[second-brain] qmd not found (required for search).")
+        print("  Install now? Runs 'npm install -g @tobilu/qmd' (network + global install).")
+        if not yes and not _confirm("  Proceed? [y/N] "):
+            print("  Skipped. Run manually: npm install -g @tobilu/qmd")
+            return 1
+        r = subprocess.run([npm, "install", "-g", "@tobilu/qmd"], check=False)
+        if r.returncode != 0:
+            print("[second-brain] npm install failed. Run manually: npm install -g @tobilu/qmd")
+            return 1
+
+    collection_match, collection_error = _qmd_collection_status(vault_path)
+    if collection_error:
+        print("[second-brain] qmd collection inspection failed.")
+        print(f"  {collection_error}")
         return 1
-    print("[second-brain] qmd not found (required for search).")
-    print("  Install now? Runs 'npm install -g @tobilu/qmd' (network + global install).")
-    if not yes and not _confirm("  Proceed? [y/N] "):
-        print("  Skipped. Run manually: npm install -g @tobilu/qmd")
+
+    wiki_path = (vault_path / "wiki").resolve()
+    if not collection_match:
+        added = subprocess.run(
+            ["qmd", "collection", "add", str(wiki_path), "--name", QMD_COLLECTION_NAME],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if added.returncode != 0:
+            print("[second-brain] qmd collection add failed.")
+            if added.stderr:
+                print(f"  {added.stderr.strip()}")
+            return 1
+
+    updated = subprocess.run(
+        ["qmd", "update"], check=False, capture_output=True, text=True
+    )
+    if updated.returncode != 0:
+        print("[second-brain] qmd update failed.")
+        if updated.stderr:
+            print(f"  {updated.stderr.strip()}")
         return 1
-    r = subprocess.run([npm, "install", "-g", "@tobilu/qmd"], check=False)
-    if r.returncode != 0:
-        print("[second-brain] npm install failed. Run manually: npm install -g @tobilu/qmd")
-        return 1
-    wiki_path = vault_path / "wiki"
-    subprocess.run(["qmd", "collection", "add", str(wiki_path), "--name", "second-brain"], check=False)
-    subprocess.run(["qmd", "update"], check=False)
     return 0
+
+
+def _skill_targets(paths: KitPaths) -> list[Path]:
+    return [
+        paths.home_root / ".agents" / SKILL_REL,
+        paths.claude_dir / SKILL_REL,
+    ]
+
+
+def _install_skill(paths: KitPaths) -> None:
+    """Install the portable skill without overwriting a user-modified copy."""
+    source = paths.template / SKILL_REL
+    content = source.read_text(encoding="utf-8")
+    for target in _skill_targets(paths):
+        if target.exists():
+            if target.read_text(encoding="utf-8") == content:
+                continue
+            print(f"kept modified second-brain skill: {target}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        print(f"installed second-brain skill: {target}")
+
+
+def _skill_status(paths: KitPaths, target: Path) -> str:
+    if not target.exists():
+        return "missing"
+    source = paths.template / SKILL_REL
+    if target.read_text(encoding="utf-8") == source.read_text(encoding="utf-8"):
+        return "up to date"
+    return "modified"
 
 
 QMD_MCP_SNIPPET_JSON: dict = {
@@ -387,6 +506,7 @@ def _merge_claude_config(paths: KitPaths) -> None:
         return
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
+    core.backup(settings_path, paths.claude_dir)
     settings_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
     print("merged qmd MCP into settings.json")
 
@@ -410,6 +530,7 @@ def _merge_opencode_config(paths: KitPaths) -> None:
         return
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    core.backup(config_path, paths.opencode_config_dir)
     config_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
     print("merged qmd MCP into opencode.jsonc")
 
@@ -440,9 +561,13 @@ def _merge_cursor_config(paths: KitPaths) -> None:
         return
 
     merged = dict(current)
-    merged["mcpServers"] = {**mcps, "qmd": dict(QMD_MCP_SNIPPET_JSON["mcpServers"]["qmd"])}
+    merged["mcpServers"] = {
+        **mcps,
+        "qmd": dict(QMD_MCP_SNIPPET_JSON["mcpServers"]["qmd"]),
+    }
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    core.backup(config_path, paths.cursor_dir)
     config_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
     print("merged qmd MCP into mcp.json")
 
@@ -460,6 +585,7 @@ def _merge_codex_config(paths: KitPaths) -> None:
         return
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    core.backup(config_path, paths.codex_dir)
     config_path.write_text(merged, encoding="utf-8")
     if action == "create":
         print(f"created {config_path} with qmd MCP section")
@@ -637,6 +763,7 @@ def _install_session_hook(paths: KitPaths) -> None:
     merged, changed = ms.hook_command_merge_strategy(current, SESSIONSTART_EVENT, _hook_command(paths))
     if changed:
         settings_path.parent.mkdir(parents=True, exist_ok=True)
+        core.backup(settings_path, paths.claude_dir)
         settings_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
         print("registered SessionStart hook in settings.json")
 
@@ -654,6 +781,7 @@ def _install_codex_hook(paths: KitPaths) -> None:
     if action == "unchanged":
         return
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    core.backup(config_path, paths.codex_dir)
     config_path.write_text(merged, encoding="utf-8")
     if action == "create":
         print(f"created {config_path} with SessionStart hook")
@@ -679,6 +807,7 @@ def _install_cursor_hook(paths: KitPaths) -> None:
     merged, changed = ms.cursor_hook_merge_strategy(current, CURSOR_SESSIONSTART_EVENT, _cursor_hook_command(paths))
     if changed:
         hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        core.backup(hooks_path, paths.cursor_dir)
         hooks_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
         print("registered sessionStart hook in hooks.json")
 
@@ -817,8 +946,14 @@ def enable_hook(
     return 0
 
 
-def _manifest_state(managed_files: list[str]) -> dict:
-    return core.manifest_state(KIT_NAME, managed_files)
+def _manifest_state(
+    managed_files: list[str], status: str = "complete", phase: str | None = None
+) -> dict:
+    state = core.manifest_state(KIT_NAME, managed_files)
+    state["status"] = status
+    if phase is not None:
+        state["phase"] = phase
+    return state
 
 
 def install(
@@ -826,14 +961,14 @@ def install(
     dry_run: bool = False,
     yes: bool = False,
     merge_settings: bool = True,
-    setup_deps: bool = True,
+    setup_deps: bool = False,
     enable_hooks: bool = True,
     **kwargs,
 ) -> int:
     paths = _paths(home)
 
     # Preflight: validate existing agent configs before any writes.
-    if not _validate_configs(paths):
+    if not _validate_configs(paths, merge_settings, enable_hooks):
         return 1
 
     print(
@@ -894,18 +1029,23 @@ def install(
     _git_init(paths.vault)
     print("git repo ready")
 
+    if setup_deps and _setup_qmd(paths.vault, yes=yes) != 0:
+        state = _manifest_state(managed, status="incomplete", phase="qmd")
+        core.write_text(paths.manifest, json.dumps(state, indent=2) + "\n")
+        print("qmd setup incomplete; re-run install after resolving the error")
+        return 1
+
+    _install_skill(paths)
+
     if merge_settings:
         _merge_claude_config(paths)
         _merge_opencode_config(paths)
         _merge_codex_config(paths)
         _merge_cursor_config(paths)
-        if enable_hooks:
-            _offer_proactive_context(paths, yes=yes)
-        else:
-            print("hooks: skipped (--no-hooks)")
-
-    if setup_deps:
-        _setup_qmd(paths.vault, yes=yes)
+    if enable_hooks:
+        _offer_proactive_context(paths, yes=yes)
+    else:
+        print("hooks: skipped (--no-hooks)")
 
     # Write runtime manifest.
     core.write_text(paths.manifest, json.dumps(_manifest_state(managed), indent=2) + "\n")
@@ -932,6 +1072,13 @@ def doctor(home: str | None = None) -> int:
         print("✗ vault missing")
         return 1
     print("✓ vault exists")
+
+    manifest = core.load_existing_install_manifest(paths.manifest)
+    if manifest and manifest.get("status") == "incomplete":
+        phase = manifest.get("phase", "unknown")
+        print(f"⚠ install incomplete during {phase} setup")
+        print("  fix: vibe kits second-brain install --yes")
+        problems = True
 
     def _check_paths(label: str, items: list[str], is_file: bool) -> None:
         nonlocal problems
@@ -967,44 +1114,64 @@ def doctor(home: str | None = None) -> int:
     qmd_path = shutil.which("qmd")
     collection_match = False
     if not qmd_path:
-        ok_node, msg_node = _check_min_version("node", ["--version"], 20)
+        ok_node, msg_node = _check_min_version("node", ["--version"], QMD_MIN_NODE_MAJOR)
         if not ok_node:
             print(f"✗ {msg_node}")
-            print("  fix: install Node.js 20+ via nvm or https://nodejs.org")
+            print(f"  fix: install Node.js {QMD_MIN_NODE_MAJOR}+ via nvm or https://nodejs.org")
             return 1
         ok_npm, msg_npm = _check_min_version("npm", ["--version"], 9)
         if not ok_npm:
             print(f"✗ {msg_npm}")
-            print("  fix: upgrade Node.js (npm is bundled); nvm: nvm install 20")
+            print(f"  fix: upgrade Node.js (npm is bundled); nvm: nvm install {QMD_MIN_NODE_MAJOR}")
             return 1
         print("✗ qmd not found")
         print("  fix: npm install -g @tobilu/qmd")
     else:
         print(f"✓ qmd: {qmd_path}")
         try:
-            result = subprocess.run(
-                ["qmd", "collection", "list"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode != 0:
-                print("✗ qmd collection list failed")
-                print(f"  stderr: {(result.stderr or '').strip()}")
+            collection_match, collection_error = _qmd_collection_status(vault_path)
+            if collection_error:
+                print("✗ qmd collection inspection failed")
+                print(f"  stderr: {collection_error}")
             else:
-                wiki_collection_str = str(vault_path / "wiki")
-                if wiki_collection_str in result.stdout:
-                    print(f"✓ qmd collection matches {wiki_collection_str}")
-                    collection_match = True
+                wiki_collection_path = (vault_path / "wiki").resolve()
+                if collection_match:
+                    print(f"✓ qmd collection matches {wiki_collection_path}")
                 else:
-                    print(f"✗ no qmd collection matches {wiki_collection_str}")
+                    print(f"✗ no qmd collection matches {wiki_collection_path}")
         except Exception as exc:
-            print(f"✗ qmd collection list error: {exc}")
+            print(f"✗ qmd collection inspection error: {exc}")
+
+        print("\n-- qmd runtime --")
+        try:
+            runtime = subprocess.run(
+                ["qmd", "doctor"], capture_output=True, text=True, timeout=30
+            )
+            details = "\n".join(
+                part.strip() for part in (runtime.stdout, runtime.stderr) if part.strip()
+            )
+            if runtime.returncode != 0:
+                print("⚠ qmd runtime unavailable")
+            if details:
+                print(details)
+                if "readonly database" in details.lower():
+                    print("  note: re-run qmd doctor from your normal host shell if an AI sandbox mounts its cache read-only")
+            elif runtime.returncode == 0:
+                print("✓ qmd runtime diagnostics completed")
+        except Exception as exc:
+            print(f"⚠ qmd runtime unavailable: {exc}")
 
     if not qmd_path or not collection_match:
         wiki_path = vault_path / "wiki"
         print(f"  fix: qmd collection add {wiki_path} --name second-brain")
-        return 1
+        problems = True
+
+    knowledge_pages = [
+        path for path in (vault_path / "wiki").rglob("*.md")
+        if path.relative_to(vault_path).as_posix() not in SEED_PAGES
+    ]
+    if not knowledge_pages:
+        print("ℹ curated wiki is empty; capture or promote a durable outcome to begin")
 
     print("\n-- obsidian --")
     if shutil.which("obsidian"):
@@ -1164,6 +1331,12 @@ def doctor(home: str | None = None) -> int:
     print("\n-- proactive context (OpenCode) --")
     print("ℹ OpenCode has no session-start context-injection API; AGENTS.md section only, no hook")
     _doctor_print_section(OPENCODE_PERSONA_SECTION)
+
+    print("\n-- second-brain skill --")
+    for target in _skill_targets(paths):
+        status = _skill_status(paths, target)
+        icon = "✓" if status == "up to date" else "⚠"
+        print(f"{icon} {target}: {status}")
 
     vault_str = str(vault_path)
     if "\\\\wsl$" in vault_str or vault_str.startswith("/mnt/"):
@@ -1351,6 +1524,11 @@ def diff_kit(home: str | None = None) -> int:
         print(f"  {CURSOR_RULE_REL}: would create")
 
     _diff_print_section(OPENCODE_PERSONA_SECTION)
+    print()
+
+    print("second-brain skill:")
+    for target in _skill_targets(paths):
+        print(f"  {target}: {_skill_status(paths, target)}")
     print()
 
     # Manifest
@@ -1590,8 +1768,10 @@ def uninstall(
     cursor_rule_dst = paths.cursor_dir / CURSOR_RULE_REL
     cursor_rule_src = paths.template / CURSOR_RULE_REL
     remove_cursor_rule = cursor_rule_dst.exists()
+    skill_source = paths.template / SKILL_REL
+    skill_targets = [target for target in _skill_targets(paths) if target.exists()]
 
-    if not specs and not remove_cursor_rule:
+    if not specs and not remove_cursor_rule and not skill_targets:
         print("nothing to uninstall")
         return 0
 
@@ -1600,6 +1780,8 @@ def uninstall(
             print(f"would remove {label}")
         if remove_cursor_rule:
             print(f"would remove {CURSOR_RULE_REL} (if unchanged from template)")
+        for target in skill_targets:
+            print(f"would remove second-brain skill {target} (if unchanged from template)")
         print("dry run: no files modified")
         return 0
 
@@ -1627,5 +1809,11 @@ def uninstall(
             print(f"removed {CURSOR_RULE_REL}")
         else:
             print(f"kept modified file {CURSOR_RULE_REL}")
+
+    for target in skill_targets:
+        if core.uninstall_unchanged_file(skill_source, target):
+            print(f"removed second-brain skill {target}")
+        else:
+            print(f"kept modified second-brain skill {target}")
 
     return 0

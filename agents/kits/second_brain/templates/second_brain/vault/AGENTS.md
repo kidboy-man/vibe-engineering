@@ -34,7 +34,8 @@ When asked to ingest a source:
 When asked a knowledge question:
 
 1. Read `wiki/hot.md` for recent context (if it exists).
-2. Read `wiki/index.md` to find relevant pages.
+2. Use qmd MCP hybrid `query` when it is available; its first use may download
+   local models and temporarily use the GPU.
 3. Read the 3-5 most relevant pages.
 4. Synthesize an answer with citations to wiki pages.
 5. Ask if the answer should be filed as a new wiki page.
@@ -54,25 +55,30 @@ qmd update
 qmd search "your query"
 
 # Semantic search (requires embeddings — run `qmd embed` first)
-qmd search "your query" --semantic
+qmd vsearch "your query"
+
+# Hybrid search (may download local query/reranking models on first use)
+qmd query "your query"
 ```
+
+Do not run bulk `qmd pull` or `qmd embed` unless the user asks. Hybrid MCP
+retrieval is the default agent path.
 
 ## Supported AI Agents
 
 ### Claude Code
-- Install the `claude-obsidian` plugin via marketplace (see `docs/claude-code-plugin.md` for exact commands: `claude plugin marketplace add`, `claude plugin install`, `claude plugin list`).
-- Provides slash commands (`/wiki`, `/save`, `/canvas`, `/autoresearch`) and agent skills (natural language triggers like "lint the wiki", "ingest this").
-- Slash commands require `/` prefix. Skills trigger by natural language — you cannot type `/wiki-lint`; say "lint the wiki" instead.
+- `second-brain install` installs the first-party `second-brain` skill under global Agent Skills and Claude-compatible paths.
+- The optional `claude-obsidian` plugin adds Claude-specific slash commands; see `docs/claude-code-plugin.md`.
 - Start sessions in the vault root so this vault-local `CLAUDE.md`/`AGENTS.md` is read automatically — this covers ingest/query behavior *when working inside the vault*.
 - **Global proactive wiring (works in any project, not just the vault):** `second-brain install` offers (interactive prompt, or `vibe kits second-brain enable-hook` standalone) to register a `SessionStart` hook that auto-loads `wiki/hot.md` + `wiki/index.md` into every Claude Code session, plus a marked section in `~/.claude/CLAUDE.md` that tells the agent when to proactively query the vault via the `qmd` MCP tools and when to file learnings back — even outside the vault directory. Both are idempotent and reversible via `uninstall`.
 
 ### OpenCode
-- Symlink skills from `.claude/skills/` into `~/.config/opencode/skills/`.
+- Discovers the kit's global `.agents/skills/second-brain` skill automatically.
 - Register qmd MCP in `opencode.jsonc`.
 - **Global proactive wiring:** `second-brain install` / `enable-hook` merges a marked section into `~/.config/opencode/AGENTS.md` describing the vault and qmd tools. There is no session-start context-injection hook for OpenCode (no documented API for it), so `wiki/hot.md`/`wiki/index.md` are not auto-loaded — read them yourself at session start if needed.
 
 ### Codex CLI
-- Symlink skills from `.claude/skills/` into `~/.codex/skills/`.
+- Discovers the kit's global `.agents/skills/second-brain` skill automatically.
 - Register qmd MCP in `~/.codex/config.toml`.
 - **Global proactive wiring:** `second-brain install` / `enable-hook` registers a `SessionStart` hook (`[[hooks.SessionStart]]` in `~/.codex/config.toml`) that auto-loads `wiki/hot.md` + `wiki/index.md` into every session, plus a marked section in `~/.codex/AGENTS.md`. Both idempotent and reversible via `uninstall`.
 

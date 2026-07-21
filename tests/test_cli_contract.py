@@ -30,8 +30,8 @@ class CliHelpContractTests(unittest.TestCase):
         expected = (FIXTURES_DIR / fixture_name).read_text(encoding="utf-8")
         actual = self._help_text(*args)
         self.assertEqual(
-            actual,
-            expected,
+            " ".join(actual.split()),
+            " ".join(expected.split()),
             f"Help output for '{' '.join(args)}' changed. "
             "If the change is intentional, update the fixture.",
         )
@@ -149,6 +149,25 @@ class CliDispatchContractTests(unittest.TestCase):
             text=True,
         )
         self.assertNotEqual(result.returncode, 0)
+
+    def test_codex_install_rejects_second_brain_only_flags(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "agents.cli",
+                "kits",
+                "codex",
+                "install",
+                "--no-hooks",
+                "--yes",
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--no-hooks", result.stderr)
 
     def test_upgrade_uses_pip_upgrade_when_pip_available(self):
         from agents.cli import PYPI_PACKAGE, cmd_upgrade

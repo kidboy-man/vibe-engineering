@@ -53,6 +53,7 @@ class KitSpec:
     doctor: Callable
     uninstall: Callable
     enable_hook: Callable | None = None
+    install_options: frozenset[str] = frozenset()
 
 
 KITS: dict[str, KitSpec] = {
@@ -63,6 +64,7 @@ KITS: dict[str, KitSpec] = {
         diff=claude_diff,
         doctor=claude_doctor,
         uninstall=claude_uninstall,
+        install_options=frozenset({"settings"}),
     ),
     "opencode": KitSpec(
         name="opencode",
@@ -71,6 +73,7 @@ KITS: dict[str, KitSpec] = {
         diff=opencode_diff,
         doctor=opencode_doctor,
         uninstall=opencode_uninstall,
+        install_options=frozenset({"settings"}),
     ),
     "second-brain": KitSpec(
         name="second-brain",
@@ -80,6 +83,7 @@ KITS: dict[str, KitSpec] = {
         doctor=second_brain_doctor,
         uninstall=second_brain_uninstall,
         enable_hook=second_brain_enable_hook,
+        install_options=frozenset({"settings", "setup_deps", "hooks"}),
     ),
     "gemini": KitSpec(
         name="gemini",

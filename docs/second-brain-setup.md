@@ -55,7 +55,7 @@ The key promise: **every session can become a source, every answer can become a 
 
 | Tool | Why | Check |
 |------|-----|-------|
-| **Node.js 20+** | qmd search engine + Claude Code plugin installs | `node --version` |
+| **Node.js 22+** | qmd search engine + Claude Code plugin installs | `node --version` |
 | **npm 9+** | install qmd globally | `npm --version` |
 | **git** | version-control the vault (plain text, trivial backup) | `git --version` |
 | **uv** (Python package manager) | dependency management for memory-compiler hooks | `uv --version` |
@@ -88,23 +88,32 @@ mkdir -p $VAULT/wiki/concepts/{backend,ai-engineering,pkm,personal}
 
 [qmd](https://github.com/tobi/qmd) combines BM25 full-text search, vector semantic search, and LLM reranking — all running locally with GGUF models. No cloud, no API keys, no indexing service.
 
-`vibe kits second-brain install` prompts to install qmd automatically when it
-is not found. Accept the prompt (or pass `--yes`) and it runs
-`npm install -g @tobilu/qmd`, registers the wiki collection, and builds the
-initial index for you. Pass `--no-setup-deps` to skip and follow the manual
-steps below instead.
+Every normal `vibe kits second-brain install` verifies the qmd wiki collection
+and runs `qmd update`. When qmd is missing, accept the prompt (or pass `--yes`)
+to run `npm install -g @tobilu/qmd` before the collection is registered. Pass
+`--no-setup-deps` to skip dependency setup and follow the manual steps below.
 
 To install manually:
 
 ```bash
 npm i -g @tobilu/qmd
-qmd --version                                            # should be >= 2.5.x
-qmd collection add wiki ~/second-brain/wiki              # index the wiki folder
+qmd --version
+qmd collection add ~/second-brain/wiki --name second-brain # index the wiki folder
 qmd update                                               # initial index
 qmd search "test"                                        # smoke test
 ```
 
-**When to use `qmd embed`**: after you cross ~15-20 pages and want semantic ("what was I reading about X") in addition to keyword search. The first run downloads a ~333 MB embedding model and reindexes all docs (~30s for 20 pages).
+**Hybrid retrieval is the default agent path**: `qmd query` combines keyword,
+semantic, and reranking locally. Its first use may download local models and
+temporarily use GPU compute/VRAM. Run bulk `qmd embed` only when you explicitly
+want vector indexing; it is best done while not gaming.
+
+**GPU diagnostics**: run `qmd doctor`. CPU mode still supports indexing and
+keyword search. On WSL with NVIDIA, install the CUDA toolkit user-space
+libraries inside WSL—never a Linux NVIDIA display driver—then verify with
+`QMD_LLAMA_GPU=cuda qmd doctor`. A read-only QMD SQLite cache inside an AI
+sandbox can be a sandbox restriction; rerun the check from your normal WSL
+shell before changing permissions.
 
 ### 3. Seed the Wiki
 
@@ -127,9 +136,11 @@ tags: [domain, subdomain]
 ---
 ```
 
-### 4. Install the Claude Code Plugin (`claude-obsidian`)
+### 4. Optional: Install the Claude Code Plugin (`claude-obsidian`)
 
-This is the engine that turns your CLI agent into a wiki maintainer. It provides **4 slash commands** and **12 agent skills** that trigger via natural language.
+The kit installs its own portable `second-brain` skill for proactive retrieval,
+automatic inbox drafts, and requested curation. This plugin is optional and adds
+Claude-specific slash commands and extra workflows.
 
 The repo: `https://github.com/AgriciDaniel/claude-obsidian`
 
@@ -170,22 +181,9 @@ All agents share the same plain Markdown files on disk. The wiring just tells ea
 - Plugin is installed globally
 - Start any session in `~/second-brain/` and it reads `CLAUDE.md` automatically
 
-**Codex CLI** — symlink the skill directories:
-```bash
-mkdir -p ~/.codex/skills
-for skill in ~/second-brain/.claude/skills/*/; do
-  name=$(basename "$skill")
-  ln -sf "$skill" "$HOME/.codex/skills/$name"
-done
-```
-
-**OpenCode** — same symlink pattern:
-```bash
-for skill in ~/second-brain/.claude/skills/*/; do
-  name=$(basename "$skill")
-  ln -sf "$skill" "$HOME/.config/opencode/skills/$name"
-done
-```
+**Codex CLI and OpenCode** — the kit installs `second-brain/SKILL.md` into
+`~/.agents/skills/` and a Claude-compatible copy under `~/.claude/skills/`.
+No symlinks or plugin installation are required for the core workflow.
 
 **Hermes Agent** — activate its built-in `obsidian` skill (filesystem-first, uses native file tools):
 ```bash
@@ -377,8 +375,8 @@ ls ~/second-brain/wiki/hot.md    && echo "OK: hot.md"    || echo "MISSING: hot.m
 # 2. qmd
 qmd ls | grep wiki               && echo "OK: qmd collection"  || echo "MISSING: qmd collection"
 
-# 3. Claude Code plugin
-claude plugin list | grep claude-obsidian  && echo "OK: plugin"  || echo "MISSING: plugin"
+# 3. First-party skill
+test -f ~/.agents/skills/second-brain/SKILL.md && echo "OK: skill" || echo "MISSING: skill"
 
 # 4. qmd MCP in Claude Code
 claude mcp list | grep qmd               && echo "OK: qmd MCP"  || echo "MISSING: qmd MCP"
