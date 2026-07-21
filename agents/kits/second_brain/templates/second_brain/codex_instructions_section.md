@@ -21,11 +21,9 @@ Skip querying for trivial, purely local, or time-sensitive tasks, and never
 block on the vault or qmd being unavailable — treat it as best-effort context,
 not a hard dependency.
 
-### When to write learnings back
+### Automatic durable capture
 
 After resolving a nontrivial bug, adopting a project convention, or reaching a
-durable decision worth remembering across sessions, offer to file it into the
-vault (one source/concept page under the right `wiki/` subfolder, cross-linked,
-with `wiki/index.md` and `wiki/log.md` updated) rather than letting it evaporate
-at session end. Do not batch-ingest; do this incrementally, one item at a time,
-and ask before writing when in doubt.
+durable decision, use the installed `second-brain` skill. It writes one
+secret-free draft to `inbox/` automatically. Only promote a draft into the
+searchable wiki when the user asks; then update the index and meta pages.

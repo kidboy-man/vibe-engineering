@@ -19,7 +19,8 @@
     "claude_md_section.md",
     "codex_instructions_section.md",
     "opencode_agents_section.md",
-    "rules/second-brain.mdc"
+    "rules/second-brain.mdc",
+    "skills/second-brain/SKILL.md"
   ],
   "settings_fragment": null,
   "secret_policy": "Never installs auth tokens, credentials, API keys, local router URLs, or machine-specific paths. Vault data is create-if-absent and never uninstall-deleted.",

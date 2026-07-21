@@ -36,6 +36,8 @@ def backup(path: Path, backup_base_dir: Path) -> Path | None:
         return None
     rel = path.relative_to(backup_base_dir)
     backup_path = backup_base_dir / "backups" / "vibe-engineering" / timestamp() / rel
+    if backup_path.exists():
+        return backup_path
     backup_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(path, backup_path)
     return backup_path

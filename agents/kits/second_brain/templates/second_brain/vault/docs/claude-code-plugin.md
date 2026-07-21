@@ -1,6 +1,8 @@
-# Claude Code Plugin — claude-obsidian
+# Optional Claude Code Plugin — claude-obsidian
 
-The `claude-obsidian` plugin turns Claude Code into a wiki maintainer. It provides slash commands and agent skills for ingesting, querying, and maintaining the vault.
+The second-brain kit already installs its own portable `second-brain` skill for
+proactive retrieval, automatic inbox drafts, and requested curation. This plugin
+is optional for Claude-specific slash commands and additional workflows.
 
 Repository: [https://github.com/AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian)
 
@@ -60,6 +62,8 @@ This is a common point of confusion:
 
 You **cannot** type `/wiki-lint`. That returns "Unknown command." Instead, say "lint the wiki" or "health check my vault."
 
-## No Bundled Skill Files
+## Built-in vs Plugin Skills
 
-This vault does **not** include copies of the `claude-obsidian` skill files. The plugin manages its own files under `~/.claude/`. Do not copy skill files from the plugin into this vault or any project. Install via the marketplace commands above only.
+The kit's `second-brain` skill is installed globally for compatible agents. The
+plugin manages its own separate skills under `~/.claude/`; do not copy plugin
+files into this vault or any project.

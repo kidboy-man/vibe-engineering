@@ -28,7 +28,7 @@ qmd --version
 
 ## Configure the Vault
 
-The auto-install registers the wiki collection and runs `qmd update` for you.
+The kit checks the wiki collection and runs `qmd update` on every normal install.
 If you installed manually, do this once:
 
 ```bash
@@ -52,21 +52,21 @@ Works immediately after `qmd update`. Fast, accurate for known terms.
 qmd search "authentication middleware"
 ```
 
-### Semantic (vector) — optional, ~333 MB model
+### Semantic (vector) — optional
 
-Run after you have ~15-20 pages. Downloads a GGUF embedding model and reindexes all docs.
+Run after you have enough pages for conceptual recall. This downloads local models.
 
 ```bash
 qmd embed        # downloads model, builds vectors (~30s for 20 pages)
-qmd search "how do I handle session expiry" --semantic
+qmd vsearch "how do I handle session expiry"
 ```
 
-### Hybrid (BM25 + semantic + rerank) — optional, ~2 GB total
+### Hybrid (BM25 + semantic + rerank) — optional
 
 Combines keyword and vector results with LLM reranking for best precision.
 
 ```bash
-qmd search "session management patterns" --hybrid
+qmd query "session management patterns"
 ```
 
 ## Maintenance

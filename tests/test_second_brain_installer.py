@@ -1345,7 +1345,7 @@ class SecondBrainOpenCodeMcpTests(unittest.TestCase):
                 config_path.read_text(encoding="utf-8"), "{not valid jsonc"
             )
 
-    def test_install_skips_non_object_root(self):
+    def test_install_rejects_non_object_root_before_writes(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
 
@@ -1356,10 +1356,12 @@ class SecondBrainOpenCodeMcpTests(unittest.TestCase):
 
             buf = io.StringIO()
             with redirect_stdout(buf):
-                install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+                rc = install(home=str(home), dry_run=False, yes=True, setup_deps=False)
             output = buf.getvalue()
 
-            self.assertIn("opencode.jsonc root is not an object", output)
+            self.assertEqual(rc, 1)
+            self.assertIn("invalid opencode.jsonc: root is not an object", output)
+            self.assertFalse((home / "second-brain").exists())
             self.assertEqual(
                 config_path.read_text(encoding="utf-8"), json.dumps("just a string")
             )
@@ -1838,6 +1840,43 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             mock_setup.assert_called_once()
 
+    @patch("agents.kits.second_brain.installer._setup_qmd", return_value=1)
+    def test_install_returns_failure_when_qmd_setup_fails(self, mock_setup):
+        with tempfile.TemporaryDirectory() as home_str:
+            rc = install(home=home_str, dry_run=False, yes=True, setup_deps=True)
+            manifest = Path(home_str) / "second-brain" / ".vibe-engineering-manifest.json"
+            state = json.loads(manifest.read_text(encoding="utf-8"))
+
+        self.assertEqual(rc, 1)
+        mock_setup.assert_called_once()
+        self.assertEqual(state["status"], "incomplete")
+        self.assertEqual(state["phase"], "qmd")
+
+    @patch("agents.kits.second_brain.installer.subprocess.run")
+    @patch("agents.kits.second_brain.installer.shutil.which")
+    def test_existing_qmd_registers_missing_collection_and_updates_index(
+        self, mock_which, mock_run
+    ):
+        mock_which.side_effect = lambda cmd: "/fake/qmd" if cmd == "qmd" else None
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+        ]
+        vault = Path("/tmp/second-brain")
+
+        rc = _setup_qmd(vault, yes=True)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            [call.args[0] for call in mock_run.call_args_list],
+            [
+                ["qmd", "collection", "list"],
+                ["qmd", "collection", "add", str(vault / "wiki"), "--name", "second-brain"],
+                ["qmd", "update"],
+            ],
+        )
+
     @patch("agents.kits.second_brain.installer.subprocess.run")
     @patch("agents.kits.second_brain.installer.shutil.which")
     def test_install_skips_npm_when_qmd_already_present(self, mock_which, mock_run):
@@ -1890,7 +1929,7 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
 
     @patch("agents.kits.second_brain.installer.subprocess.run")
     @patch("agents.kits.second_brain.installer.shutil.which")
-    def test_install_non_fatal_when_npm_missing(self, mock_which, mock_run):
+    def test_install_fails_when_qmd_and_npm_are_missing(self, mock_which, mock_run):
         def _which(cmd):
             if cmd == "git":
                 return "/usr/bin/git"
@@ -1900,9 +1939,167 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
         mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
         with tempfile.TemporaryDirectory() as home_str:
             rc = install(home=home_str, dry_run=False, yes=True, setup_deps=True)
-            self.assertEqual(rc, 0)
+            self.assertEqual(rc, 1)
             manifest = Path(home_str) / "second-brain" / ".vibe-engineering-manifest.json"
-            self.assertTrue(manifest.exists(), "manifest should exist even when npm missing")
+            state = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "incomplete")
+            self.assertEqual(state["phase"], "qmd")
+
+
+class SecondBrainIncompleteInstallDoctorTests(unittest.TestCase):
+    def test_doctor_reports_incomplete_qmd_setup_with_resume_command(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+            manifest = home / "second-brain" / ".vibe-engineering-manifest.json"
+            state = json.loads(manifest.read_text(encoding="utf-8"))
+            state.update({"status": "incomplete", "phase": "qmd"})
+            manifest.write_text(json.dumps(state), encoding="utf-8")
+
+            output = io.StringIO()
+            with patch(
+                "agents.kits.second_brain.installer.shutil.which",
+                side_effect=lambda name: f"/fake/{name}" if name in {"git", "qmd"} else None,
+            ), patch(
+                "agents.kits.second_brain.installer.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, str(home / "second-brain" / "wiki"), ""),
+            ), redirect_stdout(output):
+                rc = doctor(home=home_str)
+
+            self.assertEqual(rc, 1)
+            self.assertIn("incomplete", output.getvalue())
+            self.assertIn("vibe kits second-brain install --yes", output.getvalue())
+
+    def test_install_without_settings_still_installs_hooks(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+
+            rc = install(
+                home=home_str,
+                dry_run=False,
+                yes=True,
+                setup_deps=False,
+                merge_settings=False,
+                enable_hooks=True,
+            )
+
+            self.assertEqual(rc, 0)
+            self.assertTrue((home / ".claude" / HOOK_SCRIPT_REL).is_file())
+            settings = json.loads(
+                (home / ".claude" / "settings.json").read_text(encoding="utf-8")
+            )
+            self.assertNotIn("mcpServers", settings)
+            self.assertIn("hooks", settings)
+
+    def test_install_backs_up_existing_settings_before_merging(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            settings = home / ".claude" / "settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text('{"theme": "dark"}\n', encoding="utf-8")
+
+            rc = install(
+                home=home_str,
+                dry_run=False,
+                yes=True,
+                setup_deps=False,
+                enable_hooks=False,
+            )
+
+            self.assertEqual(rc, 0)
+            backups = list((home / ".claude" / "backups").rglob("settings.json"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), '{"theme": "dark"}\n')
+
+    def test_invalid_codex_toml_aborts_before_creating_vault(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            config = home / ".codex" / "config.toml"
+            config.parent.mkdir(parents=True)
+            config.write_text("broken = [\n", encoding="utf-8")
+
+            rc = install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+
+            self.assertEqual(rc, 1)
+            self.assertFalse((home / "second-brain").exists())
+
+
+class SecondBrainSkillInstallTests(unittest.TestCase):
+    """The kit ships a discoverable first-party second-brain skill."""
+
+    def test_install_copies_skill_to_agent_and_claude_locations(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            rc = install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+
+            self.assertEqual(rc, 0)
+            for path in (
+                home / ".agents" / "skills" / "second-brain" / "SKILL.md",
+                home / ".claude" / "skills" / "second-brain" / "SKILL.md",
+            ):
+                self.assertTrue(path.is_file(), path)
+                content = path.read_text(encoding="utf-8")
+                self.assertIn("name: second-brain", content)
+                self.assertIn("inbox/", content)
+
+    def test_dry_run_reports_skill_without_creating_it(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = install(home=home_str, dry_run=True, yes=True, setup_deps=False)
+
+            self.assertEqual(rc, 0)
+            self.assertIn("second-brain skill", output.getvalue())
+            self.assertFalse((home / ".agents" / "skills" / "second-brain" / "SKILL.md").exists())
+
+    def test_reinstall_preserves_modified_skill(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+            skill = home / ".agents" / "skills" / "second-brain" / "SKILL.md"
+            skill.write_text("custom skill\n", encoding="utf-8")
+
+            rc = install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(skill.read_text(encoding="utf-8"), "custom skill\n")
+
+    def test_uninstall_removes_unchanged_skill_files(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+
+            rc = uninstall(home=home_str, dry_run=False, yes=True)
+
+            self.assertEqual(rc, 0)
+            self.assertFalse((home / ".agents" / "skills" / "second-brain" / "SKILL.md").exists())
+            self.assertFalse((home / ".claude" / "skills" / "second-brain" / "SKILL.md").exists())
+
+    def test_uninstall_keeps_modified_skill_file(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+            skill = home / ".agents" / "skills" / "second-brain" / "SKILL.md"
+            skill.write_text("custom skill\n", encoding="utf-8")
+
+            rc = uninstall(home=home_str, dry_run=False, yes=True)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(skill.read_text(encoding="utf-8"), "custom skill\n")
+
+    def test_skill_defines_retrieve_capture_and_curation_flow(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=home_str, dry_run=False, yes=True, setup_deps=False)
+
+            content = (
+                home / ".agents" / "skills" / "second-brain" / "SKILL.md"
+            ).read_text(encoding="utf-8")
+
+            self.assertIn("Retrieve before re-deriving", content)
+            self.assertIn("Capture durable outcomes automatically", content)
+            self.assertIn("Curate only on request", content)
 
 
 class SecondBrainMarkerSafetyTests(unittest.TestCase):
@@ -2621,19 +2818,19 @@ class SecondBrainCursorHookInstallTests(unittest.TestCase):
             self.assertFalse((paths.cursor_dir / HOOK_SCRIPT_REL).exists())
             self.assertFalse((paths.cursor_dir / "hooks.json").exists())
 
-    def test_install_skips_hook_registration_on_invalid_hooks_json_without_blocking_others(self):
+    def test_install_rejects_invalid_hooks_json_before_other_writes(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             cursor_dir = home / ".cursor"
             cursor_dir.mkdir(parents=True, exist_ok=True)
             (cursor_dir / "hooks.json").write_text("{not valid json", encoding="utf-8")
 
-            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            rc = install(home=str(home), dry_run=False, yes=True, setup_deps=False)
 
+            self.assertEqual(rc, 1)
             self.assertEqual((cursor_dir / "hooks.json").read_text(encoding="utf-8"), "{not valid json")
             paths = _paths(home=str(home))
-            # Claude Code's hook wiring must still succeed despite Cursor's broken config.
-            self.assertTrue((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+            self.assertFalse((paths.claude_dir / HOOK_SCRIPT_REL).exists())
 
 
 class SecondBrainCursorRuleFileTests(unittest.TestCase):
@@ -2768,18 +2965,20 @@ class SecondBrainPartialConfigFailureTests(unittest.TestCase):
             self.assertTrue((paths.cursor_dir / HOOK_SCRIPT_REL).exists())
             self.assertTrue((paths.opencode_config_dir / "AGENTS.md").exists())
 
-    def test_invalid_cursor_hooks_json_does_not_block_claude_or_codex(self):
+    def test_invalid_cursor_hooks_json_aborts_install_before_other_writes(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             cursor_dir = home / ".cursor"
             cursor_dir.mkdir(parents=True, exist_ok=True)
             (cursor_dir / "hooks.json").write_text("{not valid json", encoding="utf-8")
 
-            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            result = install(home=str(home), dry_run=False, yes=True, setup_deps=False)
 
+            self.assertEqual(result, 1)
             paths = _paths(home=str(home))
-            self.assertTrue((paths.claude_dir / HOOK_SCRIPT_REL).exists())
-            self.assertTrue((paths.codex_dir / HOOK_SCRIPT_REL).exists())
+            self.assertFalse((paths.vault).exists())
+            self.assertFalse((paths.claude_dir / HOOK_SCRIPT_REL).exists())
+            self.assertFalse((paths.codex_dir / HOOK_SCRIPT_REL).exists())
 
 
 class SecondBrainMultiAgentEnableHookTests(unittest.TestCase):
