@@ -72,6 +72,10 @@ class KitRegistryExtensionContractTests(unittest.TestCase):
         self.assertIn("claude-code", help_text)
         self.assertIn("opencode", help_text)
 
+    def test_guardrails_registered_with_verify_option(self):
+        self.assertIn("guardrails", KITS)
+        self.assertEqual(KITS["guardrails"].install_options, frozenset({"with_verify"}))
+
     def test_build_parser_default_unchanged(self):
         parser = build_parser()
         help_text = self._kits_help_text(parser)

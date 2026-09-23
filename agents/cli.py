@@ -106,6 +106,9 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
         if "hooks" in kit.install_options:
             install_parser.add_argument("--no-hooks", action="store_true", help="Skip the proactive SessionStart hook / CLAUDE.md prompt")
 
+        if "with_verify" in kit.install_options:
+            install_parser.add_argument("--with-verify", action="store_true", help="Also register the opt-in gofmt check after Claude Code edits")
+
         diff_parser = kit_sub.add_parser("diff", help="Show file-level differences for managed files")
         diff_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
 
@@ -153,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
                 kwargs["setup_deps"] = not args.no_setup_deps
             if "hooks" in kit.install_options:
                 kwargs["enable_hooks"] = not args.no_hooks
+            if "with_verify" in kit.install_options:
+                kwargs["with_verify"] = args.with_verify
             return kit.install(**kwargs)
         if sub_command == "diff":
             return kit.diff(home=args.home)

@@ -45,6 +45,14 @@ class CliHelpContractTests(unittest.TestCase):
     def test_kits_help(self):
         self._assert_matches_fixture("kits_help.txt", "kits")
 
+    def test_kits_guardrails_help(self):
+        self._assert_matches_fixture("kits_guardrails_help.txt", "kits", "guardrails")
+
+    def test_kits_guardrails_install_help(self):
+        self._assert_matches_fixture(
+            "kits_guardrails_install_help.txt", "kits", "guardrails", "install"
+        )
+
     def test_kits_claude_code_help(self):
         self._assert_matches_fixture("kits_claude_code_help.txt", "kits", "claude-code")
 

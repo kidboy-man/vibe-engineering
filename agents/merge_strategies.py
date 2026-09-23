@@ -45,8 +45,12 @@ def hook_command_merge_strategy(
     command: str,
     *,
     hook_type: str = "command",
+    matcher: str | None = None,
 ) -> tuple[dict, bool]:
     """Add a kit-owned command to ``settings["hooks"][event]`` if absent.
+
+    When *matcher* is given (e.g. ``"Bash|Read"`` for PreToolUse) the new group
+    carries it; without it the group shape is unchanged.
 
     Dedupe key is exact string equality of an existing entry's ``command``
     field within *event*'s hook groups — independent of ``matcher``
@@ -74,9 +78,10 @@ def hook_command_merge_strategy(
 
     merged = dict(settings)
     merged_hooks = dict(hooks)
-    merged_hooks[event] = list(event_groups) + [
-        {"hooks": [{"type": hook_type, "command": command}]}
-    ]
+    new_group: dict = {"hooks": [{"type": hook_type, "command": command}]}
+    if matcher is not None:
+        new_group = {"matcher": matcher, **new_group}
+    merged_hooks[event] = list(event_groups) + [new_group]
     merged["hooks"] = merged_hooks
     return merged, True
 
@@ -142,8 +147,12 @@ def cursor_hook_merge_strategy(
     hooks_config: dict,
     event: str,
     command: str,
+    *,
+    matcher: str | None = None,
 ) -> tuple[dict, bool]:
     """Add a kit-owned command to ``hooks_config["hooks"][event]`` (Cursor's flat shape).
+
+    An optional *matcher* (regex) is stored on the entry as Cursor documents.
 
     Cursor's ``hooks.json`` entries are plain ``{"command": ...}`` objects
     directly in the event's list — no nested ``matcher``/groups wrapper,
@@ -172,7 +181,10 @@ def cursor_hook_merge_strategy(
     if "hooks" not in merged:
         merged.setdefault("version", 1)
     merged_hooks = dict(hooks)
-    merged_hooks[event] = list(entries) + [{"command": command}]
+    new_entry: dict = {"command": command}
+    if matcher is not None:
+        new_entry["matcher"] = matcher
+    merged_hooks[event] = list(entries) + [new_entry]
     merged["hooks"] = merged_hooks
     return merged, True
 
