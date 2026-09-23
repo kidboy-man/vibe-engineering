@@ -1,0 +1,14 @@
+{
+  "kit": "workflow",
+  "version": "0.1.0",
+  "description": "Business requirement to PRD, TRD, tickets, and TDD implementation: /prd, /flow, /implement-ticket, /push-tickets and the vibe-flow skill.",
+  "managed_files": [
+    "commands/flow.md",
+    "commands/implement-ticket.md",
+    "commands/prd.md",
+    "commands/push-tickets.md",
+    "skills/vibe-flow/SKILL.md",
+    "skills/vibe-flow/scripts/check_trace.py"
+  ],
+  "secret_policy": "Never reads or stores credentials. push-tickets uses the user's own gh login only after explicit approval."
+}

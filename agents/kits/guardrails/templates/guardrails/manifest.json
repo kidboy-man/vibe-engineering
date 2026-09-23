@@ -1,0 +1,10 @@
+{
+  "kit": "guardrails",
+  "version": "0.1.0",
+  "description": "Pre-tool-use guard hooks that block catastrophic commands and secret-file access for Claude Code, Codex CLI and Cursor.",
+  "managed_files": [
+    "hooks/vibe-guardrails/guard.py",
+    "hooks/vibe-guardrails/verify.py"
+  ],
+  "secret_policy": "Never reads, copies, or stores credentials. The guard only inspects tool-call payloads in memory and writes nothing."
+}

@@ -775,5 +775,50 @@ class StripCodexHookBlockTests(unittest.TestCase):
         self.assertFalse(fully_owned)
 
 
+class HookMatcherTests(unittest.TestCase):
+    def test_claude_hook_group_carries_matcher(self):
+        merged, changed = ms.hook_command_merge_strategy({}, "PreToolUse", "python3 g.py", matcher="Bash|Read")
+        self.assertTrue(changed)
+        self.assertEqual(
+            merged["hooks"]["PreToolUse"],
+            [{"matcher": "Bash|Read", "hooks": [{"type": "command", "command": "python3 g.py"}]}],
+        )
+
+    def test_claude_hook_without_matcher_shape_unchanged(self):
+        merged, _ = ms.hook_command_merge_strategy({}, "SessionStart", "python3 s.py")
+        self.assertEqual(merged["hooks"]["SessionStart"], [{"hooks": [{"type": "command", "command": "python3 s.py"}]}])
+
+    def test_claude_hook_with_matcher_is_idempotent_and_keeps_user_hooks(self):
+        user = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "mine.sh"}]}]}}
+        once, changed = ms.hook_command_merge_strategy(user, "PreToolUse", "python3 g.py", matcher="Bash")
+        self.assertTrue(changed)
+        twice, changed_again = ms.hook_command_merge_strategy(once, "PreToolUse", "python3 g.py", matcher="Bash")
+        self.assertFalse(changed_again)
+        self.assertEqual(twice, once)
+        self.assertEqual(len(once["hooks"]["PreToolUse"]), 2)
+        self.assertEqual(once["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "mine.sh")
+
+    def test_claude_strip_removes_only_our_matcher_group(self):
+        merged, _ = ms.hook_command_merge_strategy({}, "PreToolUse", "python3 g.py", matcher="Bash")
+        stripped, changed = ms.strip_hook_command(merged, "PreToolUse", "python3 g.py")
+        self.assertTrue(changed)
+        self.assertEqual(stripped, {})
+
+    def test_cursor_entry_carries_matcher(self):
+        merged, changed = ms.cursor_hook_merge_strategy({}, "preToolUse", "python3 g.py", matcher="Shell|Read")
+        self.assertTrue(changed)
+        self.assertEqual(merged["hooks"]["preToolUse"], [{"command": "python3 g.py", "matcher": "Shell|Read"}])
+        self.assertEqual(merged["version"], 1)
+
+    def test_cursor_entry_without_matcher_shape_unchanged(self):
+        merged, _ = ms.cursor_hook_merge_strategy({}, "sessionStart", "python3 s.py")
+        self.assertEqual(merged["hooks"]["sessionStart"], [{"command": "python3 s.py"}])
+
+    def test_cursor_matcher_entry_idempotent(self):
+        once, _ = ms.cursor_hook_merge_strategy({}, "preToolUse", "python3 g.py", matcher="Shell")
+        _, changed = ms.cursor_hook_merge_strategy(once, "preToolUse", "python3 g.py", matcher="Shell")
+        self.assertFalse(changed)
+
+
 if __name__ == "__main__":
     unittest.main()

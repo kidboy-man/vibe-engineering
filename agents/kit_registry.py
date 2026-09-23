@@ -29,11 +29,23 @@ from agents.kits.gemini.installer import (
     install as gemini_install,
     uninstall as gemini_uninstall,
 )
+from agents.kits.guardrails.installer import (
+    diff_kit as guardrails_diff,
+    doctor as guardrails_doctor,
+    install as guardrails_install,
+    uninstall as guardrails_uninstall,
+)
 from agents.kits.opencode.installer import (
     diff_kit as opencode_diff,
     doctor as opencode_doctor,
     install as opencode_install,
     uninstall as opencode_uninstall,
+)
+from agents.kits.workflow.installer import (
+    diff_kit as workflow_diff,
+    doctor as workflow_doctor,
+    install as workflow_install,
+    uninstall as workflow_uninstall,
 )
 from agents.kits.second_brain.installer import (
     diff_kit as second_brain_diff,
@@ -108,5 +120,22 @@ KITS: dict[str, KitSpec] = {
         diff=cursor_diff,
         doctor=cursor_doctor,
         uninstall=cursor_uninstall,
+    ),
+    "guardrails": KitSpec(
+        name="guardrails",
+        help="Manage the guardrails kit — hooks that block destructive commands and secret access",
+        install=guardrails_install,
+        diff=guardrails_diff,
+        doctor=guardrails_doctor,
+        uninstall=guardrails_uninstall,
+        install_options=frozenset({"with_verify"}),
+    ),
+    "workflow": KitSpec(
+        name="workflow",
+        help="Manage the workflow kit — business requirement to PRD, TRD, tickets, and TDD implementation",
+        install=workflow_install,
+        diff=workflow_diff,
+        doctor=workflow_doctor,
+        uninstall=workflow_uninstall,
     ),
 }

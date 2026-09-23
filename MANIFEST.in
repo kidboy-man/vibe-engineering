@@ -4,5 +4,7 @@ recursive-include agents/kits/second_brain/templates *
 recursive-include agents/kits/codex/templates *
 recursive-include agents/kits/gemini/templates *
 recursive-include agents/kits/cursor/templates *
+recursive-include agents/kits/guardrails/templates *
+recursive-include agents/kits/workflow/templates *
 global-exclude __pycache__
 global-exclude *.py[cod]
