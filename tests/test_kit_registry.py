@@ -76,6 +76,10 @@ class KitRegistryExtensionContractTests(unittest.TestCase):
         self.assertIn("guardrails", KITS)
         self.assertEqual(KITS["guardrails"].install_options, frozenset({"with_verify"}))
 
+    def test_workflow_registered_without_install_options(self):
+        self.assertIn("workflow", KITS)
+        self.assertEqual(KITS["workflow"].install_options, frozenset())
+
     def test_build_parser_default_unchanged(self):
         parser = build_parser()
         help_text = self._kits_help_text(parser)
