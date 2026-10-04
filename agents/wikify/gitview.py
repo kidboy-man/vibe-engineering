@@ -46,10 +46,15 @@ def head(root: Path) -> str | None:
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
+def tracked_files_or_none(root: Path) -> list[str] | None:
+    """Paths in the index (``git ls-files``); None on error."""
+    result = run_git(root, "ls-files")
+    return _lines(result) if result.returncode == 0 else None
+
+
 def tracked_files(root: Path) -> list[str]:
     """Paths in the index (``git ls-files``); empty on error."""
-    result = run_git(root, "ls-files")
-    return _lines(result) if result.returncode == 0 else []
+    return tracked_files_or_none(root) or []
 
 
 def show_head(root: Path, rel: str) -> str | None:

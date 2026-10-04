@@ -1,5 +1,7 @@
 import tempfile
+import subprocess
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from agents.wikify import gitview, plan, state
@@ -132,6 +134,47 @@ class PlanTests(RepoCase):
         out = plan.render(plan.build_plan(self.root))
         for needle in ("incremental", "a.md", "src/a.py", "stale"):
             self.assertIn(needle, out)
+
+    def test_annotated_members(self):
+        self.commit("src/d.py", "class D:\n    x: int = 1\n    y: str\n")
+        self.assertEqual(plan.build_plan(self.root)["symbols"]["src/d.py"], ["D", "D.x", "D.y"])
+
+    def _failing(self, sub):
+        real = gitview.run_git
+
+        def fake(root, *args):
+            if args and args[0] == sub:
+                return subprocess.CompletedProcess(["git"], 124, "", "timeout")
+            return real(root, *args)
+
+        return mock.patch.object(gitview, "run_git", fake)
+
+    def test_ls_files_failure_sets_error_rendered_first(self):
+        self.commit("src/a.py")
+        with self._failing("ls-files"):
+            p = plan.build_plan(self.root)
+        self.assertIn("ls-files", p["error"])
+        self.assertEqual(p["changed"], [])
+        self.assertTrue(plan.render(p).startswith("ERROR: "))
+
+    def test_diff_failure_with_base_sets_error_and_falls_back_full(self):
+        self.commit("src/a.py")
+        self.mark()
+        with self._failing("diff"):
+            p = plan.build_plan(self.root)
+        self.assertIn("diff", p["error"])
+        self.assertEqual(p["mode"], "full")
+        self.assertEqual(p["changed"], ["src/a.py"])
+
+    def test_error_none_when_healthy_or_empty_tree(self):
+        self.commit("src/a.py")
+        self.assertIsNone(plan.build_plan(self.root)["error"])
+        git(self.root, "rm", "-q", "src/a.py")
+        git(self.root, "commit", "-q", "-m", "empty")
+        p = plan.build_plan(self.root)
+        self.assertIsNone(p["error"])
+        self.assertEqual(p["changed"], [])
+        self.assertFalse(plan.render(p).startswith("ERROR"))
 
 
 if __name__ == "__main__":

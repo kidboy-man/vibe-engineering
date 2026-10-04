@@ -47,7 +47,12 @@ def _names(source: str) -> list[str]:
         elif isinstance(node, ast.ClassDef):
             out.append(node.name)
             for stmt in node.body:
-                targets = stmt.targets if isinstance(stmt, ast.Assign) else []
+                if isinstance(stmt, ast.Assign):
+                    targets = stmt.targets
+                elif isinstance(stmt, ast.AnnAssign):
+                    targets = [stmt.target]
+                else:
+                    targets = []
                 out.extend(
                     f"{node.name}.{t.id}" for t in targets if isinstance(t, ast.Name)
                 )
@@ -79,15 +84,22 @@ def build_plan(root: Path, full: bool = False) -> dict:
         "stale_deleted": [],
         "contexts": [],
         "symbols": {},
+        "error": None,
     }
     if head is None:
         return plan
     ignore = citations.load_ignore(root)
-    tracked = [p for p in gitview.tracked_files(root) if _keep(p, ignore)]
+    listing = gitview.tracked_files_or_none(root)
+    if listing is None:
+        plan["error"] = "git ls-files failed or timed out; plan is incomplete"
+        return plan
+    tracked = [p for p in listing if _keep(p, ignore)]
     plan["contexts"] = _contexts(tracked)
     base = None if full else state.base(root)
     changed = gitview.changed_since(root, base) if base else None
     pages = citations.index(root)
+    if base and changed is None:
+        plan["error"] = "git diff failed or timed out; fell back to full plan"
     if changed is None:  # full requested, no state, or unusable base
         plan["changed"] = sorted(tracked)
         plan["refresh_pages"] = sorted(pages)
@@ -111,7 +123,8 @@ def build_plan(root: Path, full: bool = False) -> dict:
 
 
 def render(plan: dict) -> str:
-    lines = [
+    lines = [f"ERROR: {plan['error']}"] if plan.get("error") else []
+    lines += [
         f"mode: {plan['mode']}",
         f"base: {plan['base'] or '-'}",
         f"head: {plan['head'] or '-'}",
