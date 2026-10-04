@@ -112,13 +112,17 @@ def _ignored(path: str, glob: str) -> bool:
     )
 
 
+def is_ignored(path: str, globs: list[str]) -> bool:
+    return any(_ignored(path, g) for g in globs)
+
+
 def _check(root: Path, cite: Citation, tracked: set[str], ignore: list[str]) -> str | None:
     bad = _shape_error(cite.path)
     if bad:
         return bad
     if is_secret_path(cite.path):
         return f"secret path {cite.path}"
-    if any(_ignored(cite.path, g) for g in ignore):
+    if is_ignored(cite.path, ignore):
         return f"ignored path {cite.path}"
     content = gitview.show_head(root, cite.path) if cite.path in tracked else None
     if content is None:
