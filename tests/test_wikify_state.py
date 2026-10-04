@@ -80,6 +80,33 @@ class StateTests(RepoCase):
         self.commit("docs/wiki/x.md")
         self.assertTrue(state.is_fresh(self.root))
 
+    def test_squash_merge_needs_one_remark(self):
+        """Documented limitation (R18): a squash merge folds code and the state
+        file into one mixed commit, so the wiki reads stale until one more
+        mark + docs-only commit. The hook must agree at every step."""
+        from tests.test_wikify_hook import bash, guard
+
+        def fresh():
+            got = state.is_fresh(self.root)
+            self.assertEqual(guard.decide(bash("git push", self.root)) is None, got)
+            return got
+
+        self.commit("src/a.py")
+        self.mark()
+        git(self.root, "checkout", "-q", "-b", "feat")
+        self.commit("src/b.py")
+        self.mark()
+        self.commit("docs/wiki/x.md")
+        self.assertTrue(fresh())
+        git(self.root, "checkout", "-q", "main")
+        git(self.root, "merge", "-q", "--squash", "feat")
+        git(self.root, "commit", "-q", "-m", "feat (squashed)")
+        self.assertFalse(fresh())
+        self.mark()
+        self.assertTrue(fresh())
+        self.commit("docs/wiki/y.md")
+        self.assertTrue(fresh())
+
     def test_corrupt_state_defaults(self):
         p = self.root / STATE
         p.parent.mkdir(parents=True)

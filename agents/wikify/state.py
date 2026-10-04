@@ -1,7 +1,12 @@
 """Wiki freshness state stored in ``docs/wiki/.wikify.json``.
 
 Freshness is derived from git, not from a stored SHA: the base is the commit
-that last touched the state file, so rebases and squashes do not invalidate it.
+that last touched the state file, so rebasing, amending or cherry-picking
+docs-only commits does not invalidate it.
+
+Limitation: a squash merge folds code and the state file into one mixed
+commit, which reads as stale (a mixed base must not hide uncovered code).
+After a squash merge, run ``vibe wikify mark`` and commit docs-only once.
 """
 
 from __future__ import annotations
