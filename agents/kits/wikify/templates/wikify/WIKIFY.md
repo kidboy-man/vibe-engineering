@@ -28,7 +28,8 @@ If `.wikify.json` has a merge conflict, take either side and rerun
 - `architecture/` for the overall structure.
 - Classification rule: a concern used by two or more bounded contexts, or that
   lives in shared or infrastructure code, goes to `technical/`.
-- `index.md` lists the pages.
+- `index.md` lists the pages: headings and link lists only, or cited prose
+  (it is verified like every other page).
 
 ## Citations
 

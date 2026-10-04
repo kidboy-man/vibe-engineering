@@ -13,7 +13,7 @@ TEMPLATE = (
     / "kits" / "wikify" / "templates" / "wikify" / "WIKIFY.md"
 )
 
-INDEX = "# Wiki index\n\nNo pages yet.\n"
+INDEX = "# Wiki index\n"  # headings only: prose here needs citations too
 STATE = '{\n  "version": 1,\n  "covered": null\n}\n'
 IGNORE = (
     "# Repo paths the wiki must not cite, one glob per line.\n"

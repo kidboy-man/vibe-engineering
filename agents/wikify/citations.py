@@ -122,6 +122,8 @@ def _check(root: Path, cite: Citation, tracked: set[str], ignore: list[str]) -> 
     bad = _shape_error(cite.path)
     if bad:
         return bad
+    if cite.path.startswith(WIKI_DIR):  # would launder unverified wiki text
+        return f"cites the wiki itself ({cite.path})"
     if is_secret_path(cite.path):
         return f"secret path {cite.path}"
     if is_ignored(cite.path, ignore):
@@ -149,8 +151,7 @@ def verify_page(root: Path, page_rel: str, text: str, ignore: list[str]) -> list
         reason = _check(root, cite, tracked, ignore)
         if reason:
             errors.append((cite.line, reason))
-    if page_rel != "index.md":
-        errors.extend((n, "uncited paragraph") for n in uncited)
+    errors.extend((n, "uncited paragraph") for n in uncited)
     return [f"{page_rel}:{n}: {reason}" for n, reason in sorted(errors, key=lambda e: e[0])]
 
 

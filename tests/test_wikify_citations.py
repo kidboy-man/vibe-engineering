@@ -131,10 +131,20 @@ class VerifyTests(RepoCase):
         errs = self.verify("# Title\n\nno cite here\n")
         self.assertEqual(errs, ["p.md:3: uncited paragraph"])
 
-    def test_index_exempt_only_at_top_level(self):
-        self.assertEqual(self.verify("prose\n", page="index.md"), [])
-        self.assertEqual(self.verify("prose\n", page="Index.md"), ["Index.md:1: uncited paragraph"])
-        self.assertEqual(self.verify("prose\n", page="sub/index.md"), ["sub/index.md:1: uncited paragraph"])
+    def test_index_is_not_exempt(self):
+        for page in ("index.md", "Index.md", "sub/index.md"):
+            with self.subTest(page):
+                self.assertEqual(self.verify("prose\n", page=page), [f"{page}:1: uncited paragraph"])
+        links = "# Wiki index\n\n## Domain\n\n- [a](a.md)\n- [[b]]\n"
+        self.assertEqual(self.verify(links, page="index.md"), [])
+
+    def test_citing_the_wiki_itself_rejected(self):
+        self.commit("docs/wiki/index.md", "# Wiki index\n")
+        self.commit("docs/wiki/a.md", "<!-- wikify:human -->\nclaim\n<!-- /wikify:human -->\n")
+        for path in ("docs/wiki/index.md", "docs/wiki/a.md"):
+            with self.subTest(path):
+                errs = self.verify(f"x (src: {path}:1)\n")
+                self.assertEqual(errs, [f"p.md:1: cites the wiki itself ({path})"])
 
     def test_line_number_is_original_after_human_block(self):
         text = "<!-- wikify:human -->\na\nb\n<!-- /wikify:human -->\n\nx (src: src/a.py:1-99)\n"
