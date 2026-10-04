@@ -141,6 +141,58 @@ class VerifyTests(RepoCase):
         self.assertTrue(self.verify(text)[0].startswith("p.md:6: "))
 
 
+class HardeningTests(RepoCase):
+    def test_huge_and_unicode_digits_do_not_raise(self):
+        for name, text in {
+            "huge": "x (src: a.py:" + "1" * 5000 + ")\n",
+            "unicode": "x (src: a.py:\u0661)\n",
+        }.items():
+            with self.subTest(name):
+                cites, unc = citations.parse(text)
+                self.assertEqual((cites, unc), ([], [1]))
+                self.assertEqual(self.verify(text), ["p.md:1: uncited paragraph"])
+        self.write("docs/wiki/bad.md", "x (src: a.py:" + "1" * 5000 + ")\n")
+        self.write("docs/wiki/ok.md", "x (src: src/a.py:1)\n")
+        self.assertEqual(citations.index(self.root)["ok.md"], {"src/a.py"})
+
+    def test_heading_rule(self):
+        cases = [
+            ("heading then uncited prose", "# H\nprose under heading\n", ["p.md:2: uncited paragraph"]),
+            ("heading alone", "## H\n", []),
+            ("hashtag claim", "#hashtag claim\n", ["p.md:1: uncited paragraph"]),
+            ("heading then cited", "# H\nok (src: src/a.py:1)\n", []),
+        ]
+        for name, text, want in cases:
+            with self.subTest(name):
+                self.assertEqual(self.verify(text), want)
+
+    def test_ignore_directory_patterns(self):
+        self.commit("vendor/a.py", "x\n")
+        self.commit("internal/x.py", "x\n")
+        self.commit("docs2/x.py", "x\n")
+        cases = [
+            ("vendor/", "vendor/a.py", True),
+            ("internal", "internal/x.py", True),
+            ("docs", "docs2/x.py", False),
+            ("vendor/*", "vendor/a.py", True),
+        ]
+        for glob, path, rejected in cases:
+            with self.subTest(glob=glob, path=path):
+                errs = self.verify(f"x (src: {path}:1)\n", ignore=[glob])
+                self.assertEqual(len(errs) == 1, rejected, errs)
+
+    def test_line_numbering_matches_git(self):
+        self.commit("src/odd.txt", "a\x0cb\nsecond\u2028x\nthird\n")
+        self.assertEqual(self.verify("x (src: src/odd.txt:3 `third`)\n"), [])
+        self.assertEqual(len(self.verify("x (src: src/odd.txt:4)\n")), 1)
+        p = self.root / "src/crlf.txt"
+        p.write_bytes(b"one\r\ntwo\r\n")
+        git(self.root, "add", "src/crlf.txt")
+        git(self.root, "commit", "-q", "-m", "crlf")
+        self.assertEqual(self.verify("x (src: src/crlf.txt:2 `two`)\n"), [])
+        self.assertEqual(len(self.verify("x (src: src/crlf.txt:3)\n")), 1)
+
+
 class LoadIgnoreTests(RepoCase):
     def test_missing(self):
         self.assertEqual(citations.load_ignore(self.root), [])

@@ -16,8 +16,9 @@ from agents.secret_policies import is_secret_path
 from agents.wikify import gitview
 from agents.wikify.state import WIKI_DIR
 
-CITE = re.compile(r"\(src: ([^\s:`()]+):(\d+)(?:-(\d+))?(?: `([^`]+)`)?\)")
+CITE = re.compile(r"\(src: ([^\s:`()]+):([0-9]{1,9})(?:-([0-9]{1,9}))?(?: `([^`]+)`)?\)")
 HUMAN = re.compile(r"<!-- wikify:human -->.*?<!-- /wikify:human -->", re.S)
+HEADING = re.compile(r"^#{1,6} ")
 LINK = re.compile(r"\[\[[^\]]*\]\]|\[[^\]]*\]\([^)]*\)")
 IGNORE_REL = WIKI_DIR + ".wikifyignore"
 
@@ -48,37 +49,31 @@ def _citations(clean: str) -> list[Citation]:
     ]
 
 
-def _is_exempt(block: list[str]) -> bool:
-    if block[0].lstrip().startswith("#"):
-        return True
-    rest = re.sub(r"[\W_]+", "", LINK.sub("", "\n".join(block)))
-    return not rest  # empty or a pure link list
-
-
 def _uncited(clean: str) -> list[int]:
     out: list[int] = []
-    block: list[str] = []
-    first = 0
+    block: list[tuple[int, str]] = []
     in_fence = False
 
     def flush() -> None:
-        if block and not _is_exempt(block) and not CITE.search("\n".join(block)):
-            out.append(first)
+        body = [(n, ln) for n, ln in block if not HEADING.match(ln)]
         block.clear()
+        if not body:
+            return
+        text = "\n".join(ln for _, ln in body)
+        pure_links = not re.sub(r"[\W_]+", "", LINK.sub("", text))
+        if not pure_links and not CITE.search(text):
+            out.append(body[0][0])
 
     for n, line in enumerate(clean.split("\n"), 1):
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
             flush()
+        elif in_fence:
             continue
-        if in_fence:
-            continue
-        if not line.strip():
+        elif not line.strip():
             flush()
-            continue
-        if not block:
-            first = n
-        block.append(line)
+        else:
+            block.append((n, line))
     flush()
     return out
 
@@ -108,18 +103,29 @@ def load_ignore(root: Path) -> list[str]:
     return [g for g in globs if g and not g.startswith("#")]
 
 
+def _ignored(path: str, glob: str) -> bool:
+    prefix = glob.rstrip("/")
+    return (
+        fnmatch.fnmatchcase(path, glob)
+        or path == prefix
+        or path.startswith(prefix + "/")
+    )
+
+
 def _check(root: Path, cite: Citation, tracked: set[str], ignore: list[str]) -> str | None:
     bad = _shape_error(cite.path)
     if bad:
         return bad
     if is_secret_path(cite.path):
         return f"secret path {cite.path}"
-    if any(fnmatch.fnmatchcase(cite.path, g) for g in ignore):
+    if any(_ignored(cite.path, g) for g in ignore):
         return f"ignored path {cite.path}"
     content = gitview.show_head(root, cite.path) if cite.path in tracked else None
     if content is None:
         return f"{cite.path} not tracked at HEAD"
-    lines = content.splitlines()
+    lines = [ln.rstrip("\r") for ln in content.split("\n")]
+    if lines[-1] == "":
+        lines.pop()
     if not 1 <= cite.start <= cite.end <= len(lines):
         return f"range {cite.start}-{cite.end} out of range for {cite.path} ({len(lines)} lines)"
     if cite.symbol and cite.symbol not in "\n".join(lines[cite.start - 1 : cite.end]):
