@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from pathlib import Path
+
 try:
     import tomllib
 except ModuleNotFoundError:  # Python < 3.11
     import tomli as tomllib  # type: ignore[no-redef]
-from pathlib import Path
 
 from agents import installer_core as core
 from agents import merge_strategies as ms

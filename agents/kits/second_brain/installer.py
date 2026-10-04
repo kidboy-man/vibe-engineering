@@ -22,6 +22,7 @@ except ModuleNotFoundError:  # Python < 3.11
 from agents import installer_core as core
 from agents import merge_strategies as ms
 
+# Re-exports: the stable public surface of this module (tests and the registry import these).
 from agents.kits.second_brain.paths import (  # noqa: F401
     KIT_NAME,
     MANIFEST_FILE,
@@ -44,6 +45,88 @@ from agents.kits.second_brain.paths import (  # noqa: F401
     KitPaths,
     _template_dir,
     _paths,
+)
+from agents.kits.second_brain.mcp import (  # noqa: F401
+    QMD_MCP_SNIPPET_JSON,
+    OPENCODE_QMD_MCP_ENTRY,
+    _is_legacy_kit_owned_qmd_mcp,
+    _is_expected_opencode_qmd_mcp,
+    _merge_opencode_qmd_mcp,
+    CODEX_TOML_SECTION,
+    CODEX_TOML_BODY,
+    _strip_qmd_mcp,
+    _strip_opencode_qmd_mcp,
+)
+from agents.kits.second_brain.vault import (  # noqa: F401
+    _seed_page,
+    _gitignore_diff,
+    _merge_gitignore,
+    _git_init,
+    _vault_foreign_files,
+)
+from agents.kits.second_brain.skills import (  # noqa: F401
+    _skill_source_dirs,
+    _skill_root_targets,
+    _skill_targets,
+    _skill_source_for_target,
+    _skill_dir_status,
+    _install_skill,
+    _skill_status,
+)
+from agents.kits.second_brain.agent_configs import (  # noqa: F401
+    CLAUDE_SECRET_KEYS,
+    _merge_claude_config,
+    _merge_opencode_config,
+    _merge_cursor_config,
+    _merge_codex_config,
+)
+from agents.kits.second_brain.personas import (  # noqa: F401
+    PersonaSection,
+    _merge_persona_section,
+    CLAUDE_PERSONA_SECTION,
+    CODEX_PERSONA_SECTION,
+    OPENCODE_PERSONA_SECTION,
+    PERSONA_SECTIONS,
+    _merge_claude_md_section,
+    _merge_codex_instructions_section,
+    _merge_opencode_agents_section,
+    _marked_section_present,
+    _section_dry_run_label,
+)
+from agents.kits.second_brain.hooks import (  # noqa: F401
+    HookAgent,
+    _install_hook_script_file,
+    _json_hook_already_installed,
+    _hook_command,
+    _codex_hook_command,
+    _cursor_hook_command,
+    _hook_already_installed,
+    _codex_hook_block,
+    _codex_hook_identity,
+    _codex_hook_already_installed,
+    _cursor_hook_already_installed,
+    CLAUDE_HOOK_AGENT,
+    CODEX_HOOK_AGENT,
+    CURSOR_HOOK_AGENT,
+    HOOK_AGENTS,
+    _install_session_hook,
+    _install_codex_hook,
+    _install_cursor_hook,
+    _install_cursor_rule,
+    _cursor_rule_up_to_date,
+)
+from agents.kits.second_brain.qmd import (  # noqa: F401
+    _check_min_version,
+    _qmd_collection_status,
+)
+from agents.kits.second_brain.doctor_cmd import (  # noqa: F401
+    doctor,
+)
+from agents.kits.second_brain.diff_cmd import (  # noqa: F401
+    diff_kit,
+)
+from agents.kits.second_brain.uninstall_cmd import (  # noqa: F401
+    uninstall,
 )
 
 
@@ -129,27 +212,12 @@ def _print_dry_run(paths: KitPaths) -> None:
     print("dry run: no files written")
 
 
-from agents.kits.second_brain.vault import (  # noqa: F401
-    _seed_page,
-    _gitignore_diff,
-    _merge_gitignore,
-    _git_init,
-    _vault_foreign_files,
-)
-
-
 def _confirm(prompt: str) -> bool:
     """Prompt for y/N. Returns False on EOF (non-interactive stdin)."""
     try:
         return input(prompt).strip().lower() in ("y", "yes")
     except EOFError:
         return False
-
-
-from agents.kits.second_brain.qmd import (  # noqa: F401
-    _check_min_version,
-    _qmd_collection_status,
-)
 
 
 def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
@@ -204,78 +272,6 @@ def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
             print(f"  {updated.stderr.strip()}")
         return 1
     return 0
-
-
-from agents.kits.second_brain.skills import (  # noqa: F401
-    _skill_source_dirs,
-    _skill_root_targets,
-    _skill_targets,
-    _skill_source_for_target,
-    _skill_dir_status,
-    _install_skill,
-    _skill_status,
-)
-
-
-from agents.kits.second_brain.mcp import (  # noqa: F401
-    QMD_MCP_SNIPPET_JSON,
-    OPENCODE_QMD_MCP_ENTRY,
-    _is_legacy_kit_owned_qmd_mcp,
-    _is_expected_opencode_qmd_mcp,
-    _merge_opencode_qmd_mcp,
-    CODEX_TOML_SECTION,
-    CODEX_TOML_BODY,
-    _strip_qmd_mcp,
-    _strip_opencode_qmd_mcp,
-)
-
-
-from agents.kits.second_brain.agent_configs import (  # noqa: F401
-    CLAUDE_SECRET_KEYS,
-    _merge_claude_config,
-    _merge_opencode_config,
-    _merge_cursor_config,
-    _merge_codex_config,
-)
-
-
-from agents.kits.second_brain.hooks import (  # noqa: F401
-    HookAgent,
-    _install_hook_script_file,
-    _json_hook_already_installed,
-    _hook_command,
-    _codex_hook_command,
-    _cursor_hook_command,
-    _hook_already_installed,
-    _codex_hook_block,
-    _codex_hook_identity,
-    _codex_hook_already_installed,
-    _cursor_hook_already_installed,
-    CLAUDE_HOOK_AGENT,
-    CODEX_HOOK_AGENT,
-    CURSOR_HOOK_AGENT,
-    HOOK_AGENTS,
-    _install_session_hook,
-    _install_codex_hook,
-    _install_cursor_hook,
-    _install_cursor_rule,
-    _cursor_rule_up_to_date,
-)
-
-
-from agents.kits.second_brain.personas import (  # noqa: F401
-    PersonaSection,
-    _merge_persona_section,
-    CLAUDE_PERSONA_SECTION,
-    CODEX_PERSONA_SECTION,
-    OPENCODE_PERSONA_SECTION,
-    PERSONA_SECTIONS,
-    _merge_claude_md_section,
-    _merge_codex_instructions_section,
-    _merge_opencode_agents_section,
-    _marked_section_present,
-    _section_dry_run_label,
-)
 
 
 def _all_proactive_context_installed(paths: KitPaths) -> bool:
@@ -473,16 +469,3 @@ def install(
     return 0
 
 
-from agents.kits.second_brain.doctor_cmd import (  # noqa: F401
-    doctor,
-)
-
-
-from agents.kits.second_brain.diff_cmd import (  # noqa: F401
-    diff_kit,
-)
-
-
-from agents.kits.second_brain.uninstall_cmd import (  # noqa: F401
-    uninstall,
-)
