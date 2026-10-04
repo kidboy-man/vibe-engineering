@@ -51,9 +51,16 @@ def _layout_errors(root: Path) -> tuple[list[str], list[tuple[str, Path]]]:
     errors: list[str] = []
     pages: list[tuple[str, Path]] = []
     wiki = root / state.WIKI_DIR
+    if wiki.exists() and not wiki.is_dir():
+        return ["docs/wiki: not a directory"], pages
     if not wiki.is_dir():
         return errors, pages
-    for dirpath, dirnames, filenames in os.walk(wiki, followlinks=False):
+
+    def unreadable(exc: OSError) -> None:
+        rel = Path(exc.filename).relative_to(wiki).as_posix() if exc.filename else ""
+        errors.append(f"{state.WIKI_DIR}{rel}: unreadable directory")
+
+    for dirpath, dirnames, filenames in os.walk(wiki, followlinks=False, onerror=unreadable):
         here = Path(dirpath)
         for name in sorted(dirnames + filenames):
             path = here / name
@@ -76,7 +83,7 @@ def _verify(root: Path) -> tuple[int, list[str]]:
     errors, pages = _layout_errors(root)
     notices: list[str] = []
     allowed: list[str] = []
-    if not any(e.startswith(("docs:", "docs/wiki:")) for e in errors):
+    if not any(e.startswith(("docs:", "docs/wiki:")) and "unreadable" not in e for e in errors):
         for rel, path in pages:
             text = path.read_text(encoding="utf-8")
             errors.extend(citations.verify_page(root, rel, text, ignore))
@@ -129,8 +136,8 @@ def cmd_mark(cwd: str | Path | None = None) -> int:
     head = gitview.head(root)
     try:
         state.save(root, head)
-    except state.UnsafeWikiPath as exc:
-        print(f"not marked: {exc}")
+    except (state.UnsafeWikiPath, OSError) as exc:
+        print(f"not marked: {exc if isinstance(exc, state.UnsafeWikiPath) else type(exc).__name__}")
         return 1
     print(f"marked at {head[:7] if head else 'no commits'}")
     print(

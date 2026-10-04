@@ -163,9 +163,6 @@ class ParseAllowTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class GateHardeningTests(VerifyCase):
     def errors(self):
@@ -273,3 +270,43 @@ class SymlinkWriteTests(RepoCase):
         rc, text = out(init_cmd.cmd_init, cwd=self.root)
         self.assertEqual(rc, 1)
         self.assertIn("cannot create", text)
+
+
+@unittest.skipIf(os.geteuid() == 0, "root bypasses directory permissions")
+class UnreadableDirTests(VerifyCase):
+    def setUp(self):
+        super().setUp()
+        priv = self.root / "docs/wiki/priv"
+        priv.mkdir()
+        (priv / "x.txt").write_text("AKIA" + "A" * 16 + "\n")
+        priv.chmod(0)
+        self.addCleanup(priv.chmod, 0o755)
+
+    def test_verify_fails_closed(self):
+        rc, lines = commands.run_verify(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("docs/wiki/priv: unreadable directory", lines)
+
+    def test_scan_reports_unreadable(self):
+        self.assertIn("priv:0: unreadable", scan.scan_wiki(self.root))
+
+
+class WikiIsFileTests(RepoCase):
+    def setUp(self):
+        super().setUp()
+        (self.root / "docs").mkdir()
+        (self.root / "docs/wiki").write_text("x")
+
+    def test_verify_errors(self):
+        rc, lines = commands.run_verify(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("docs/wiki: not a directory", lines)
+
+    def test_mark_no_traceback(self):
+        rc, text = out(commands.cmd_mark, self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("not marked", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

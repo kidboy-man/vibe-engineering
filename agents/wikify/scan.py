@@ -8,6 +8,7 @@ well-known token shapes, home paths, emails and quoted credential assignments.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from pathlib import Path
@@ -90,21 +91,29 @@ def _all_hits(root: Path) -> list[tuple[str, int, str, str]]:
     if not wiki.is_dir():
         return []
     skip = Path(root) / ALLOW_REL
-    out = []
-    for path in sorted(wiki.rglob("*")):
-        if path == skip or path.is_symlink() or not path.is_file():
-            continue
-        rel = path.relative_to(wiki).as_posix()
-        try:
-            if path.stat().st_size > MAX_BYTES:
-                out.append((rel, 0, "too-large", "too-large"))
+    items: list[tuple[Path, list[tuple[str, int, str, str]]]] = []
+
+    def unreadable_dir(exc: OSError) -> None:  # fail closed, never skip silently
+        path = Path(exc.filename) if exc.filename else wiki
+        rel = path.relative_to(wiki).as_posix() if path != wiki else "."
+        items.append((path, [(rel, 0, "unreadable", "unreadable")]))
+
+    for dirpath, _dirs, files in os.walk(wiki, followlinks=False, onerror=unreadable_dir):
+        for name in files:
+            path = Path(dirpath) / name
+            if path == skip or path.is_symlink() or not path.is_file():
                 continue
-            text = path.read_bytes().decode("utf-8", errors="replace")
-        except OSError:
-            out.append((rel, 0, "unreadable", "unreadable"))
-            continue
-        out.extend((rel, line, rule, hit) for line, rule, hit in _scan(text))
-    return out
+            rel = path.relative_to(wiki).as_posix()
+            try:
+                if path.stat().st_size > MAX_BYTES:
+                    items.append((path, [(rel, 0, "too-large", "too-large")]))
+                    continue
+                text = path.read_bytes().decode("utf-8", errors="replace")
+            except OSError:
+                items.append((path, [(rel, 0, "unreadable", "unreadable")]))
+                continue
+            items.append((path, [(rel, line, rule, hit) for line, rule, hit in _scan(text)]))
+    return [hit for _, hits in sorted(items, key=lambda i: i[0]) for hit in hits]
 
 
 def scan_wiki(root: Path) -> list[str]:
