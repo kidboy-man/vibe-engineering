@@ -41,6 +41,12 @@ from agents.kits.opencode.installer import (
     install as opencode_install,
     uninstall as opencode_uninstall,
 )
+from agents.kits.wikify.installer import (
+    diff_kit as wikify_diff,
+    doctor as wikify_doctor,
+    install as wikify_install,
+    uninstall as wikify_uninstall,
+)
 from agents.kits.workflow.installer import (
     diff_kit as workflow_diff,
     doctor as workflow_doctor,
@@ -180,6 +186,14 @@ KITS: dict[str, KitSpec] = {
         doctor=guardrails_doctor,
         uninstall=guardrails_uninstall,
         install_options=frozenset({"with_verify"}),
+    ),
+    "wikify": KitSpec(
+        name="wikify",
+        help="Manage the wikify kit — push gate that keeps docs/wiki in sync",
+        install=wikify_install,
+        diff=wikify_diff,
+        doctor=wikify_doctor,
+        uninstall=wikify_uninstall,
     ),
     "workflow": KitSpec(
         name="workflow",

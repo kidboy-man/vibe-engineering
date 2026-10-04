@@ -62,6 +62,12 @@ class CliHelpContractTests(unittest.TestCase):
             "kits_guardrails_install_help.txt", "kits", "guardrails", "install"
         )
 
+    def test_kits_wikify_help(self):
+        self._assert_matches_fixture("kits_wikify_help.txt", "kits", "wikify")
+
+    def test_kits_wikify_install_help(self):
+        self._assert_matches_fixture("kits_wikify_install_help.txt", "kits", "wikify", "install")
+
     def test_kits_claude_code_help(self):
         self._assert_matches_fixture("kits_claude_code_help.txt", "kits", "claude-code")
 
