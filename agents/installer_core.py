@@ -123,17 +123,47 @@ def report_manifest(manifest: dict | None) -> None:
         print("manifest: not installed")
 
 
-def planned_changes_copy_style(target_files_list: list[tuple[Path, Path, str]]) -> list[str]:
-    """Return planned-change descriptions for copy-style managed files."""
-    changes: list[str] = []
+@dataclass(frozen=True)
+class Change:
+    """One planned action on a copy-style managed file."""
+
+    kind: str  # "create" | "update" | "unchanged"
+    rel: str
+    src: Path
+    dst: Path
+
+    def describe(self) -> str:
+        return f"{self.kind} {self.rel}"
+
+
+def plan_copy_files(target_files_list: list[tuple[Path, Path, str]]) -> list[Change]:
+    """Classify each managed file against what is installed. Reads only; never writes."""
+    plan: list[Change] = []
     for src, dst, rel in target_files_list:
         if not dst.exists():
-            changes.append(f"create {rel}")
+            kind = "create"
         elif read_text(src) != read_text(dst):
-            changes.append(f"update {rel}")
+            kind = "update"
         else:
-            changes.append(f"unchanged {rel}")
-    return changes
+            kind = "unchanged"
+        plan.append(Change(kind, rel, src, dst))
+    return plan
+
+
+def planned_changes_copy_style(target_files_list: list[tuple[Path, Path, str]]) -> list[str]:
+    """Return planned-change descriptions for copy-style managed files."""
+    return [change.describe() for change in plan_copy_files(target_files_list)]
+
+
+def apply_copy_plan(plan: list[Change], backup_base_dir: Path) -> None:
+    """Execute a plan from plan_copy_files: back up then overwrite updates, create the rest."""
+    for change in plan:
+        if change.kind == "unchanged":
+            continue
+        if change.kind == "update":
+            backup(change.dst, backup_base_dir)
+        write_text(change.dst, read_text(change.src))
+        print(f"installed {change.rel}")
 
 
 def install_copy_style_file(src: Path, dst: Path, backup_base_dir: Path) -> bool:
@@ -205,7 +235,8 @@ def _copy_kit_files(kit: CopyKit, home: str | None) -> tuple[Path, Path, list[tu
 
 def copy_kit_install(kit: CopyKit, home: str | None = None, dry_run: bool = False, yes: bool = False) -> int:
     _home, target_dir, files = _copy_kit_files(kit, home)
-    for change in [*planned_changes_copy_style(files), f"write {MANIFEST_FILE}"]:
+    plan = plan_copy_files(files)
+    for change in [*(c.describe() for c in plan), f"write {MANIFEST_FILE}"]:
         print(change)
     if dry_run:
         print("dry run: no files written")
@@ -215,13 +246,10 @@ def copy_kit_install(kit: CopyKit, home: str | None = None, dry_run: bool = Fals
         return 1
 
     (target_dir / kit.ensure_subdir).mkdir(parents=True, exist_ok=True)
-    managed: list[str] = []
-    for src, dst, rel in files:
-        managed.append(rel)
-        if install_copy_style_file(src, dst, target_dir):
-            print(f"installed {rel}")
+    apply_copy_plan(plan, target_dir)
 
     manifest_path = target_dir / MANIFEST_FILE
+    managed = [change.rel for change in plan]
     write_text(manifest_path, json.dumps(manifest_state(kit.kit_name, managed), indent=2) + "\n")
     print(f"wrote {manifest_path}")
     return 0
@@ -229,11 +257,10 @@ def copy_kit_install(kit: CopyKit, home: str | None = None, dry_run: bool = Fals
 
 def copy_kit_diff(kit: CopyKit, home: str | None = None) -> int:
     _home, _target, files = _copy_kit_files(kit, home)
-    any_diff = False
-    for src, dst, rel in files:
-        if diff_copy_style(src, dst, rel):
-            any_diff = True
-    if not any_diff:
+    pending = [change for change in plan_copy_files(files) if change.kind != "unchanged"]
+    for change in pending:
+        diff_copy_style(change.src, change.dst, change.rel)
+    if not pending:
         print("managed files match kit templates")
     return 0
 

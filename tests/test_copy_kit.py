@@ -79,6 +79,42 @@ class ReportBinaryTests(unittest.TestCase):
         self.assertIn("tool version check failed: boom", out)
 
 
+class PlanCopyFilesTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self.src = root / "src"
+        self.dst = root / "dst"
+        self.src.mkdir()
+        self.dst.mkdir()
+        for name in ("new.md", "changed.md", "same.md"):
+            (self.src / name).write_text("kit\n", encoding="utf-8")
+        (self.dst / "changed.md").write_text("old\n", encoding="utf-8")
+        (self.dst / "same.md").write_text("kit\n", encoding="utf-8")
+        self.files = [(self.src / n, self.dst / n, n) for n in ("new.md", "changed.md", "same.md")]
+
+    def test_plan_classifies_files_without_writing(self):
+        before = sorted(p.name for p in self.dst.iterdir())
+        plan = core.plan_copy_files(self.files)
+        self.assertEqual([(c.kind, c.rel) for c in plan], [("create", "new.md"), ("update", "changed.md"), ("unchanged", "same.md")])
+        self.assertEqual([c.describe() for c in plan], ["create new.md", "update changed.md", "unchanged same.md"])
+        self.assertEqual(sorted(p.name for p in self.dst.iterdir()), before)
+
+    def test_planned_changes_copy_style_is_the_plan_rendered(self):
+        self.assertEqual(core.planned_changes_copy_style(self.files), [c.describe() for c in core.plan_copy_files(self.files)])
+
+    def test_apply_writes_only_pending_changes_and_backs_up_updates(self):
+        plan = core.plan_copy_files(self.files)
+        _rc, out = _run(core.apply_copy_plan, plan, self.dst)
+        self.assertEqual(out.splitlines(), ["installed new.md", "installed changed.md"])
+        self.assertEqual((self.dst / "new.md").read_text(encoding="utf-8"), "kit\n")
+        self.assertEqual((self.dst / "changed.md").read_text(encoding="utf-8"), "kit\n")
+        backups = list((self.dst / "backups").rglob("changed.md"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), "old\n")
+
+
 class CopyKitRunnerTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
