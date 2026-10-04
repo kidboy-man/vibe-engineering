@@ -15,21 +15,38 @@ from pathlib import Path
 from agents.wikify.state import WIKI_DIR
 
 ALLOW_REL = WIKI_DIR + ".wikify-allow"
+MAX_BYTES = 1 << 20  # larger files are not read; they hard-block as "too-large"
 
-# Quantifiers are bounded so long non-matching runs cannot backtrack badly.
+FLOOR_NOTICE = (
+    "Built-in scan rules are a floor, not a complete scanner; "
+    "review the wiki text yourself before pushing."
+)
+
+# Every quantifier is bounded (Python 3.10 has no possessive quantifiers) and
+# the JWT start is anchored after a non-word char, so long adversarial runs
+# cannot cause quadratic backtracking. [^\S\r\n] is single-line whitespace
+# that still matches NBSP and other Unicode spaces.
+_WS = r"[^\S\r\n]*"
+_KEY = r"(?:api[_-]?key|secret|token|password|passwd)['\"]?"
 RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("private-key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----")),
+    ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY")),
     ("aws-access-key", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("github-token", re.compile(r"ghp_[A-Za-z0-9]{36}")),
-    ("slack-token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
-    ("bearer-token", re.compile(r"Bearer[ \t]+[A-Za-z0-9._-]{20,}")),
-    ("jwt", re.compile(r"eyJ[\w-]+\.[\w-]+\.[\w-]+")),
-    ("home-path", re.compile(r"/(?:home|Users)/[A-Za-z0-9._-]+/")),
+    ("slack-token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,4096}")),
+    ("bearer-token", re.compile(r"Bearer[^\S\r\n]{1,64}[A-Za-z0-9._-]{20,4096}")),
+    ("jwt", re.compile(r"(?<![\w-])eyJ[\w-]{1,4096}\.[\w-]{1,4096}\.[\w-]{1,4096}")),
+    ("home-path", re.compile(r"/(?:home|Users)/[A-Za-z0-9._-]{1,128}/")),
     ("email", re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+")),
     (
         "secret-assignment",
+        re.compile(_KEY + _WS + r"[:=]" + _WS + r"""['"][^'"\s]{8,4096}['"]""", re.I),
+    ),
+    (
+        # Unquoted value: >=10 chars with at least one digit (skips "password: required").
+        "secret-assignment",
         re.compile(
-            r"""(?:api[_-]?key|secret|token|password)[ \t]*[:=][ \t]*['"][^'"\s]{8,}['"]""",
+            _KEY + _WS + r"[:=]" + _WS
+            + r"(?=[A-Za-z0-9+/=_.-]{0,255}\d)[A-Za-z0-9+/=_.-]{10,256}",
             re.I,
         ),
     ),
@@ -73,8 +90,15 @@ def _all_hits(root: Path) -> list[tuple[str, int, str, str]]:
     for path in sorted(wiki.rglob("*")):
         if path == skip or path.is_symlink() or not path.is_file():
             continue
-        text = path.read_bytes().decode("utf-8", errors="replace")
         rel = path.relative_to(wiki).as_posix()
+        try:
+            if path.stat().st_size > MAX_BYTES:
+                out.append((rel, 0, "too-large", "too-large"))
+                continue
+            text = path.read_bytes().decode("utf-8", errors="replace")
+        except OSError:
+            out.append((rel, 0, "unreadable", "unreadable"))
+            continue
         out.extend((rel, line, rule, hit) for line, rule, hit in _scan(text))
     return out
 

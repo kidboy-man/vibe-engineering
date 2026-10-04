@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -51,6 +52,35 @@ class ScanTextCase(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertNotIn(rule, self.rules(text))
 
+    def test_private_key_variants(self):
+        for kind in ("PGP PRIVATE KEY BLOCK", "ENCRYPTED PRIVATE KEY", "DSA PRIVATE KEY"):
+            with self.subTest(kind=kind):
+                self.assertIn("private-key", self.rules("-----BEGIN " + kind + "-----"))
+
+    def test_secret_assignment_shapes(self):
+        pos = [
+            '"api_key": "' + "x" * 8 + "1234" + '"',
+            "password: " + "hunter" + "2" * 6,
+            "token =\u00a0\"" + "y" * 12 + '"',
+            "DB_PASSWD=" + "abcdef" + "12345",
+        ]
+        for text in pos:
+            with self.subTest(text=text):
+                self.assertIn("secret-assignment", self.rules(text))
+        for text in ("password: required", "token: refresh", "secret: none",
+                     "password: requiredvalue"):
+            with self.subTest(text=text):
+                self.assertNotIn("secret-assignment", self.rules(text))
+
+    def test_adversarial_input_is_fast(self):
+        for text in ("eyJ" * 20000, "token=" * 33000, "Bearer " * 20000):
+            start = time.monotonic()
+            scan.scan_text(text)
+            self.assertLess(time.monotonic() - start, 1.0)
+
+    def test_floor_notice(self):
+        self.assertIn("floor", scan.FLOOR_NOTICE)
+
     def test_line_numbers_and_users_path(self):
         hits = scan.scan_text("ok\nok\n/Users/bob/x\n")
         self.assertEqual(hits, [(3, "home-path")])
@@ -101,6 +131,38 @@ class WikiCase(unittest.TestCase):
         self.assertEqual(scan.load_allow(self.root), {
             ("a.md", "noreply@example.com"), ("c.md", "noreply@example.com"),
         })
+
+    def test_unreadable_file_is_a_hit(self):
+        self.write("a.md", "fine\n")
+        self.write("b.md", GHP + "\n")
+        real = Path.read_bytes
+
+        def fake(path):
+            if path.name == "a.md":
+                raise PermissionError("denied")
+            return real(path)
+
+        with mock.patch.object(Path, "read_bytes", fake):
+            self.assertEqual(
+                scan.scan_wiki(self.root), ["a.md:0: unreadable", "b.md:1: github-token"]
+            )
+        self.write(".wikify-allow", "a.md|unreadable\n")
+        with mock.patch.object(Path, "read_bytes", fake):
+            self.assertEqual(scan.scan_wiki(self.root), ["b.md:1: github-token"])
+
+    def test_too_large_file_is_a_hit_and_not_read(self):
+        (self.wiki / "big.md").write_bytes(b"a" * ((1 << 20) + 1))
+        self.write("b.md", GHP + "\n")
+        real = Path.read_bytes
+
+        def fake(path):
+            self.assertNotEqual(path.name, "big.md")
+            return real(path)
+
+        with mock.patch.object(Path, "read_bytes", fake):
+            self.assertEqual(
+                scan.scan_wiki(self.root), ["b.md:1: github-token", "big.md:0: too-large"]
+            )
 
     def test_allow_file_itself_not_scanned(self):
         self.write(".wikify-allow", "a.md|noreply@example.com\n")
