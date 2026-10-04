@@ -1,15 +1,17 @@
-"""Second-brain kit installer — vault scaffold, seed pages, .gitignore, git init,
-and agent config adapters (Claude Code, OpenCode, Codex CLI)."""
+"""Second-brain kit installer: public entry points and install orchestration.
+
+The implementation is split into sibling modules (paths, vault, skills, mcp,
+agent_configs, hooks, personas, qmd, doctor_cmd, diff_cmd, uninstall_cmd).
+Names tests patch (`_confirm`, `_setup_qmd`, `shutil`, `subprocess`, `core`)
+and the registry imports resolve here, so this module is the stable surface.
+"""
 
 from __future__ import annotations
 
 import json
-import os
-import re
 import shutil
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -19,7 +21,6 @@ except ModuleNotFoundError:  # Python < 3.11
 
 from agents import installer_core as core
 from agents import merge_strategies as ms
-from agents.secret_policies import LOCAL_ONLY_KEYS, is_secret_key
 
 from agents.kits.second_brain.paths import (  # noqa: F401
     KIT_NAME,

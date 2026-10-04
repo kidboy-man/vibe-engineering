@@ -10,6 +10,19 @@ and `merge_strategies.py` config merging helpers. Individual kits live under
 `templates/`. Tests are in `tests/`, with CLI help snapshots in
 `tests/fixtures/cli_help/`. User-facing setup notes are in `docs/`.
 
+### second-brain layout
+
+`agents/kits/second_brain/installer.py` is the public facade: `install`,
+`enable_hook`, install orchestration, and the names tests patch (`_confirm`,
+`_setup_qmd`, `shutil`, `subprocess`, `core`). Implementation lives in sibling
+modules: `paths` (constants and on-disk markers), `vault`, `skills`, `mcp`
+(pure qmd entry helpers), `agent_configs`, `hooks`, `personas`, `qmd`, and the
+read-only/strip commands `doctor_cmd`, `diff_cmd`, `uninstall_cmd`. Submodules
+call `shutil.which` / `subprocess.run` / `core.confirm` through the module
+object (never `from x import y`) so test patches keep working.
+`tests/test_second_brain_contract.py` freezes the strings older installs are
+found and removed by; change them only with a migration.
+
 ### Adding a kit
 
 A copy-only kit (managed files, no config merging) is a `core.CopyKit(...)`
