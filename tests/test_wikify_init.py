@@ -41,6 +41,22 @@ class InitTests(RepoCase):
         self.assertIn("git status --short -- docs/wiki", text)
         self.assertIn("git add -N -- docs/wiki && git diff -- docs/wiki", text)
 
+    def test_template_states_limits_and_batching(self):
+        text = " ".join(TEMPLATE.read_text().split())
+        for phrase in (
+            "After a squash merge",
+            "one bounded context",
+            "confirm each batch with the user",
+            "`stale_deleted`",
+            "never deleted automatically",
+            "only after the user agrees",
+            "One citation covers its whole paragraph",
+            "link text is not verified",
+            "does not re-run `verify`",
+        ):
+            with self.subTest(phrase):
+                self.assertIn(phrase, text)
+
     def test_reinit_preserves_existing(self):
         init_cmd.cmd_init(cwd=self.root)
         self.wiki("index.md").write_text("custom\n")

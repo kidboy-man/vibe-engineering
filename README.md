@@ -348,7 +348,13 @@ Limitations:
 - Pushes typed in a plain terminal are not covered.
 - The hook checks `HEAD`, not the ref being pushed.
 - It is a convenience gate, not a security control, and fails open on errors.
-- The verifier is structural, not semantic.
+- The verifier is structural, not semantic: one citation covers its whole
+  paragraph, fenced code and headings are not checked for citations, and link
+  text is not verified. You must still review the wiki.
+- The hook gates freshness only; it does not re-run `verify`, so a docs-only
+  commit made without `mark`/`verify` passes the gate.
+- After a squash merge the wiki reads as stale (the squashed commit mixes code
+  with `.wikify.json`): run `vibe wikify mark` and make one docs-only commit.
 - The built-in secret scan is a floor, not a complete scanner.
 - Codex needs a one-time `/hooks` trust review.
 - Cursor's push-time payload shape is unverified; the hook fails open if it differs.

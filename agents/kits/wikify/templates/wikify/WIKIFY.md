@@ -20,7 +20,17 @@ publishing channel: nothing lands here without the verifier and the user.
 7. Retry the push.
 
 If `.wikify.json` has a merge conflict, take either side and rerun
-`vibe wikify mark`.
+`vibe wikify mark`. After a squash merge the wiki reads as stale (the squashed
+commit mixes code with `.wikify.json`): run `vibe wikify mark` and make one
+docs-only commit.
+
+For a first or `--full` plan on a large repo, work one bounded context (see
+`contexts` in the plan) at a time and confirm each batch with the user before
+starting the next.
+
+Pages listed under `stale_deleted` cite files that were deleted. They are
+flagged, never deleted automatically: tell the user, and edit or remove such a
+page only after the user agrees.
 
 ## Layout
 
@@ -71,5 +81,8 @@ can review them.
 - Never add or edit `.wikify-allow` entries or `.wikifyignore` unless the user
   explicitly tells you to.
 - The verifier is structural, not semantic: it proves a cited line exists, not
-  that the sentence is true. The built-in secret scan is a floor, not a full
-  scanner. The user must still review the wiki before it is pushed.
+  that the sentence is true. One citation covers its whole paragraph, fenced
+  code and headings are not checked for citations, and link text is not
+  verified. The built-in secret scan is a floor, not a full scanner. The user
+  must still review the wiki before it is pushed.
+- The push hook checks freshness only; it does not re-run `verify`.
