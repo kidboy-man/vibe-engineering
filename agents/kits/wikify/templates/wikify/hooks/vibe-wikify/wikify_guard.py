@@ -16,7 +16,14 @@ everything since must touch only docs/wiki/.
 
 Known v1 limitations: it checks HEAD, not the ref being pushed
 (`git push origin other:main`), and it does not cover pushes typed in a
-terminal. The hook never creates any file and only runs in repos whose working
+terminal. On git errors or timeouts the hook intentionally allows (fail open)
+whereas state.is_fresh reports stale; parity holds for normal repo states.
+Known false-allow limits (heuristic parsing): `env -i git push`,
+`sudo -u bob git push`, `git --git-dir x push`, `(cd x && git push)`,
+`if ...; then git push; fi`, `$(git push)`, `bash -c "git push"`, combined
+short flags such as `-nf` are treated as a normal push, and refspec deletions
+(`git push origin :old`) are gated like a normal push. Heredoc bodies are
+dropped on a best-effort basis. The hook never creates any file and only runs in repos whose working
 tree has docs/wiki/.wikify.json.
 """
 
@@ -28,6 +35,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 SHELL_TOOLS = {"", "bash", "shell", "local_shell"}
 SEPARATORS = {";", "&&", "||", "|", "&", "|&"}
@@ -36,6 +44,8 @@ NO_CHECK_FLAGS = {"--delete", "-d", "--dry-run", "-n"}
 WIKI_DIR = "docs/wiki/"
 STATE_REL = "docs/wiki/.wikify.json"
 TIMEOUT_SECONDS = 10
+BUDGET_SECONDS = 20  # total git time per hook invocation
+_deadline = 0.0
 MESSAGE = (
     "wikify: docs/wiki is out of date for this push. Follow docs/wiki/WIKIFY.md: run "
     "'vibe wikify plan', update the wiki, run 'vibe wikify verify' and 'vibe wikify mark', "
@@ -47,25 +57,67 @@ MESSAGE = (
 def _tokenize(line: str) -> list[str]:
     try:
         lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.commenters = ""  # `fix#12` is not a comment; never drop the tail
         lexer.whitespace_split = True
         return list(lexer)
     except ValueError:  # unbalanced quotes: degrade to a crude split
         return line.split()
 
 
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+
+
+def _drop_heredocs(command: str) -> str:
+    """Remove heredoc bodies (best effort) so their text is never parsed as commands."""
+    kept: list[str] = []
+    terminator: str | None = None
+    for line in command.split("\n"):
+        if terminator is not None:
+            if line.strip() == terminator:
+                terminator = None
+            continue
+        kept.append(line)
+        match = HEREDOC.search(line)
+        if match:
+            terminator = match.group(2)
+    return "\n".join(kept)
+
+
+def _newlines_to_separators(command: str) -> str:
+    """Replace unquoted newlines with `;`; newlines inside quotes stay in the token."""
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if ch == "\\" and quote != "'" and i + 1 < len(command):
+            out.append(command[i : i + 2])
+            i += 2
+            continue
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "\n":
+            ch = ";"
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _segments(command: str) -> list[list[str]]:
     segments: list[list[str]] = []
-    for line in command.splitlines():
-        current: list[str] = []
-        for token in _tokenize(line):
-            if token in SEPARATORS:
-                if current:
-                    segments.append(current)
-                current = []
-            else:
-                current.append(token)
-        if current:
-            segments.append(current)
+    current: list[str] = []
+    for token in _tokenize(_newlines_to_separators(_drop_heredocs(command))):
+        if token in SEPARATORS:
+            if current:
+                segments.append(current)
+            current = []
+        else:
+            current.append(token)
+    if current:
+        segments.append(current)
     return segments
 
 
@@ -83,11 +135,14 @@ def _resolve(cwd: str, target: str) -> str | None:
 
 def _git(cwd: str, *args: str) -> str | None:
     """stdout of ``git <args>`` in cwd; None on any failure (callers fail open)."""
+    remaining = _deadline - time.monotonic()
+    if remaining <= 0:
+        return None  # budget exhausted: fail open
     try:
         result = subprocess.run(
             ["git", "-c", "core.quotePath=false", *args],
             cwd=cwd, capture_output=True, text=True, errors="replace",
-            check=False, timeout=TIMEOUT_SECONDS,
+            check=False, timeout=min(TIMEOUT_SECONDS, remaining),
         )
     except (subprocess.TimeoutExpired, OSError):
         return None
@@ -161,6 +216,8 @@ def _shell_stale(command: str, cwd: str) -> bool:
 
 def decide(payload: object) -> str | None:
     """Return a block reason, or None to allow."""
+    global _deadline
+    _deadline = time.monotonic() + BUDGET_SECONDS
     if not isinstance(payload, dict):
         return None
     if str(payload.get("tool_name") or "").lower() not in SHELL_TOOLS:

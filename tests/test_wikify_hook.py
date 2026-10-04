@@ -181,7 +181,39 @@ class DecideTests(RepoCase):
         with mock.patch.object(guard.subprocess, "run", spy):
             self.push()
         self.assertTrue(seen)
-        self.assertTrue(all(t == 10 for t in seen))
+        self.assertTrue(all(0 < t <= 10 for t in seen))
+
+    def test_exhausted_budget_allows_without_git(self):
+        self._stale_repo()
+        with mock.patch.object(guard, "BUDGET_SECONDS", 0), mock.patch.object(
+            guard.subprocess, "run"
+        ) as run:
+            self.assertIsNone(self.push())
+        run.assert_not_called()
+
+    def test_hash_is_not_a_comment(self):
+        self._stale_repo()
+        for cmd in (
+            'git commit -m "fix #12" && git push', "git commit -m fix#12 && git push",
+            "echo a#b; git push",
+        ):
+            with self.subTest(cmd):
+                self.assertTrue(self.push(cmd))
+
+    def test_multiline_quotes_and_heredocs(self):
+        self._stale_repo()
+        for cmd in (
+            "cat <<EOF\ngit push\nEOF", "cat <<'EOF'\ngit push\nEOF\necho done",
+            'git commit -m "a\ngit push\nb"', "cat <<-EOF\n\tgit push\n\tEOF",
+        ):
+            with self.subTest(cmd):
+                self.assertIsNone(self.push(cmd))
+        for cmd in (
+            "git commit -m x\ngit push", "cat <<EOF\nhello\nEOF\ngit push",
+            'git commit -m "a\nb"\ngit push',
+        ):
+            with self.subTest(cmd):
+                self.assertTrue(self.push(cmd))
 
     def test_not_wikified_allowed(self):
         self.commit(CODE_FILE)
