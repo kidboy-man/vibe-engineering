@@ -71,6 +71,18 @@ def cmd_upgrade(_args: argparse.Namespace) -> int:
     return rc
 
 
+HOME_HELP = "Target config base directory (default: $XDG_CONFIG_HOME or current user's home)"
+
+
+def _add_home(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--home", default=None, help=HOME_HELP)
+
+
+def _add_apply_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
+    parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
+
+
 def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vibe",
@@ -96,68 +108,51 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
         kit_sub = kit_parser.add_subparsers(dest=f"{kit.name}_command", required=True)
 
         install_parser = kit_sub.add_parser("install", help=f"Install or update the {kit.name} kit")
-        install_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
-        install_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
-        install_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
-        if "settings" in kit.install_options:
-            install_parser.add_argument("--no-settings", action="store_true", help="Do not merge the safe settings fragment")
-        if "setup_deps" in kit.install_options:
-            install_parser.add_argument("--no-setup-deps", action="store_true", help="Do not auto-install qmd or other dependencies")
-        if "hooks" in kit.install_options:
-            install_parser.add_argument("--no-hooks", action="store_true", help="Skip the proactive SessionStart hook / CLAUDE.md prompt")
-
-        if "with_verify" in kit.install_options:
-            install_parser.add_argument("--with-verify", action="store_true", help="Also register the opt-in gofmt check after Claude Code edits")
+        _add_home(install_parser)
+        _add_apply_flags(install_parser)
+        for option in kit.options():
+            install_parser.add_argument(option.flag, action="store_true", help=option.help)
 
         diff_parser = kit_sub.add_parser("diff", help="Show file-level differences for managed files")
-        diff_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
+        _add_home(diff_parser)
 
         doctor_parser = kit_sub.add_parser("doctor", help=f"Check {kit.name} kit installation status")
-        doctor_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
+        _add_home(doctor_parser)
 
         uninstall_parser = kit_sub.add_parser("uninstall", help="Remove files managed by this kit")
-        uninstall_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
-        uninstall_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
-        uninstall_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
+        _add_home(uninstall_parser)
+        _add_apply_flags(uninstall_parser)
 
         if kit.enable_hook is not None:
             enable_hook_parser = kit_sub.add_parser("enable-hook", help="Enable proactive context wiring (SessionStart hook + persona section) for Claude Code, Codex CLI, Cursor, and OpenCode")
-            enable_hook_parser.add_argument("--home", default=None, help="Target config base directory (default: $XDG_CONFIG_HOME or current user's home)")
-            enable_hook_parser.add_argument("--dry-run", action="store_true", help="Show changes without writing files")
-            enable_hook_parser.add_argument("--yes", "-y", action="store_true", help="Apply without interactive confirmation")
+            _add_home(enable_hook_parser)
+            _add_apply_flags(enable_hook_parser)
 
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
+def main(argv: list[str] | None = None, kit_specs: Mapping[str, KitSpec] | None = None) -> int:
+    kit_specs = KITS if kit_specs is None else kit_specs
+    parser = build_parser(kit_specs)
     args = parser.parse_args(argv)
 
     if args.command == "upgrade":
         return cmd_upgrade(args)
 
     if args.command == "kits" and args.kits_command == "list":
-        for name in KITS:
+        for name in kit_specs:
             print(name)
         return 0
 
     if args.command == "kits":
-        kit = KITS.get(args.kits_command)
+        kit = kit_specs.get(args.kits_command)
         if kit is None:
             parser.error("unsupported kit")
             return 2
-        sub_command_attr = f"{kit.name}_command"
-        sub_command = getattr(args, sub_command_attr, None)
+        sub_command = getattr(args, f"{kit.name}_command", None)
         if sub_command == "install":
             kwargs = {"home": args.home, "dry_run": args.dry_run, "yes": args.yes}
-            if "settings" in kit.install_options:
-                kwargs["merge_settings"] = not args.no_settings
-            if "setup_deps" in kit.install_options:
-                kwargs["setup_deps"] = not args.no_setup_deps
-            if "hooks" in kit.install_options:
-                kwargs["enable_hooks"] = not args.no_hooks
-            if "with_verify" in kit.install_options:
-                kwargs["with_verify"] = args.with_verify
+            kwargs.update({option.kwarg: option.value_from(args) for option in kit.options()})
             return kit.install(**kwargs)
         if sub_command == "diff":
             return kit.diff(home=args.home)
