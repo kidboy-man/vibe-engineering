@@ -17,6 +17,7 @@ from agents.kits.claude_code import installer as claude_installer
 from agents.kits.guardrails import installer as guardrails_installer
 from agents.kits.opencode import installer as opencode_installer
 from agents.kits.second_brain import installer as second_brain_installer
+from agents.kits.wikify import installer as wikify_installer
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -94,6 +95,9 @@ class ManifestSurfaceTests(unittest.TestCase):
 
     def test_guardrails_manifest_surface(self) -> None:
         self._assert_manifest_surface(guardrails_installer, "guardrails")
+
+    def test_wikify_manifest_surface(self) -> None:
+        self._assert_manifest_surface(wikify_installer, "wikify")
 
 
 class ManifestParityTests(unittest.TestCase):

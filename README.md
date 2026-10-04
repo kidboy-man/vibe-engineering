@@ -19,6 +19,7 @@ overwriting your existing config files. The `second-brain` kit optionally runs
 | `second-brain` | `vibe kits second-brain …` | Local Obsidian/qmd vault scaffold + non-secret AI-agent snippets |
 | `workflow` | `vibe kits workflow …` | Business requirement → PRD → TRD → tickets → TDD: `/prd`, `/flow`, `/implement-ticket`, `/push-tickets`, `vibe-flow` skill (Claude Code, OpenCode) |
 | `guardrails` | `vibe kits guardrails …` | Pre-tool-use hooks that block destructive commands and secret-file access (Claude Code, Codex CLI, Cursor) |
+| `wikify` | `vibe kits wikify …` | Push-gate hook that blocks an agent's `git push` while `docs/wiki` is stale (Claude Code, Codex CLI, Cursor) |
 
 ## Install
 
@@ -314,6 +315,49 @@ not a sandbox: shell parsing can be bypassed by obfuscation.
 hook that tells the agent when an edited `.go` file is not `gofmt`-clean. Codex and
 Cursor are not covered by it. Existing hooks and settings are preserved, changed
 files are backed up, and uninstall removes only what this kit registered.
+
+## Wikify Kit
+
+Keeps a repo's `docs/wiki` in sync with the code. The kit installs a push-gate
+hook (`hooks/vibe-wikify/wikify_guard.py`) for each agent whose config directory
+already exists (`~/.claude`, `~/.codex`, `~/.cursor`); missing agents are skipped.
+The hook blocks an agent's `git push` in repos that opted in with
+`docs/wiki/.wikify.json` until the wiki is fresh.
+
+```bash
+vibe kits wikify doctor
+vibe kits wikify install --dry-run
+vibe kits wikify install --yes
+vibe kits wikify diff
+vibe kits wikify uninstall --yes
+
+vibe wikify init | plan | verify | mark     # per-repo commands
+```
+
+Push flow: the hook blocks the push, the agent updates `docs/wiki`, runs
+`vibe wikify verify` and `vibe wikify mark`, you confirm, a docs-only commit
+records the mark, and the push goes through. Freshness rule: the commit that last
+touched `.wikify.json` and every commit since it may touch only `docs/wiki/`.
+
+Registered as `PreToolUse` (Bash) in Claude Code `settings.json`, `[[hooks.PreToolUse]]`
+(`^Bash$`) in Codex `config.toml`, and `beforeShellExecution` in Cursor `hooks.json`.
+`VIBE_WIKIFY=off` bypasses it. It coexists with the guardrails kit.
+
+Limitations:
+
+- Pushes typed in a plain terminal are not covered.
+- The hook checks `HEAD`, not the ref being pushed.
+- It is a convenience gate, not a security control, and fails open on errors.
+- The verifier is structural, not semantic: one citation covers its whole
+  paragraph, fenced code and headings are not checked for citations, and link
+  text is not verified. You must still review the wiki.
+- The hook gates freshness only; it does not re-run `verify`, so a docs-only
+  commit made without `mark`/`verify` passes the gate.
+- After a squash merge the wiki reads as stale (the squashed commit mixes code
+  with `.wikify.json`): run `vibe wikify mark` and make one docs-only commit.
+- The built-in secret scan is a floor, not a complete scanner.
+- Codex needs a one-time `/hooks` trust review.
+- Cursor's push-time payload shape is unverified; the hook fails open if it differs.
 
 ## Second-Brain Kit
 

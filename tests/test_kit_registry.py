@@ -76,6 +76,10 @@ class KitRegistryExtensionContractTests(unittest.TestCase):
         self.assertIn("guardrails", KITS)
         self.assertEqual(KITS["guardrails"].install_options, frozenset({"with_verify"}))
 
+    def test_wikify_registered_without_install_options(self):
+        self.assertIn("wikify", KITS)
+        self.assertEqual(KITS["wikify"].install_options, frozenset())
+
     def test_workflow_registered_without_install_options(self):
         self.assertIn("workflow", KITS)
         self.assertEqual(KITS["workflow"].install_options, frozenset())

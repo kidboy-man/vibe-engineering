@@ -1,0 +1,11 @@
+usage: vibe wikify [-h] {init,plan,verify,mark} ...
+
+positional arguments:
+  {init,plan,verify,mark}
+    init                Scaffold docs/wiki (never overwrites files)
+    plan                Show which wiki pages need updating
+    verify              Check citations and scan the wiki for secrets
+    mark                Verify, then record the covered commit
+
+options:
+  -h, --help            show this help message and exit
