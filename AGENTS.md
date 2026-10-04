@@ -14,8 +14,8 @@ and `merge_strategies.py` config merging helpers. Individual kits live under
 
 - `python3 -m pip install -e .` installs the package locally with the `vibe`
   console script.
-- `python3 -m pytest` runs the test suite.
-- `python3 -m pytest tests/test_second_brain_installer.py` runs one focused
+- `python3 -m unittest discover -s tests` runs the test suite.
+- `python3 -m unittest tests.test_second_brain_installer` runs one focused
   test module while iterating.
 - `vibe kits list` verifies the installed CLI can load registered kits.
 - `vibe kits <kit> install --dry-run --yes` checks installer behavior without
@@ -32,7 +32,8 @@ tokens.
 
 ## Testing Guidelines
 
-Tests use `pytest` and follow the `tests/test_*.py` naming pattern. Add focused
+Tests use `unittest` (pytest also works if installed) and follow the
+`tests/test_*.py` naming pattern. Add focused
 tests beside related coverage: installer behavior in `test_*_installer.py`,
 shared merge logic in `test_merge_strategies.py`, registry behavior in
 `test_kit_registry.py`, and CLI contracts in `test_cli_contract.py`. When a CLI

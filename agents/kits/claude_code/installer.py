@@ -9,8 +9,6 @@ caches, backups, project transcripts, or local machine state.
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -61,24 +59,8 @@ def _target_files(paths: KitPaths) -> list[tuple[Path, Path, str]]:
     return core.target_files(paths.template_dir, paths.claude_dir, manifest)
 
 
-def _read_text(path: Path) -> str:
-    return core.read_text(path)
-
-
-def _write_text(path: Path, content: str) -> None:
-    core.write_text(path, content)
-
-
-def _backup(path: Path, paths: KitPaths) -> Path | None:
-    return core.backup(path, paths.claude_dir)
-
-
 def _manifest_state(paths: KitPaths, managed_files: Iterable[str]) -> dict:
     return core.manifest_state(KIT_NAME, managed_files)
-
-
-def _load_existing_install_manifest(paths: KitPaths) -> dict | None:
-    return core.load_existing_install_manifest(paths.manifest_path)
 
 
 def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
@@ -99,13 +81,9 @@ def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
         return "settings.json unchanged", False
 
     if not dry_run:
-        _backup(settings_path, paths)
-        _write_text(settings_path, json.dumps(merged, indent=2, sort_keys=True) + "\n")
+        core.backup(settings_path, paths.claude_dir)
+        core.write_text(settings_path, json.dumps(merged, indent=2, sort_keys=True) + "\n")
     return "settings.json merged safe non-secret defaults", True
-
-
-def _confirm(prompt: str, yes: bool) -> bool:
-    return core.confirm(prompt, yes)
 
 
 def _planned_changes(paths: KitPaths) -> list[str]:
@@ -134,7 +112,7 @@ def install(home: str | None = None, dry_run: bool = False, yes: bool = False, m
     if dry_run:
         print("dry run: no files written")
         return 0
-    if not _confirm("Install/update the Claude Code kit?", yes=yes):
+    if not core.confirm("Install/update the Claude Code kit?", yes=yes):
         print("aborted")
         return 1
 
@@ -151,7 +129,7 @@ def install(home: str | None = None, dry_run: bool = False, yes: bool = False, m
         if changed:
             managed.append("settings.json")
 
-    _write_text(paths.manifest_path, json.dumps(_manifest_state(paths, managed), indent=2) + "\n")
+    core.write_text(paths.manifest_path, json.dumps(_manifest_state(paths, managed), indent=2) + "\n")
     print(f"wrote {paths.manifest_path}")
     return 0
 
@@ -172,24 +150,9 @@ def doctor(home: str | None = None) -> int:
     ok = True
     print(f"home: {paths.home}")
     print(f"claude dir: {paths.claude_dir}")
-    claude = shutil.which("claude")
-    if claude:
-        print(f"claude: {claude}")
-        try:
-            result = subprocess.run([claude, "--version"], check=False, text=True, capture_output=True, timeout=10)
-            print(f"claude version: {(result.stdout or result.stderr).strip()}")
-        except Exception as exc:  # pragma: no cover - environment dependent
-            print(f"claude version check failed: {exc}")
-            ok = False
-    else:
-        print("claude: missing (install with: npm install -g @anthropic-ai/claude-code)")
-        ok = False
+    ok = core.report_binary("claude", "claude: missing (install with: npm install -g @anthropic-ai/claude-code)") and ok
 
-    manifest = _load_existing_install_manifest(paths)
-    if manifest:
-        print(f"manifest: installed kit={manifest.get('kit')} files={len(manifest.get('managed_files', []))}")
-    else:
-        print("manifest: not installed")
+    core.report_manifest(core.load_existing_install_manifest(paths.manifest_path))
 
     missing_templates = [rel for src, _dst, rel in _target_files(paths) if not src.exists()]
     if missing_templates:
@@ -221,7 +184,7 @@ def doctor(home: str | None = None) -> int:
 
 def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False) -> int:
     paths = _paths(home)
-    manifest = _load_existing_install_manifest(paths)
+    manifest = core.load_existing_install_manifest(paths.manifest_path)
     if not manifest:
         print(f"no {MANIFEST_FILE} found; nothing to uninstall")
         return 0
@@ -232,7 +195,7 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
     if dry_run:
         print("dry run: no files removed")
         return 0
-    if not _confirm("Uninstall managed Claude Code kit files?", yes=yes):
+    if not core.confirm("Uninstall managed Claude Code kit files?", yes=yes):
         print("aborted")
         return 1
 

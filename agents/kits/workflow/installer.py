@@ -76,15 +76,6 @@ def _present(paths: KitPaths) -> list[tuple[str, str, Path]]:
     return [(key, label, paths.agent_dirs[key]) for key, label in TARGETS if paths.agent_dirs[key].is_dir()]
 
 
-def _prune_empty_dirs(agent_dir: Path) -> None:
-    """Remove the skill dirs this kit created, if now empty; never touch commands/ or skills/."""
-    for sub in ("skills/vibe-flow/scripts", "skills/vibe-flow"):
-        try:
-            (agent_dir / sub).rmdir()
-        except OSError:
-            pass
-
-
 def install(home: str | None = None, dry_run: bool = False, yes: bool = False, **kwargs) -> int:
     paths = _paths(home)
     present = _present(paths)
@@ -193,7 +184,8 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
         else:
             print(f"kept modified file {entry}")
     for agent_dir in paths.agent_dirs.values():
-        _prune_empty_dirs(agent_dir)
+        # Only dirs this kit created; never touch commands/ or skills/.
+        core.prune_empty_dirs(agent_dir / "skills/vibe-flow/scripts", agent_dir / "skills/vibe-flow")
     paths.manifest_path.unlink(missing_ok=True)
     try:
         paths.manifest_dir.rmdir()

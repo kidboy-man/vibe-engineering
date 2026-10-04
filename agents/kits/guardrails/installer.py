@@ -216,15 +216,6 @@ def _is_registered(paths: KitPaths, agent: Agent) -> bool:
     return all(not _merge_fn(agent)(current, event, command, matcher=matcher)[1] for event, matcher, command in guard_regs)
 
 
-def _prune_empty_dirs(*dirs: Path) -> None:
-    """rmdir each dir in order, stopping at the first that is missing or non-empty."""
-    for directory in dirs:
-        try:
-            directory.rmdir()
-        except OSError:
-            return
-
-
 def install(
     home: str | None = None,
     dry_run: bool = False,
@@ -344,7 +335,7 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
     for agent in AGENTS:
         if agent.present(paths):
             _unregister(paths, agent)
-            _prune_empty_dirs(agent.dir(paths) / "hooks" / "vibe-guardrails", agent.dir(paths) / "hooks")
+            core.prune_empty_dirs(agent.dir(paths) / "hooks" / "vibe-guardrails", agent.dir(paths) / "hooks")
     paths.manifest_path.unlink(missing_ok=True)
     try:
         paths.manifest_dir.rmdir()
