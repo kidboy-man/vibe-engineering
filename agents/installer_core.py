@@ -156,12 +156,13 @@ def planned_changes_copy_style(target_files_list: list[tuple[Path, Path, str]]) 
 
 
 def apply_copy_plan(plan: list[Change], backup_base_dir: Path) -> None:
-    """Execute a plan from plan_copy_files: back up then overwrite updates, create the rest."""
+    """Execute a plan from plan_copy_files, backing up any existing destination first."""
     for change in plan:
         if change.kind == "unchanged":
             continue
-        if change.kind == "update":
-            backup(change.dst, backup_base_dir)
+        # Back up whatever is there now, not what the plan saw: a file may have
+        # appeared while the user was confirming. backup() ignores missing paths.
+        backup(change.dst, backup_base_dir)
         write_text(change.dst, read_text(change.src))
         print(f"installed {change.rel}")
 

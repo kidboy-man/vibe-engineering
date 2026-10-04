@@ -10,6 +10,17 @@ and `merge_strategies.py` config merging helpers. Individual kits live under
 `templates/`. Tests are in `tests/`, with CLI help snapshots in
 `tests/fixtures/cli_help/`. User-facing setup notes are in `docs/`.
 
+### Adding a kit
+
+A copy-only kit (managed files, no config merging) is a `core.CopyKit(...)`
+declaration plus four one-line wrappers; see `agents/kits/codex/installer.py`.
+Kits with merge logic keep their own `installer.py` but reuse `installer_core`
+helpers (`plan_copy_files`, `apply_copy_plan`, `report_binary`, `confirm`).
+Then: add `templates/<name>/manifest.json` plus files, register a `KitSpec` in
+`kit_registry.py`, and declare any extra install flags in `INSTALL_OPTIONS`
+(flag -> installer kwarg). `MANIFEST.in` and `tests/test_kit_contract.py` check
+that the kit is packaged and honors the shared signature.
+
 ## Build, Test, and Development Commands
 
 - `python3 -m pip install -e .` installs the package locally with the `vibe`

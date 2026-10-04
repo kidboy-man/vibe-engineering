@@ -62,7 +62,9 @@ class InstallFn(Protocol):
     def __call__(self, home: str | None = None, dry_run: bool = False, yes: bool = False, **options: bool) -> int: ...
 
 
-class UninstallFn(Protocol):
+class ApplyFn(Protocol):
+    """uninstall / enable-hook: change files, honoring --dry-run and --yes."""
+
     def __call__(self, home: str | None = None, dry_run: bool = False, yes: bool = False) -> int: ...
 
 
@@ -109,8 +111,8 @@ class KitSpec:
     install: InstallFn
     diff: HomeFn
     doctor: HomeFn
-    uninstall: UninstallFn
-    enable_hook: UninstallFn | None = None
+    uninstall: ApplyFn
+    enable_hook: ApplyFn | None = None
     install_options: frozenset[str] = frozenset()
 
     def options(self) -> list[InstallOption]:

@@ -115,6 +115,22 @@ class PlanCopyFilesTests(unittest.TestCase):
         self.assertEqual(backups[0].read_text(encoding="utf-8"), "old\n")
 
 
+class ApplyBackupGuaranteeTests(unittest.TestCase):
+    def test_file_appearing_after_planning_is_backed_up_not_lost(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, dst_dir = root / "src", root / "dst"
+            src.mkdir()
+            dst_dir.mkdir()
+            (src / "a.md").write_text("kit\n", encoding="utf-8")
+            plan = core.plan_copy_files([(src / "a.md", dst_dir / "a.md", "a.md")])
+            self.assertEqual(plan[0].kind, "create")
+            (dst_dir / "a.md").write_text("user\n", encoding="utf-8")  # appears during the confirm prompt
+            _run(core.apply_copy_plan, plan, dst_dir)
+            backups = list((dst_dir / "backups").rglob("a.md"))
+            self.assertEqual([b.read_text(encoding="utf-8") for b in backups], ["user\n"])
+
+
 class CopyKitRunnerTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
