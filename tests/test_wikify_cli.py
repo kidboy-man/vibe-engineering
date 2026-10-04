@@ -418,6 +418,15 @@ class GitignoredControlFileTests(RepoCase):
         self.assertEqual(rc, 1)
         self.assertIn("docs/wiki/index.md", text)
 
+    def test_hint_negations_work_for_docs_glob(self):
+        self.ignore("docs/*\n")
+        rc, text = out(init_cmd.cmd_init, cwd=self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("`!docs/wiki/` then `!docs/wiki/**`", text)
+        self.ignore("docs/*\n!docs/wiki/\n!docs/wiki/**\n")
+        self.assertEqual(gitview.ignored(self.root, state.CONTROL_RELS), [])
+        self.assertEqual(out(init_cmd.cmd_init, cwd=self.root)[0], 0)
+
     def test_negation_accepted(self):
         self.ignore("*.json\n!docs/wiki/.wikify.json\n")
         self.assertEqual(out(init_cmd.cmd_init, cwd=self.root)[0], 0)

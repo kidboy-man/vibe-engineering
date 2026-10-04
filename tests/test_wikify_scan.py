@@ -1,3 +1,4 @@
+import base64
 import tempfile
 import time
 import unittest
@@ -78,10 +79,30 @@ class ScanTextCase(unittest.TestCase):
                 self.assertNotIn("secret-assignment", self.rules(text))
 
     def test_adversarial_input_is_fast(self):
-        for text in ("eyJ" * 20000, "token=" * 33000, "Bearer " * 20000):
+        for text in ("eyJ" * 20000, "token=" * 33000, "Bearer " * 20000,
+                     "x_eyJ" * 40000, "_eyJ" * 50000, "-eyJ" * 250000):
+            with self.subTest(text=text[:8]):
+                start = time.monotonic()
+                scan.scan_text(text)
+                self.assertLess(time.monotonic() - start, 1.0)
+
+    def test_adversarial_wiki_file_is_fast(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "docs" / "wiki"
+            wiki.mkdir(parents=True)
+            (wiki / "a.md").write_text("_eyJ" * 262143)  # just under 1 MiB
             start = time.monotonic()
-            scan.scan_text(text)
+            scan.scan_wiki(Path(tmp))
             self.assertLess(time.monotonic() - start, 1.0)
+
+    def test_real_shaped_jwt_detected(self):
+        enc = lambda raw: base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+        header = enc('{"alg":"HS256","typ":"JWT"}')
+        self.assertEqual(len(header), 36)
+        token = ".".join([header, enc('{"sub":"1234567890","iat":1516239022}'), "s" * 43])
+        for prefix in ("", "t=", '"', "'", "Bearer ", "x_", "x-", "\n"):
+            with self.subTest(prefix=prefix):
+                self.assertIn("jwt", self.rules(prefix + token))
 
     def test_floor_notice(self):
         self.assertIn("floor", scan.FLOOR_NOTICE)

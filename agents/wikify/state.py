@@ -31,8 +31,8 @@ def ignored_control_files(root: Path) -> list[str]:
     so the state base would never advance and the hook would block forever)."""
     return [
         f"{rel}: ignored by git, so it would never be committed; un-ignore it "
-        "(e.g. add `!docs/wiki/**` at the end of .gitignore; if a parent "
-        "directory such as `docs/` is ignored, narrow that rule instead)"
+        "(e.g. add `!docs/wiki/` then `!docs/wiki/**` at the end of .gitignore; "
+        "if a parent directory such as `docs/` is ignored, narrow that rule instead)"
         for rel in gitview.ignored(root, CONTROL_RELS)
     ]
 
