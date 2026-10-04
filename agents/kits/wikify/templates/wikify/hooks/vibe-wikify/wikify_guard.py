@@ -64,7 +64,17 @@ def _tokenize(line: str) -> list[str]:
         return line.split()
 
 
-HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_]\w*)\1")
+
+
+def _heredoc_word(line: str) -> str | None:
+    """Terminator of an unquoted `<<WORD` opener on this line, if any."""
+    for match in HEREDOC.finditer(line):
+        prefix = line[: match.start()]
+        # an odd count of quote characters before the match means it is quoted
+        if prefix.count("'") % 2 == 0 and prefix.count('"') % 2 == 0:
+            return match.group(2)
+    return None
 
 
 def _drop_heredocs(command: str) -> str:
@@ -77,9 +87,7 @@ def _drop_heredocs(command: str) -> str:
                 terminator = None
             continue
         kept.append(line)
-        match = HEREDOC.search(line)
-        if match:
-            terminator = match.group(2)
+        terminator = _heredoc_word(line)
     return "\n".join(kept)
 
 
@@ -90,6 +98,12 @@ def _newlines_to_separators(command: str) -> str:
     i = 0
     while i < len(command):
         ch = command[i]
+        if ch == "\\" and quote != "'":
+            cont = "\r\n" if command.startswith("\r\n", i + 1) else "\n" if command.startswith("\n", i + 1) else ""
+            if cont:  # line continuation: shell removes it
+                out.append("" if quote else " ")
+                i += 1 + len(cont)
+                continue
         if ch == "\\" and quote != "'" and i + 1 < len(command):
             out.append(command[i : i + 2])
             i += 2
@@ -106,11 +120,16 @@ def _newlines_to_separators(command: str) -> str:
     return "".join(out)
 
 
+def _is_punct_separator(token: str) -> bool:
+    """Punctuation runs like `));` or `);` merge into one token; they still end a segment."""
+    return all(c in "();&|<>" for c in token) and bool(re.search(r"[;&|]", token))
+
+
 def _segments(command: str) -> list[list[str]]:
     segments: list[list[str]] = []
     current: list[str] = []
     for token in _tokenize(_newlines_to_separators(_drop_heredocs(command))):
-        if token in SEPARATORS:
+        if token in SEPARATORS or _is_punct_separator(token):
             if current:
                 segments.append(current)
             current = []

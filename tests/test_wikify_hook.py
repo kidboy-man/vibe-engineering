@@ -215,6 +215,18 @@ class DecideTests(RepoCase):
             with self.subTest(cmd):
                 self.assertTrue(self.push(cmd))
 
+    def test_non_heredoc_shifts_and_continuations(self):
+        self._stale_repo()
+        for cmd in (
+            "cat <<< x\ngit push", "x=1<<2\ngit push", "echo $((1<<2))\ngit push",
+            'echo "<<EOF"\ngit push', "echo '<<EOF'\ngit push",
+            "git push \\\n --force", "git push \\\r\n --force",
+        ):
+            with self.subTest(cmd):
+                self.assertTrue(self.push(cmd))
+        self.assertIsNone(self.push("echo 'a\\\nb'; git status"))
+        self.assertIsNone(self.push("cat <<EOF\ngit push\nEOF"))
+
     def test_not_wikified_allowed(self):
         self.commit(CODE_FILE)
         self.assertIsNone(self.push())
