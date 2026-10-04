@@ -24,9 +24,10 @@ FLOOR_NOTICE = (
     "review the wiki text yourself before pushing."
 )
 
-# Every quantifier is bounded (Python 3.10 has no possessive quantifiers) and
-# the JWT start is anchored after a non-word char, so long adversarial runs
-# cannot cause quadratic backtracking. [^\S\r\n] is single-line whitespace
+# Every quantifier is bounded (Python 3.10 has no possessive quantifiers), so
+# long adversarial runs cannot cause quadratic backtracking. The JWT start only
+# excludes a preceding letter or digit, so `x_eyJ...` and `x-eyJ...` still hit.
+# [^\S\r\n] is single-line whitespace
 # that still matches NBSP and other Unicode spaces.
 _WS = r"[^\S\r\n]*"
 _KEY = r"(?:api[_-]?key|secret|token|password|passwd)['\"]?"
@@ -36,7 +37,7 @@ RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("github-token", re.compile(r"ghp_[A-Za-z0-9]{36}")),
     ("slack-token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,4096}")),
     ("bearer-token", re.compile(r"Bearer[^\S\r\n]{1,64}[A-Za-z0-9._-]{20,4096}")),
-    ("jwt", re.compile(r"(?<![\w-])eyJ[\w-]{1,4096}\.[\w-]{1,4096}\.[\w-]{1,4096}")),
+    ("jwt", re.compile(r"(?<![A-Za-z0-9])eyJ[\w-]{1,4096}\.[\w-]{1,4096}\.[\w-]{1,4096}")),
     ("home-path", re.compile(r"/(?:home|Users)/[A-Za-z0-9._-]{1,128}/")),
     ("email", re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+")),
     (

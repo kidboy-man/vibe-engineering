@@ -4,7 +4,7 @@ Installs the wikify push-gate hook script and registers it as a pre-tool-use
 hook for each agent whose config directory already exists (Claude Code, Codex
 CLI, Cursor). Never creates an agent's config directory, never overwrites
 unrelated hooks or settings, and uninstall removes only what this kit
-registered. Orchestration is deliberately parallel to the wikify kit.
+registered. Orchestration is deliberately parallel to the guardrails kit.
 """
 
 from __future__ import annotations
@@ -281,7 +281,7 @@ def doctor(home: str | None = None) -> int:
     scanner = next((name for name in ("gitleaks", "trufflehog") if shutil.which(name)), None)
     if scanner:
         print(
-            f"scan: gitleaks/trufflehog {scanner} found on PATH "
+            f"scan: {scanner} found on PATH "
             "(informational; wikify's built-in scan is a floor, not a complete scanner)"
         )
     else:

@@ -239,7 +239,7 @@ class DiffAndDoctorTests(unittest.TestCase):
             do_install(home)
             with mock.patch.object(wikify.shutil, "which", side_effect=lambda n: "/x/trufflehog" if n == "trufflehog" else None):
                 _, out = run(doctor, home=str(home))
-            self.assertIn("scan: gitleaks/trufflehog trufflehog found on PATH", out)
+            self.assertIn("scan: trufflehog found on PATH (informational; wikify's built-in scan is a floor, not a complete scanner)", out)
             self.assertNotIn("/hooks", out)
 
     def test_doctor_flags_unregistered_hook_and_missing_manifest(self):

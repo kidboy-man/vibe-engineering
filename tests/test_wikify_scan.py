@@ -52,6 +52,11 @@ class ScanTextCase(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertNotIn(rule, self.rules(text))
 
+    def test_jwt_after_word_char(self):
+        for prefix in ("x_", "x-", "token:"):
+            with self.subTest(prefix=prefix):
+                self.assertIn("jwt", self.rules(prefix + JWT))
+
     def test_private_key_variants(self):
         for kind in ("PGP PRIVATE KEY BLOCK", "ENCRYPTED PRIVATE KEY", "DSA PRIVATE KEY"):
             with self.subTest(kind=kind):
