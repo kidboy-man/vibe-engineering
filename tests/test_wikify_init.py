@@ -36,6 +36,11 @@ class InitTests(RepoCase):
         init_cmd.cmd_init(cwd=self.root)
         self.assertEqual(self.wiki("WIKIFY.md").read_bytes(), TEMPLATE.read_bytes())
 
+    def test_template_confirmation_gate_shows_new_files(self):
+        text = TEMPLATE.read_text()
+        self.assertIn("git status --short -- docs/wiki", text)
+        self.assertIn("git add -N -- docs/wiki && git diff -- docs/wiki", text)
+
     def test_reinit_preserves_existing(self):
         init_cmd.cmd_init(cwd=self.root)
         self.wiki("index.md").write_text("custom\n")

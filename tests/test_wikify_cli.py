@@ -116,6 +116,44 @@ class MarkTests(VerifyCase):
         out(commands.cmd_mark, self.root)
         self.assertNotEqual((self.root / state.STATE_REL).read_text(), before)
 
+    def files_section(self, text):
+        return text.split("Files to commit:\n", 1)[1].split("\nNext:", 1)[0].splitlines()
+
+    def test_mark_lists_new_and_modified_files(self):
+        self.page("Foo (src: src/a.py:1)\n")
+        self.commit_wiki()
+        self.page("Foo again (src: src/a.py:1)\n")
+        self.page("New (src: src/a.py:2)\n", "docs/wiki/sub/new é.md")
+        rc, text = out(commands.cmd_mark, self.root)
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            sorted(self.files_section(text)),
+            ["   M docs/wiki/.wikify.json", "   M docs/wiki/a.md", "  ?? docs/wiki/sub/new é.md"],
+        )
+        self.assertIn("git status --short -- docs/wiki", text)
+        self.assertIn("git add -N -- docs/wiki && git diff -- docs/wiki", text)
+
+    def test_status_helper_clean_and_failure(self):
+        self.commit_wiki()
+        self.assertEqual(gitview.status_paths(self.root, "docs/wiki"), [])
+        failed = gitview.subprocess.CompletedProcess([], 128, "", "")
+        with mock.patch.object(gitview, "run_git", return_value=failed):
+            self.assertIsNone(gitview.status_paths(self.root, "docs/wiki"))
+        with mock.patch.object(gitview, "status_paths", return_value=None):
+            rc, text = out(commands.cmd_mark, self.root)
+        self.assertIn("git status failed", text)
+
+    def test_status_helper_rename_and_intent_to_add(self):
+        self.page("Foo (src: src/a.py:1)\n")
+        self.commit_wiki()
+        git(self.root, "mv", "docs/wiki/a.md", "docs/wiki/b.md")
+        self.page("x\n", "docs/wiki/c.md")
+        git(self.root, "add", "-N", "--", "docs/wiki/c.md")
+        self.assertEqual(
+            sorted(gitview.status_paths(self.root, "docs/wiki")),
+            [" A docs/wiki/c.md", "R  docs/wiki/b.md"],
+        )
+
     def test_mark_no_commits(self):
         import tempfile
         from pathlib import Path

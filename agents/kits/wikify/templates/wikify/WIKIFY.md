@@ -10,9 +10,11 @@ publishing channel: nothing lands here without the verifier and the user.
 2. Write or update pages under `docs/wiki/`.
 3. Run `vibe wikify verify` and fix every error line.
 4. Run `vibe wikify mark` (it re-runs verify, then records the covered commit).
-5. Show the user the wiki diff (`git diff -- docs/wiki`) and the verify output,
-   including any `HUMAN BLOCK CHANGED`, `ALLOW-LIST CHANGED` and `ALLOW-LISTED`
-   lines, plus the exact path list you intend to commit.
+5. Show the user the verify output, including any `HUMAN BLOCK CHANGED`,
+   `ALLOW-LIST CHANGED` and `ALLOW-LISTED` lines; the exact path list
+   (`Files to commit:` from `mark`, or `git status --short -- docs/wiki`); and
+   the content (`git add -N -- docs/wiki && git diff -- docs/wiki`, where `-N`
+   makes new pages appear in the diff).
 6. Only after the user confirms: `git add -- docs/wiki` (never `-A` or `.`),
    then `git commit -m "docs(wiki): ..."`. Keep wiki changes in a docs-only commit.
 7. Retry the push.

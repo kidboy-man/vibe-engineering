@@ -63,6 +63,26 @@ def ignored(root: Path, rels: list[str] | tuple[str, ...]) -> list[str]:
     return _lines(result) if result.returncode == 0 else []
 
 
+def status_paths(root: Path, rel: str) -> list[str] | None:
+    """``"XY path"`` per changed or untracked file under ``rel``; None on error.
+
+    ``-z`` keeps odd paths unquoted; each untracked file is listed (never just
+    its directory) so the user sees the exact paths to be committed.
+    """
+    result = run_git(root, "status", "--porcelain", "-z", "--untracked-files=all", "--", rel)
+    if result.returncode != 0:
+        return None
+    out: list[str] = []
+    entries = iter(result.stdout.split("\0"))
+    for entry in entries:
+        if not entry:
+            continue
+        out.append(entry)
+        if "R" in entry[:2] or "C" in entry[:2]:
+            next(entries, None)  # rename/copy source path follows
+    return out
+
+
 def show_head(root: Path, rel: str) -> str | None:
     """Content of ``rel`` at HEAD, so uncommitted edits never count."""
     result = run_git(root, "show", f"HEAD:{rel}")

@@ -103,10 +103,20 @@ def cmd_mark(cwd: str | Path | None = None) -> int:
         print(f"not marked: {exc if isinstance(exc, state.UnsafeWikiPath) else type(exc).__name__}")
         return 1
     print(f"marked at {head[:7] if head else 'no commits'}")
+    files = gitview.status_paths(root, "docs/wiki")
+    print("Files to commit:")
+    if files is None:
+        print("  (git status failed; run `git status --short -- docs/wiki`)")
+    elif not files:
+        print("  (none)")
+    for f in files or []:
+        print(f"  {f}")
     print(
-        "Next: show the user `git diff -- docs/wiki` and the verify output above. "
-        "Only after the user confirms, run `git add -- docs/wiki` and commit with "
-        "a `docs(wiki): ...` message."
+        "Next: show the user the verify output above, the file list "
+        "(`git status --short -- docs/wiki`) and the content "
+        "(`git add -N -- docs/wiki && git diff -- docs/wiki`; -N makes new pages "
+        "appear in the diff). Only after the user confirms, run "
+        "`git add -- docs/wiki` and commit with a `docs(wiki): ...` message."
     )
     return 0
 
