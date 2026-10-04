@@ -33,8 +33,25 @@ def load(root: Path) -> dict:
     return {"version": 1, "covered": covered}
 
 
+class UnsafeWikiPath(Exception):
+    """The wiki location is a symlink or escapes the repo; nothing is written."""
+
+
+def check_wiki_path(root: Path) -> None:
+    """Raise UnsafeWikiPath if docs, docs/wiki or the state file is a symlink
+    or the wiki dir resolves outside the repo root."""
+    root = Path(root)
+    for rel in ("docs", "docs/wiki", STATE_REL):
+        if (root / rel).is_symlink():
+            raise UnsafeWikiPath(f"{rel} is a symlink")
+    wiki = (root / WIKI_DIR).resolve()
+    if not wiki.is_relative_to(root.resolve()):
+        raise UnsafeWikiPath("docs/wiki resolves outside the repository")
+
+
 def save(root: Path, head: str | None) -> None:
     """Rewrite the state file; ``covered`` always reflects ``head``."""
+    check_wiki_path(root)
     path = Path(root) / STATE_REL
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"version": 1, "covered": head}

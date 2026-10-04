@@ -52,9 +52,13 @@ Every factual paragraph needs a citation:
 
 ## Human blocks
 
-Text between the human-block markers (an HTML comment reading `wikify:human`,
-closed by the same comment with a leading slash) belongs to people. Never
-rewrite or edit a human block. The verifier lists changed blocks so the user
+Text between these markers belongs to people:
+
+    <!-- wikify:human -->
+    ...
+    <!-- /wikify:human -->
+
+Never rewrite or edit a human block. The verifier lists changed or removed blocks so the user
 can review them.
 
 ## Trust and limits

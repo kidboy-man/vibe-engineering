@@ -20,11 +20,12 @@ def _human_blocks(text: str) -> list[tuple[int, str]]:
 def _notices(root: Path, rel: str, text: str) -> list[str]:
     old = gitview.show_head(root, state.WIKI_DIR + rel)
     known = {b for _, b in _human_blocks(old)} if old is not None else set()
+    now = {b for _, b in _human_blocks(text)}
     return [
         f"HUMAN BLOCK CHANGED: {rel}:{line}"
         for line, block in _human_blocks(text)
         if block not in known
-    ]
+    ] + [f"HUMAN BLOCK REMOVED: {rel}" for _ in sorted(known - now)]
 
 
 def _allow_notices(root: Path) -> list[str]:
@@ -39,24 +40,50 @@ def _allow_notices(root: Path) -> list[str]:
     return [f"ALLOW-LIST CHANGED: {p}|{t}" for p, t in sorted(now - before)]
 
 
-def _verify(root: Path) -> tuple[int, list[str]]:
-    wiki = root / state.WIKI_DIR
-    ignore = citations.load_ignore(root)
+CONTROL_FILES = {".wikify.json", ".wikifyignore", ".wikify-allow", "WIKIFY.md"}
+
+
+def _layout_errors(root: Path) -> tuple[list[str], list[tuple[str, Path]]]:
+    """Layout errors plus the markdown pages (rel, path) to verify."""
+    for rel in ("docs", "docs/wiki"):
+        if (root / rel).is_symlink():
+            return [f"{rel}: symlink not allowed"], []
     errors: list[str] = []
+    pages: list[tuple[str, Path]] = []
+    wiki = root / state.WIKI_DIR
+    if not wiki.is_dir():
+        return errors, pages
+    for dirpath, dirnames, filenames in os.walk(wiki, followlinks=False):
+        here = Path(dirpath)
+        for name in sorted(dirnames + filenames):
+            path = here / name
+            rel = path.relative_to(wiki).as_posix()
+            if path.is_symlink():
+                errors.append(f"{state.WIKI_DIR}{rel}: symlink not allowed")
+            elif path.is_file():
+                top = here == wiki
+                if top and name in CONTROL_FILES:
+                    continue
+                if name.lower().endswith(".md"):
+                    pages.append((rel, path))
+                else:
+                    errors.append(f"{state.WIKI_DIR}{rel}: only markdown pages and control files are allowed")
+    return errors, sorted(pages)
+
+
+def _verify(root: Path) -> tuple[int, list[str]]:
+    ignore = citations.load_ignore(root)
+    errors, pages = _layout_errors(root)
     notices: list[str] = []
-    for path in sorted(wiki.rglob("*.md")) if wiki.is_dir() else []:
-        rel = path.relative_to(wiki).as_posix()
-        if rel == "WIKIFY.md":
-            continue
-        if path.is_symlink() or not path.is_file():
-            errors.append(f"{rel}: not a regular file")
-            continue
-        text = path.read_text(encoding="utf-8")
-        errors.extend(citations.verify_page(root, rel, text, ignore))
-        notices.extend(_notices(root, rel, text))
-    errors.extend(scan.scan_wiki(root))
-    notices.extend(_allow_notices(root))
-    allowed = scan.allowed_hits(root)
+    allowed: list[str] = []
+    if not any(e.startswith(("docs:", "docs/wiki:")) for e in errors):
+        for rel, path in pages:
+            text = path.read_text(encoding="utf-8")
+            errors.extend(citations.verify_page(root, rel, text, ignore))
+            notices.extend(_notices(root, rel, text))
+        errors.extend(scan.scan_wiki(root))
+        notices.extend(_allow_notices(root))
+        allowed = scan.allowed_hits(root)
     lines = errors + notices
     if allowed:
         lines += ["ALLOW-LISTED:", *(f"  {a}" for a in allowed)]
@@ -100,7 +127,11 @@ def cmd_mark(cwd: str | Path | None = None) -> int:
         print("not marked: fix the errors above and rerun")
         return 1
     head = gitview.head(root)
-    state.save(root, head)
+    try:
+        state.save(root, head)
+    except state.UnsafeWikiPath as exc:
+        print(f"not marked: {exc}")
+        return 1
     print(f"marked at {head[:7] if head else 'no commits'}")
     print(
         "Next: show the user `git diff -- docs/wiki` and the verify output above. "
@@ -129,4 +160,7 @@ def cmd_wikify(args: argparse.Namespace, cwd: str | Path | None = None) -> int:
         return cmd_plan(cwd, args.full, args.json)
     if sub == "verify":
         return cmd_verify(cwd)
-    return cmd_mark(cwd)
+    if sub == "mark":
+        return cmd_mark(cwd)
+    print(f"unknown wikify command: {sub}")
+    return 2

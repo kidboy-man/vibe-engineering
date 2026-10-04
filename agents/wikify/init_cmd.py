@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from agents.wikify import gitview
+from agents.wikify import gitview, state
 from agents.wikify.state import WIKI_DIR
 
 TEMPLATE = (
@@ -44,7 +44,15 @@ def cmd_init(cwd: str | Path | None = None) -> int:
         ".wikify-allow": ALLOW.encode(),
     }
     wiki = root / WIKI_DIR
-    wiki.mkdir(parents=True, exist_ok=True)
+    try:
+        state.check_wiki_path(root)
+        wiki.mkdir(parents=True, exist_ok=True)
+    except state.UnsafeWikiPath as exc:
+        print(f"refusing to initialize: {exc}")
+        return 1
+    except OSError as exc:
+        print(f"cannot create {WIKI_DIR}: {type(exc).__name__}")
+        return 1
     for name, data in files.items():
         try:
             with open(wiki / name, "xb") as fh:  # exclusive: never overwrite
