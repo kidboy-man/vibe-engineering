@@ -10,6 +10,7 @@ from importlib import metadata
 from typing import Mapping
 
 from agents.kit_registry import KITS, KitSpec
+from agents.wikify import commands as wikify_commands
 
 PYPI_PACKAGE = "vibe-kits"
 
@@ -98,6 +99,15 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
 
     sub.add_parser("upgrade", help="Self-upgrade the vibe CLI to the latest version")
 
+    wik = sub.add_parser("wikify", help="Maintain a verified repo wiki in docs/wiki")
+    wik_sub = wik.add_subparsers(dest="wikify_command", required=True)
+    wik_sub.add_parser("init", help="Scaffold docs/wiki (never overwrites files)")
+    plan_parser = wik_sub.add_parser("plan", help="Show which wiki pages need updating")
+    plan_parser.add_argument("--full", action="store_true", help="Plan a full rebuild")
+    plan_parser.add_argument("--json", action="store_true", help="Print the plan as JSON")
+    wik_sub.add_parser("verify", help="Check citations and scan the wiki for secrets")
+    wik_sub.add_parser("mark", help="Verify, then record the covered commit")
+
     kits = sub.add_parser("kits", help="List and manage kits")
     kits_sub = kits.add_subparsers(dest="kits_command", required=True)
 
@@ -138,6 +148,9 @@ def main(argv: list[str] | None = None, kit_specs: Mapping[str, KitSpec] | None 
 
     if args.command == "upgrade":
         return cmd_upgrade(args)
+
+    if args.command == "wikify":
+        return wikify_commands.cmd_wikify(args)
 
     if args.command == "kits" and args.kits_command == "list":
         for name in kit_specs:

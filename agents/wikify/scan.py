@@ -66,19 +66,23 @@ def scan_text(text: str) -> list[tuple[int, str]]:
     return [(line, rule) for line, rule, _ in _scan(text)]
 
 
-def load_allow(root: Path) -> set[tuple[str, str]]:
+def parse_allow(text: str) -> set[tuple[str, str]]:
     """Parse ``<page-rel>|<exact matched text>`` lines; ``#`` and blanks ignored."""
+    entries = set()
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#") or "|" not in line:
+            continue
+        page, hit = line.split("|", 1)
+        entries.add((page.strip(), hit))
+    return entries
+
+
+def load_allow(root: Path) -> set[tuple[str, str]]:
     try:
         raw = (Path(root) / ALLOW_REL).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return set()
-    entries = set()
-    for line in raw.splitlines():
-        if not line.strip() or line.lstrip().startswith("#") or "|" not in line:
-            continue
-        page, text = line.split("|", 1)
-        entries.add((page.strip(), text))
-    return entries
+    return parse_allow(raw)
 
 
 def _all_hits(root: Path) -> list[tuple[str, int, str, str]]:
