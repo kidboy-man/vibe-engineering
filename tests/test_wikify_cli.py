@@ -366,9 +366,15 @@ class PageListTests(VerifyCase):
 
         with tempfile.TemporaryDirectory() as outside:
             target = Path(outside) / "t.md"
-            target.write_text("Foo (src: src/a.py:1)\n")
+            target.write_text("Foo (src: src/missing.py:1) " + "AKIA" + "A" * 16 + "\n")
             os.symlink(target, self.root / "docs/wiki/link.md")
             self.assertNotIn("link.md", citations.index(self.root))
+            rc, lines = self.verify()
+            hits = scan.scan_wiki(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("docs/wiki/link.md: symlink not allowed", lines)
+        self.assertFalse(any(ln.startswith("link.md:") for ln in lines), lines)
+        self.assertFalse(any("link.md" in h for h in hits), hits)
 
     def test_non_regular_file_is_an_error(self):
         os.mkfifo(self.root / "docs/wiki/pipe.md")
