@@ -158,6 +158,23 @@ class StateTests(RepoCase):
         self.assertEqual(gitview.repo_root(self.root), self.root.resolve())
         self.assertIsNone(gitview.repo_root("/"))
 
+    def test_show_head_binary_does_not_raise(self):
+        p = self.root / "img.png"
+        p.write_bytes(b"\x89PNG\xff\xfe\x00\x80")
+        git(self.root, "add", "img.png")
+        git(self.root, "commit", "-q", "-m", "bin")
+        self.assertIsInstance(gitview.show_head(self.root, "img.png"), str)
+
+    def test_non_ascii_paths(self):
+        self.commit("src/ü.py")
+        self.mark()
+        self.commit("docs/wiki/é.md")
+        self.assertEqual(
+            sorted(gitview.tracked_files(self.root)),
+            sorted(["src/ü.py", "docs/wiki/é.md", STATE]),
+        )
+        self.assertTrue(state.is_fresh(self.root))
+
 
 if __name__ == "__main__":
     unittest.main()

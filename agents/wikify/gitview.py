@@ -15,13 +15,14 @@ TIMEOUT_SECONDS = 10
 
 def run_git(root: Path, *args: str) -> subprocess.CompletedProcess:
     """Run ``git <args>`` in ``root``; a timeout yields returncode 124."""
-    argv = ["git", *args]
+    argv = ["git", "-c", "core.quotePath=false", *args]
     try:
         return subprocess.run(
             argv,
             cwd=root,
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=TIMEOUT_SECONDS,
         )
