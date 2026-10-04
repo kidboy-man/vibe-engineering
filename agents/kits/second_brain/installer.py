@@ -270,111 +270,13 @@ from agents.kits.second_brain.mcp import (  # noqa: F401
 )
 
 
-CLAUDE_SECRET_KEYS = {"env"}
-
-
-def _merge_claude_config(paths: KitPaths) -> None:
-    settings_path = paths.claude_dir / "settings.json"
-    current: dict = {}
-    if settings_path.exists():
-        try:
-            current = json.loads(settings_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            print("skipping invalid settings.json")
-            return
-
-    merged, changed = ms.json_defaults_strategy(
-        QMD_MCP_SNIPPET_JSON, current, CLAUDE_SECRET_KEYS
-    )
-    if not changed:
-        return
-
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    core.backup(settings_path, paths.claude_dir)
-    settings_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
-    print("merged qmd MCP into settings.json")
-
-
-def _merge_opencode_config(paths: KitPaths) -> None:
-    config_path = paths.opencode_config_dir / "opencode.jsonc"
-    current: dict = {}
-    if config_path.exists():
-        try:
-            current = ms.parse_jsonc(config_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, ValueError):
-            print("skipping invalid opencode.jsonc")
-            return
-
-    merged, changed, warnings = _merge_opencode_qmd_mcp(current)
-
-    for w in warnings:
-        print(w)
-
-    if not changed:
-        return
-
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    core.backup(config_path, paths.opencode_config_dir)
-    config_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
-    print("merged qmd MCP into opencode.jsonc")
-
-
-def _merge_cursor_config(paths: KitPaths) -> None:
-    """Merge qmd MCP entry into ~/.cursor/mcp.json.
-
-    Nested merge (not json_defaults_strategy's shallow top-level merge):
-    an existing unrelated mcpServers.* entry must not block adding qmd.
-    """
-    config_path = paths.cursor_dir / "mcp.json"
-    current: dict = {}
-    if config_path.exists():
-        try:
-            current = json.loads(config_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            print("skipping invalid mcp.json")
-            return
-
-    if not isinstance(current, dict):
-        print("skipping mcp.json: root is not an object")
-        return
-
-    mcps = current.get("mcpServers")
-    if not isinstance(mcps, dict):
-        mcps = {}
-    if "qmd" in mcps:
-        return
-
-    merged = dict(current)
-    merged["mcpServers"] = {
-        **mcps,
-        "qmd": dict(QMD_MCP_SNIPPET_JSON["mcpServers"]["qmd"]),
-    }
-
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    core.backup(config_path, paths.cursor_dir)
-    config_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
-    print("merged qmd MCP into mcp.json")
-
-
-def _merge_codex_config(paths: KitPaths) -> None:
-    config_path = paths.codex_dir / "config.toml"
-    current: str | None = None
-    if config_path.exists():
-        current = config_path.read_text(encoding="utf-8")
-
-    merged, action = ms.toml_block_merge_strategy(
-        CODEX_TOML_SECTION, CODEX_TOML_BODY, current
-    )
-    if action == "unchanged":
-        return
-
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    core.backup(config_path, paths.codex_dir)
-    config_path.write_text(merged, encoding="utf-8")
-    if action == "create":
-        print(f"created {config_path} with qmd MCP section")
-    else:
-        print("merged qmd MCP into config.toml")
+from agents.kits.second_brain.agent_configs import (  # noqa: F401
+    CLAUDE_SECRET_KEYS,
+    _merge_claude_config,
+    _merge_opencode_config,
+    _merge_cursor_config,
+    _merge_codex_config,
+)
 
 
 @dataclass(frozen=True)
@@ -388,15 +290,19 @@ class HookAgent:
     already_installed_fn: Callable[[KitPaths], bool]
 
 
-@dataclass(frozen=True)
-class PersonaSection:
-    """A marked-section merge target (persona/instructions file)."""
-
-    label: str
-    path_fn: Callable[[KitPaths], Path]
-    fragment_name: str
-    begin_marker: str
-    end_marker: str
+from agents.kits.second_brain.personas import (  # noqa: F401
+    PersonaSection,
+    _merge_persona_section,
+    CLAUDE_PERSONA_SECTION,
+    CODEX_PERSONA_SECTION,
+    OPENCODE_PERSONA_SECTION,
+    PERSONA_SECTIONS,
+    _merge_claude_md_section,
+    _merge_codex_instructions_section,
+    _merge_opencode_agents_section,
+    _marked_section_present,
+    _section_dry_run_label,
+)
 
 
 def _install_hook_script_file(script_dir: Path, template: Path) -> None:
@@ -425,19 +331,6 @@ def _json_hook_already_installed(
         return False
     _, changed = merge_fn(current, event, command)
     return not changed
-
-
-def _merge_persona_section(paths: KitPaths, spec: PersonaSection) -> None:
-    path = spec.path_fn(paths)
-    fragment = (paths.template / spec.fragment_name).read_text(encoding="utf-8")
-    existing = path.read_text(encoding="utf-8") if path.exists() else None
-    merged, action = ms.marked_section_strategy(fragment, existing, spec.begin_marker, spec.end_marker)
-    if action == "unchanged":
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(merged, encoding="utf-8")
-    verb = "created" if action == "create" else "merged"
-    print(f"{verb} second-brain section in {spec.label}")
 
 
 def _hook_command(paths: KitPaths) -> str:
@@ -497,25 +390,6 @@ def _cursor_hook_already_installed(paths: KitPaths) -> bool:
         _cursor_hook_command(paths),
     )
 
-
-CLAUDE_PERSONA_SECTION = PersonaSection(
-    "CLAUDE.md", lambda p: p.claude_dir / "CLAUDE.md", "claude_md_section.md", CLAUDE_MD_BEGIN_MARKER, CLAUDE_MD_END_MARKER
-)
-CODEX_PERSONA_SECTION = PersonaSection(
-    "AGENTS.md",
-    lambda p: p.codex_dir / "AGENTS.md",
-    "codex_instructions_section.md",
-    CODEX_INSTRUCTIONS_BEGIN_MARKER,
-    CODEX_INSTRUCTIONS_END_MARKER,
-)
-OPENCODE_PERSONA_SECTION = PersonaSection(
-    "opencode AGENTS.md",
-    lambda p: p.opencode_config_dir / "AGENTS.md",
-    "opencode_agents_section.md",
-    OPENCODE_AGENTS_BEGIN_MARKER,
-    OPENCODE_AGENTS_END_MARKER,
-)
-PERSONA_SECTIONS = [CLAUDE_PERSONA_SECTION, CODEX_PERSONA_SECTION, OPENCODE_PERSONA_SECTION]
 
 CLAUDE_HOOK_AGENT = HookAgent(
     "Claude Code", "SessionStart", "settings.json", lambda p: p.claude_dir, _hook_already_installed
@@ -605,33 +479,6 @@ def _install_cursor_rule(paths: KitPaths) -> None:
         rule_dst.parent.mkdir(parents=True, exist_ok=True)
         rule_dst.write_text(content, encoding="utf-8")
         print(f"installed {rule_dst}")
-
-
-def _merge_claude_md_section(paths: KitPaths) -> None:
-    """Merge the second-brain marked section into ~/.claude/CLAUDE.md."""
-    _merge_persona_section(paths, CLAUDE_PERSONA_SECTION)
-
-
-def _merge_codex_instructions_section(paths: KitPaths) -> None:
-    """Merge the second-brain marked section into ~/.codex/AGENTS.md."""
-    _merge_persona_section(paths, CODEX_PERSONA_SECTION)
-
-
-def _merge_opencode_agents_section(paths: KitPaths) -> None:
-    """Merge the second-brain marked section into OpenCode's AGENTS.md.
-
-    Uses a marker distinct from the ``opencode`` kit's own persona-section
-    marker, so both kits' merges coexist in the same file.
-    """
-    _merge_persona_section(paths, OPENCODE_PERSONA_SECTION)
-
-
-def _marked_section_present(path: Path, begin_marker: str) -> bool:
-    return path.exists() and begin_marker in path.read_text(encoding="utf-8")
-
-
-def _section_dry_run_label(path: Path, begin_marker: str) -> str:
-    return "already present" if _marked_section_present(path, begin_marker) else "would create/merge"
 
 
 def _cursor_rule_up_to_date(paths: KitPaths) -> bool:
