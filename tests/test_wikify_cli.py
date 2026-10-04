@@ -340,6 +340,59 @@ class PageListTests(VerifyCase):
         self.assertIn("pipe.md:0: unreadable", scan.scan_wiki(self.root))  # never opened
 
 
+class GitignoredControlFileTests(RepoCase):
+    def setUp(self):
+        super().setUp()
+        self.commit("src/a.py", "x = 1\n")
+
+    def ignore(self, text):
+        (self.root / ".gitignore").write_text(text)
+
+    def test_init_refuses_and_writes_nothing(self):
+        self.ignore("*.json\n")
+        rc, text = out(init_cmd.cmd_init, cwd=self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("docs/wiki/.wikify.json", text)
+        self.assertIn("!docs/wiki/", text)
+        self.assertFalse((self.root / "docs").exists())
+
+    def test_mark_and_verify_refuse(self):
+        out(init_cmd.cmd_init, cwd=self.root)
+        self.ignore("*.json\n")
+        before = (self.root / state.STATE_REL).read_text()
+        rc, lines = commands.run_verify(self.root)
+        self.assertEqual(rc, 1)
+        self.assertTrue(any(ln.startswith("docs/wiki/.wikify.json: ignored by git") for ln in lines), lines)
+        rc, text = out(commands.cmd_mark, self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("not marked", text)
+        self.assertEqual((self.root / state.STATE_REL).read_text(), before)
+
+    def test_other_control_files_checked(self):
+        self.ignore("index.md\n")
+        rc, text = out(init_cmd.cmd_init, cwd=self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("docs/wiki/index.md", text)
+
+    def test_negation_accepted(self):
+        self.ignore("*.json\n!docs/wiki/.wikify.json\n")
+        self.assertEqual(out(init_cmd.cmd_init, cwd=self.root)[0], 0)
+        self.assertEqual(commands.run_verify(self.root)[0], 0)
+
+    def test_tracked_file_not_reported(self):
+        out(init_cmd.cmd_init, cwd=self.root)
+        git(self.root, "add", "--", "docs/wiki")
+        git(self.root, "commit", "-q", "-m", "docs(wiki): init")
+        self.ignore("*.json\n")
+        self.assertEqual(commands.run_verify(self.root)[0], 0)
+
+    def test_git_error_is_not_ignored(self):
+        self.ignore("*.json\n")
+        failed = gitview.subprocess.CompletedProcess([], 128, "", "")
+        with mock.patch.object(gitview, "run_git", return_value=failed):
+            self.assertEqual(gitview.ignored(self.root, ["docs/wiki/.wikify.json"]), [])
+
+
 class WikiIsFileTests(RepoCase):
     def setUp(self):
         super().setUp()

@@ -57,6 +57,12 @@ def tracked_files(root: Path) -> list[str]:
     return tracked_files_or_none(root) or []
 
 
+def ignored(root: Path, rels: list[str] | tuple[str, ...]) -> list[str]:
+    """Which untracked ``rels`` git would ignore; [] on error or timeout."""
+    result = run_git(root, "check-ignore", "--", *rels)
+    return _lines(result) if result.returncode == 0 else []
+
+
 def show_head(root: Path, rel: str) -> str | None:
     """Content of ``rel`` at HEAD, so uncommitted edits never count."""
     result = run_git(root, "show", f"HEAD:{rel}")

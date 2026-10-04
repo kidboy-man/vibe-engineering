@@ -43,6 +43,7 @@ def _allow_notices(root: Path) -> list[str]:
 def _verify(root: Path) -> tuple[int, list[str]]:
     ignore = citations.load_ignore(root)
     errors, pages = citations.walk_wiki(root)
+    errors += state.ignored_control_files(root)
     notices: list[str] = []
     allowed: list[str] = []
     if not any(e.startswith(("docs:", "docs/wiki:")) for e in errors):

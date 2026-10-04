@@ -15,6 +15,22 @@ WIKI_DIR = "docs/wiki/"
 STATE_REL = "docs/wiki/.wikify.json"
 
 
+CONTROL_RELS = tuple(
+    WIKI_DIR + name
+    for name in (".wikify.json", "WIKIFY.md", ".wikifyignore", ".wikify-allow", "index.md")
+)
+
+
+def ignored_control_files(root: Path) -> list[str]:
+    """One error per control file git would ignore (it would never be committed,
+    so the state base would never advance and the hook would block forever)."""
+    return [
+        f"{rel}: ignored by git, so it would never be committed; un-ignore it "
+        "(e.g. add `!docs/wiki/**` at the end of .gitignore)"
+        for rel in gitview.ignored(root, CONTROL_RELS)
+    ]
+
+
 def _default() -> dict:
     return {"version": 1, "covered": None}
 

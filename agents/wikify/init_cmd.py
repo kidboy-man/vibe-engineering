@@ -44,6 +44,10 @@ def cmd_init(cwd: str | Path | None = None) -> int:
         ".wikify-allow": ALLOW.encode(),
     }
     wiki = root / WIKI_DIR
+    ignored = state.ignored_control_files(root)
+    if ignored:
+        print("refusing to initialize:", *ignored, sep="\n")
+        return 1
     try:
         state.check_wiki_path(root)
         wiki.mkdir(parents=True, exist_ok=True)
