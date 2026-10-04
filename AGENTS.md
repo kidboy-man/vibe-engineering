@@ -10,12 +10,36 @@ and `merge_strategies.py` config merging helpers. Individual kits live under
 `templates/`. Tests are in `tests/`, with CLI help snapshots in
 `tests/fixtures/cli_help/`. User-facing setup notes are in `docs/`.
 
+### second-brain layout
+
+`agents/kits/second_brain/installer.py` is the public facade: `install`,
+`enable_hook`, install orchestration, and the names tests patch (`_confirm`,
+`_setup_qmd`, `shutil`, `subprocess`, `core`). Implementation lives in sibling
+modules: `paths` (constants and on-disk markers), `vault`, `skills`, `mcp`
+(pure qmd entry helpers), `agent_configs`, `hooks`, `personas`, `qmd`, and the
+read-only/strip commands `doctor_cmd`, `diff_cmd`, `uninstall_cmd`. Submodules
+call `shutil.which` / `subprocess.run` / `core.confirm` through the module
+object (never `from x import y`) so test patches keep working.
+`tests/test_second_brain_contract.py` freezes the strings older installs are
+found and removed by; change them only with a migration.
+
+### Adding a kit
+
+A copy-only kit (managed files, no config merging) is a `core.CopyKit(...)`
+declaration plus four one-line wrappers; see `agents/kits/codex/installer.py`.
+Kits with merge logic keep their own `installer.py` but reuse `installer_core`
+helpers (`plan_copy_files`, `apply_copy_plan`, `report_binary`, `confirm`).
+Then: add `templates/<name>/manifest.json` plus files, register a `KitSpec` in
+`kit_registry.py`, and declare any extra install flags in `INSTALL_OPTIONS`
+(flag -> installer kwarg). `MANIFEST.in` and `tests/test_kit_contract.py` check
+that the kit is packaged and honors the shared signature.
+
 ## Build, Test, and Development Commands
 
 - `python3 -m pip install -e .` installs the package locally with the `vibe`
   console script.
-- `python3 -m pytest` runs the test suite.
-- `python3 -m pytest tests/test_second_brain_installer.py` runs one focused
+- `python3 -m unittest discover -s tests` runs the test suite.
+- `python3 -m unittest tests.test_second_brain_installer` runs one focused
   test module while iterating.
 - `vibe kits list` verifies the installed CLI can load registered kits.
 - `vibe kits <kit> install --dry-run --yes` checks installer behavior without
@@ -32,7 +56,8 @@ tokens.
 
 ## Testing Guidelines
 
-Tests use `pytest` and follow the `tests/test_*.py` naming pattern. Add focused
+Tests use `unittest` (pytest also works if installed) and follow the
+`tests/test_*.py` naming pattern. Add focused
 tests beside related coverage: installer behavior in `test_*_installer.py`,
 shared merge logic in `test_merge_strategies.py`, registry behavior in
 `test_kit_registry.py`, and CLI contracts in `test_cli_contract.py`. When a CLI

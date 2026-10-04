@@ -11,8 +11,6 @@ from __future__ import annotations
 import difflib
 import json
 import os
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -69,18 +67,6 @@ def _target_files(paths: KitPaths) -> list[tuple[Path, Path, str]]:
     return core.target_files(paths.template_dir, paths.config_dir, manifest)
 
 
-def _read_text(path: Path) -> str:
-    return core.read_text(path)
-
-
-def _write_text(path: Path, content: str) -> None:
-    core.write_text(path, content)
-
-
-def _backup(path: Path, paths: KitPaths) -> Path | None:
-    return core.backup(path, paths.config_dir)
-
-
 def _merge_agents_md(template: str, existing: str | None) -> tuple[str, str]:
     from agents.merge_strategies import marked_section_strategy
     return marked_section_strategy(template, existing, AGENTS_BEGIN_MARKER, AGENTS_END_MARKER)
@@ -95,10 +81,6 @@ def _manifest_state(paths: KitPaths, managed_files: Iterable[str]) -> dict:
     return core.manifest_state(KIT_NAME, managed_files)
 
 
-def _load_existing_install_manifest(paths: KitPaths) -> dict | None:
-    return core.load_existing_install_manifest(paths.manifest_path)
-
-
 def _parse_jsonc(text: str) -> dict:
     from agents.merge_strategies import parse_jsonc
     return parse_jsonc(text)
@@ -108,7 +90,7 @@ def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
     from agents.merge_strategies import jsonc_defaults_strategy, parse_jsonc
 
     fragment_path = paths.template_dir / "opencode.fragment.jsonc"
-    fragment_text = _read_text(fragment_path)
+    fragment_text = core.read_text(fragment_path)
     fragment = parse_jsonc(fragment_text)
 
     # The fragment is JSONC with possible comments. Strip them before we use
@@ -116,7 +98,7 @@ def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
     settings_path = paths.config_dir / "opencode.jsonc"
     current: dict = {}
     if settings_path.exists():
-        current = parse_jsonc(_read_text(settings_path))
+        current = parse_jsonc(core.read_text(settings_path))
 
     merged, changed = jsonc_defaults_strategy(fragment, current, LOCAL_ONLY_KEYS, is_secret_key)
 
@@ -124,31 +106,27 @@ def _merge_settings(paths: KitPaths, dry_run: bool) -> tuple[str, bool]:
         return "opencode.jsonc unchanged", False
 
     if not dry_run:
-        _backup(settings_path, paths)
+        core.backup(settings_path, paths.config_dir)
         # Write as JSON. JSONC comments in the original are not preserved
         # when we add a key, but the values are preserved verbatim and the
         # structure remains valid for OpenCode (which accepts both .json and
         # .jsonc).
-        _write_text(settings_path, json.dumps(merged, indent=2, sort_keys=True) + "\n")
+        core.write_text(settings_path, json.dumps(merged, indent=2, sort_keys=True) + "\n")
     return "opencode.jsonc merged safe non-secret defaults", True
-
-
-def _confirm(prompt: str, yes: bool) -> bool:
-    return core.confirm(prompt, yes)
 
 
 def _planned_changes(paths: KitPaths) -> list[str]:
     changes: list[str] = []
     for src, dst, rel in _target_files(paths):
         if rel == AGENTS_MD:
-            template = _read_text(src)
-            existing = _read_text(dst) if dst.exists() else None
+            template = core.read_text(src)
+            existing = core.read_text(dst) if dst.exists() else None
             _, action = _merge_agents_md(template, existing)
             changes.append(f"{action} {rel}")
             continue
         if not dst.exists():
             changes.append(f"create {rel}")
-        elif _read_text(src) != _read_text(dst):
+        elif core.read_text(src) != core.read_text(dst):
             changes.append(f"update {rel}")
         else:
             changes.append(f"unchanged {rel}")
@@ -165,7 +143,7 @@ def install(home: str | None = None, dry_run: bool = False, yes: bool = False, m
     settings_path = paths.config_dir / "opencode.jsonc"
     if settings_path.exists():
         try:
-            _parse_jsonc(_read_text(settings_path))
+            _parse_jsonc(core.read_text(settings_path))
         except (json.JSONDecodeError, ValueError):
             print("invalid opencode.jsonc")
             return 1
@@ -176,7 +154,7 @@ def install(home: str | None = None, dry_run: bool = False, yes: bool = False, m
     if dry_run:
         print("dry run: no files written")
         return 0
-    if not _confirm("Install/update the OpenCode kit?", yes=yes):
+    if not core.confirm("Install/update the OpenCode kit?", yes=yes):
         print("aborted")
         return 1
 
@@ -184,15 +162,15 @@ def install(home: str | None = None, dry_run: bool = False, yes: bool = False, m
     managed: list[str] = []
     for src, dst, rel in _target_files(paths):
         if rel == AGENTS_MD:
-            template = _read_text(src)
-            existing = _read_text(dst) if dst.exists() else None
+            template = core.read_text(src)
+            existing = core.read_text(dst) if dst.exists() else None
             merged, action = _merge_agents_md(template, existing)
             if action == "unchanged":
                 managed.append(rel)
                 continue
             if action == "merge" and dst.exists():
-                _backup(dst, paths)
-            _write_text(dst, merged)
+                core.backup(dst, paths.config_dir)
+            core.write_text(dst, merged)
             managed.append(rel)
             print(f"{action} {rel}")
             continue
@@ -207,7 +185,7 @@ def install(home: str | None = None, dry_run: bool = False, yes: bool = False, m
         if changed:
             managed.append("opencode.jsonc")
 
-    _write_text(paths.manifest_path, json.dumps(_manifest_state(paths, managed), indent=2) + "\n")
+    core.write_text(paths.manifest_path, json.dumps(_manifest_state(paths, managed), indent=2) + "\n")
     print(f"wrote {paths.manifest_path}")
     return 0
 
@@ -217,8 +195,8 @@ def diff_kit(home: str | None = None) -> int:
     any_diff = False
     for src, dst, rel in _target_files(paths):
         if rel == AGENTS_MD:
-            template = _read_text(src)
-            existing = _read_text(dst) if dst.exists() else None
+            template = core.read_text(src)
+            existing = core.read_text(dst) if dst.exists() else None
             merged, _ = _merge_agents_md(template, existing)
             if existing is not None and merged == existing:
                 continue
@@ -241,24 +219,9 @@ def doctor(home: str | None = None) -> int:
     ok = True
     print(f"config base: {paths.home}")
     print(f"opencode dir: {paths.config_dir}")
-    opencode = shutil.which("opencode")
-    if opencode:
-        print(f"opencode: {opencode}")
-        try:
-            result = subprocess.run([opencode, "--version"], check=False, text=True, capture_output=True, timeout=10)
-            print(f"opencode version: {(result.stdout or result.stderr).strip()}")
-        except Exception as exc:  # pragma: no cover - environment dependent
-            print(f"opencode version check failed: {exc}")
-            ok = False
-    else:
-        print("opencode: missing (install with: curl -fsSL https://opencode.ai/install | bash)")
-        ok = False
+    ok = core.report_binary("opencode", "opencode: missing (install with: curl -fsSL https://opencode.ai/install | bash)") and ok
 
-    manifest = _load_existing_install_manifest(paths)
-    if manifest:
-        print(f"manifest: installed kit={manifest.get('kit')} files={len(manifest.get('managed_files', []))}")
-    else:
-        print("manifest: not installed")
+    core.report_manifest(core.load_existing_install_manifest(paths.manifest_path))
 
     missing_templates = [rel for src, _dst, rel in _target_files(paths) if not src.exists()]
     if missing_templates:
@@ -272,7 +235,7 @@ def doctor(home: str | None = None) -> int:
     settings_path = paths.config_dir / "opencode.jsonc"
     if settings_path.exists():
         try:
-            settings = _parse_jsonc(_read_text(settings_path))
+            settings = _parse_jsonc(core.read_text(settings_path))
             local_only = sorted(k for k in settings if k in LOCAL_ONLY_KEYS)
             secretish = sorted(k for k in settings if is_secret_key(k))
             if local_only or secretish:
@@ -291,7 +254,7 @@ def doctor(home: str | None = None) -> int:
 
 def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False) -> int:
     paths = _paths(home)
-    manifest = _load_existing_install_manifest(paths)
+    manifest = core.load_existing_install_manifest(paths.manifest_path)
     if not manifest:
         print(f"no {MANIFEST_FILE} found; nothing to uninstall")
         return 0
@@ -305,7 +268,7 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
     if dry_run:
         print("dry run: no files removed")
         return 0
-    if not _confirm("Uninstall managed OpenCode kit files?", yes=yes):
+    if not core.confirm("Uninstall managed OpenCode kit files?", yes=yes):
         print("aborted")
         return 1
 
@@ -316,14 +279,14 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
         if not dst.exists():
             continue
         if rel == AGENTS_MD:
-            existing = _read_text(dst)
+            existing = core.read_text(dst)
             remaining, fully_owned = _strip_agents_md_section(existing)
             if fully_owned:
                 dst.unlink()
                 removed += 1
                 print(f"removed {rel} (was entirely kit content)")
             elif remaining is not None and remaining != existing:
-                _write_text(dst, remaining)
+                core.write_text(dst, remaining)
                 removed += 1
                 print(f"stripped {rel} persona section; user content kept")
             else:

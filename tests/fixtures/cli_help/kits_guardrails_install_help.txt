@@ -1,0 +1,10 @@
+usage: vibe kits guardrails install [-h] [--home HOME] [--dry-run] [--yes]
+                                    [--with-verify]
+
+options:
+  -h, --help     show this help message and exit
+  --home HOME    Target config base directory (default: $XDG_CONFIG_HOME or
+                 current user's home)
+  --dry-run      Show changes without writing files
+  --yes, -y      Apply without interactive confirmation
+  --with-verify  Also register the opt-in gofmt check after Claude Code edits

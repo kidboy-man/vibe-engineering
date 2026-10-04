@@ -1,0 +1,11 @@
+usage: vibe kits guardrails [-h] {install,diff,doctor,uninstall} ...
+
+positional arguments:
+  {install,diff,doctor,uninstall}
+    install             Install or update the guardrails kit
+    diff                Show file-level differences for managed files
+    doctor              Check guardrails kit installation status
+    uninstall           Remove files managed by this kit
+
+options:
+  -h, --help            show this help message and exit

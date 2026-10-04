@@ -25,6 +25,18 @@ Every TRD you produce must contain these sections in order:
 8. **Testing Strategy** — unit, integration, e2e test plan; acceptance criteria per requirement
 9. **Open Questions & Risks** — unresolved decisions, external dependencies, technical risks
 
+### When a PRD exists (`docs/prd/<slug>.md`)
+
+Skip this block entirely when there is no PRD; the 9 sections above are the whole TRD then.
+
+- Add frontmatter `prd: docs/prd/<slug>.md` to the TRD.
+- Reuse the PRD's requirement IDs (`R-001`, ...) verbatim; never invent or renumber them.
+- In **Testing Strategy**, list the concrete test cases per requirement ID (one bullet per case,
+  naming the behaviour under test), so they can be turned into failing tests before any code.
+- Append a **10. Traceability** section: a table `| Requirement | Design section | Test cases |` with
+  one row per requirement, so each R-ID points at the design that satisfies it and the tests that
+  prove it. Every Must requirement must have a row.
+
 ---
 
 ## Create Mode
@@ -33,6 +45,11 @@ Every TRD you produce must contain these sections in order:
 
 **Step 1 — Identify the feature.**
 If a feature name was provided in args, use it. Otherwise ask: "What is the feature or epic name?"
+
+**Step 1b — Look for a PRD.**
+If `docs/prd/<kebab-feature-name>.md` exists, read it first. Treat it as the source of the problem,
+consumers, scope, and requirement IDs: do not re-ask questions 1, 2 and 6 below if the PRD already
+answers them, and follow the "When a PRD exists" rules above.
 
 **Step 2 — Interview.**
 Ask the following questions. You may ask them all at once or in one clear numbered list. Do not proceed to writing until you have answers.
@@ -101,6 +118,8 @@ For each of the 9 standard sections, identify:
 - Sections that are missing entirely
 
 **Step 3 — Rewrite.**
+If the TRD has a `prd:` link (or `docs/prd/<slug>.md` exists), also check that every Must requirement
+has a Traceability row and test cases, and add what is missing.
 Produce an improved version of the full TRD. Where you make a meaningful improvement, add an HTML comment immediately after: `<!-- improved: <reason> -->`. Do not add comments for minor wording changes.
 
 **Step 4 — Save.**

@@ -14,6 +14,7 @@ except ModuleNotFoundError:  # Python < 3.11
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.kits.claude_code import installer as claude_installer
+from agents.kits.guardrails import installer as guardrails_installer
 from agents.kits.opencode import installer as opencode_installer
 from agents.kits.second_brain import installer as second_brain_installer
 
@@ -90,6 +91,9 @@ class ManifestSurfaceTests(unittest.TestCase):
 
     def test_second_brain_manifest_surface(self) -> None:
         self._assert_manifest_surface(second_brain_installer, "second-brain")
+
+    def test_guardrails_manifest_surface(self) -> None:
+        self._assert_manifest_surface(guardrails_installer, "guardrails")
 
 
 class ManifestParityTests(unittest.TestCase):
