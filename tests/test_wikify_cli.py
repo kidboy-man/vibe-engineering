@@ -291,6 +291,55 @@ class UnreadableDirTests(VerifyCase):
         self.assertIn("priv:0: unreadable", scan.scan_wiki(self.root))
 
 
+@unittest.skipIf(os.geteuid() == 0, "root bypasses directory permissions")
+class ListableNotSearchableDirTests(VerifyCase):
+    """0o444: names are listable but every per-entry stat fails."""
+
+    def setUp(self):
+        super().setUp()
+        priv = self.root / "docs/wiki/priv"
+        priv.mkdir()
+        (priv / "x.txt").write_text("AKIA" + "A" * 16 + "\n")
+        priv.chmod(0o444)
+        self.addCleanup(priv.chmod, 0o755)
+
+    def test_verify_fails_closed(self):
+        rc, lines = commands.run_verify(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("docs/wiki/priv/x.txt: unreadable", lines)
+
+    def test_scan_reports_unreadable(self):
+        self.assertIn("priv/x.txt:0: unreadable", scan.scan_wiki(self.root))
+
+
+class PageListTests(VerifyCase):
+    def test_uppercase_md_is_indexed_and_planned(self):
+        from agents.wikify import citations, plan
+
+        self.page("Foo (src: src/a.py:1)\n", "docs/wiki/page.MD")
+        self.assertEqual(citations.index(self.root)["page.MD"], {"src/a.py"})
+        self.assertIn("page.MD", plan.build_plan(self.root, full=True)["refresh_pages"])
+
+    def test_symlinked_md_is_not_indexed(self):
+        import tempfile
+        from pathlib import Path
+
+        from agents.wikify import citations
+
+        with tempfile.TemporaryDirectory() as outside:
+            target = Path(outside) / "t.md"
+            target.write_text("Foo (src: src/a.py:1)\n")
+            os.symlink(target, self.root / "docs/wiki/link.md")
+            self.assertNotIn("link.md", citations.index(self.root))
+
+    def test_non_regular_file_is_an_error(self):
+        os.mkfifo(self.root / "docs/wiki/pipe.md")
+        rc, lines = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertTrue(any(ln.startswith("docs/wiki/pipe.md:") for ln in lines), lines)
+        self.assertIn("pipe.md:0: unreadable", scan.scan_wiki(self.root))  # never opened
+
+
 class WikiIsFileTests(RepoCase):
     def setUp(self):
         super().setUp()

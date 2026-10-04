@@ -40,50 +40,12 @@ def _allow_notices(root: Path) -> list[str]:
     return [f"ALLOW-LIST CHANGED: {p}|{t}" for p, t in sorted(now - before)]
 
 
-CONTROL_FILES = {".wikify.json", ".wikifyignore", ".wikify-allow", "WIKIFY.md"}
-
-
-def _layout_errors(root: Path) -> tuple[list[str], list[tuple[str, Path]]]:
-    """Layout errors plus the markdown pages (rel, path) to verify."""
-    for rel in ("docs", "docs/wiki"):
-        if (root / rel).is_symlink():
-            return [f"{rel}: symlink not allowed"], []
-    errors: list[str] = []
-    pages: list[tuple[str, Path]] = []
-    wiki = root / state.WIKI_DIR
-    if wiki.exists() and not wiki.is_dir():
-        return ["docs/wiki: not a directory"], pages
-    if not wiki.is_dir():
-        return errors, pages
-
-    def unreadable(exc: OSError) -> None:
-        rel = Path(exc.filename).relative_to(wiki).as_posix() if exc.filename else ""
-        errors.append(f"{state.WIKI_DIR}{rel}: unreadable directory")
-
-    for dirpath, dirnames, filenames in os.walk(wiki, followlinks=False, onerror=unreadable):
-        here = Path(dirpath)
-        for name in sorted(dirnames + filenames):
-            path = here / name
-            rel = path.relative_to(wiki).as_posix()
-            if path.is_symlink():
-                errors.append(f"{state.WIKI_DIR}{rel}: symlink not allowed")
-            elif path.is_file():
-                top = here == wiki
-                if top and name in CONTROL_FILES:
-                    continue
-                if name.lower().endswith(".md"):
-                    pages.append((rel, path))
-                else:
-                    errors.append(f"{state.WIKI_DIR}{rel}: only markdown pages and control files are allowed")
-    return errors, sorted(pages)
-
-
 def _verify(root: Path) -> tuple[int, list[str]]:
     ignore = citations.load_ignore(root)
-    errors, pages = _layout_errors(root)
+    errors, pages = citations.walk_wiki(root)
     notices: list[str] = []
     allowed: list[str] = []
-    if not any(e.startswith(("docs:", "docs/wiki:")) and "unreadable" not in e for e in errors):
+    if not any(e.startswith(("docs:", "docs/wiki:")) for e in errors):
         for rel, path in pages:
             text = path.read_text(encoding="utf-8")
             errors.extend(citations.verify_page(root, rel, text, ignore))

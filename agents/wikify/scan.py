@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 from pathlib import Path
 
 from agents.wikify.state import WIKI_DIR
@@ -101,11 +102,21 @@ def _all_hits(root: Path) -> list[tuple[str, int, str, str]]:
     for dirpath, _dirs, files in os.walk(wiki, followlinks=False, onerror=unreadable_dir):
         for name in files:
             path = Path(dirpath) / name
-            if path == skip or path.is_symlink() or not path.is_file():
+            if path == skip:
                 continue
             rel = path.relative_to(wiki).as_posix()
             try:
-                if path.stat().st_size > MAX_BYTES:
+                st = os.lstat(path)
+            except OSError:  # e.g. listable but not searchable directory
+                items.append((path, [(rel, 0, "unreadable", "unreadable")]))
+                continue
+            if stat.S_ISLNK(st.st_mode) or stat.S_ISDIR(st.st_mode):
+                continue  # symlinks are layout errors; never followed
+            if not stat.S_ISREG(st.st_mode):  # FIFO, socket, device: never opened
+                items.append((path, [(rel, 0, "unreadable", "unreadable")]))
+                continue
+            try:
+                if st.st_size > MAX_BYTES:
                     items.append((path, [(rel, 0, "too-large", "too-large")]))
                     continue
                 text = path.read_bytes().decode("utf-8", errors="replace")

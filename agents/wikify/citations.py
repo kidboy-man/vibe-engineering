@@ -8,7 +8,9 @@ reads committed content only, so uncommitted edits never satisfy a citation.
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -152,14 +154,60 @@ def verify_page(root: Path, page_rel: str, text: str, ignore: list[str]) -> list
     return [f"{page_rel}:{n}: {reason}" for n, reason in sorted(errors, key=lambda e: e[0])]
 
 
+CONTROL_FILES = {".wikify.json", ".wikifyignore", ".wikify-allow", "WIKIFY.md"}
+
+
+def walk_wiki(root: Path) -> tuple[list[str], list[tuple[str, Path]]]:
+    """Layout errors plus the pages (rel, path) under docs/wiki.
+
+    Pages are regular non-symlink files ending in ``.md`` (any case); the
+    top-level control files are skipped. Anything that cannot be stat'ed, is a
+    symlink, or is neither a regular file nor a directory is an error.
+    """
+    root = Path(root)
+    for rel in ("docs", "docs/wiki"):
+        if (root / rel).is_symlink():
+            return [f"{rel}: symlink not allowed"], []
+    errors: list[str] = []
+    pages: list[tuple[str, Path]] = []
+    wiki = root / WIKI_DIR
+    if wiki.exists() and not wiki.is_dir():
+        return ["docs/wiki: not a directory"], pages
+    if not wiki.is_dir():
+        return errors, pages
+
+    def unreadable(exc: OSError) -> None:
+        rel = Path(exc.filename).relative_to(wiki).as_posix() if exc.filename else ""
+        errors.append(f"{WIKI_DIR}{rel}: unreadable directory")
+
+    for dirpath, dirnames, filenames in os.walk(wiki, followlinks=False, onerror=unreadable):
+        here = Path(dirpath)
+        for name in sorted(dirnames + filenames):
+            path = here / name
+            rel = path.relative_to(wiki).as_posix()
+            try:
+                mode = os.lstat(path).st_mode
+            except OSError:
+                errors.append(f"{WIKI_DIR}{rel}: unreadable")
+                continue
+            if stat.S_ISLNK(mode):
+                errors.append(f"{WIKI_DIR}{rel}: symlink not allowed")
+            elif stat.S_ISREG(mode):
+                if here == wiki and name in CONTROL_FILES:
+                    continue
+                if name.lower().endswith(".md"):
+                    pages.append((rel, path))
+                else:
+                    errors.append(f"{WIKI_DIR}{rel}: only markdown pages and control files are allowed")
+            elif not stat.S_ISDIR(mode):
+                errors.append(f"{WIKI_DIR}{rel}: not a regular file")
+    return errors, sorted(pages)
+
+
 def index(root: Path) -> dict[str, set[str]]:
     """Page (relative to docs/wiki) -> repo paths it cites, from the working tree."""
-    wiki = Path(root) / WIKI_DIR
     out: dict[str, set[str]] = {}
-    for page in sorted(wiki.rglob("*.md")):
-        rel = page.relative_to(wiki).as_posix()
-        if rel == "WIKIFY.md":
-            continue
+    for rel, page in walk_wiki(root)[1]:
         try:
             text = page.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
