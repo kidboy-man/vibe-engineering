@@ -167,8 +167,11 @@ def plan_link(root: Path) -> tuple[list[Change], list[str]]:
         if ignored is None:
             notes.append(f"{REFUSED}could not determine whether {rel} is ignored")
             continue
-        if ignored:
+        if ignored and rel == TARGETS[0]:
             notes.append(f"{REFUSED}{rel} is gitignored; the pointer block would not be shared")
+            continue
+        if ignored:  # local-only: no teammate loads it, so it must not block AGENTS.md
+            notes.append(f"skipped: {rel} is gitignored; add the pointer block by hand if you want it there")
             continue
         if not exists:
             changes.append(Change(rel, "create", None, BEGIN + TEMPLATE + END))
@@ -332,7 +335,10 @@ def pointer_notices(root: Path) -> list[str]:
         blocks.append(rel)
         if "".join(lines[begins[0] + 1 : ends[0]]) != TEMPLATE:
             notices.append(f"POINTER STALE: {rel}; run vibe wikify link")
-    if seen:  # Claude Code reads only CLAUDE.md when it exists: every file needs a block
+    if seen and lacking:  # Claude Code reads only CLAUDE.md when it exists: every file needs a block
+        ignored = gitview.ignored_or_none(root, lacking)  # None: notify all (fail loud)
+        lacking = [rel for rel in lacking if rel not in (ignored or [])]
+    if seen:
         notices += [f"NOTICE: {rel} has no wikify pointer block; run vibe wikify link" for rel in lacking]
     elif not notices:
         notices.append(

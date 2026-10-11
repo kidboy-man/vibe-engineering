@@ -170,6 +170,29 @@ class LinkTests(LinkCase):
         self.assertIn("AGENTS.md", text)
         self.assertFalse((self.root / "AGENTS.md").exists())
 
+    def test_ignored_optional_target_skipped_with_note(self):
+        for rel in ("CLAUDE.md", "GEMINI.md"):
+            with self.subTest(rel):
+                self.write(".gitignore", f"{rel}\n")
+                self.write(rel, "local rules\n")
+                (self.root / "AGENTS.md").unlink(missing_ok=True)
+                rc, text = link(self.root)
+                self.assertEqual(rc, 0, text)
+                self.assertEqual(self.read("AGENTS.md"), BLOCK.encode())
+                self.assertEqual(self.read(rel), b"local rules\n")
+                self.assertIn(f"skipped: {rel} is gitignored", text)
+                self.assertNotIn("refused", text)
+                self.assertIn("Next: commit AGENTS.md in their own commit", text)
+                (self.root / rel).unlink()
+
+    def test_ignored_agents_md_refuses_even_with_claude(self):
+        self.write(".gitignore", "AGENTS.md\n")
+        self.write("CLAUDE.md", "mine\n")
+        rc, text = link(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("refused: AGENTS.md is gitignored", text)
+        self.assertEqual(self.read("CLAUDE.md"), b"mine\n")
+
     def test_missing_index_refuses(self):
         (self.root / "docs/wiki/index.md").unlink()
         rc, text = link(self.root)
@@ -553,6 +576,27 @@ class NoticeTests(LinkCase):
                 "NOTICE: CLAUDE.md has no wikify pointer block; run vibe wikify link",
                 "NOTICE: GEMINI.md has no wikify pointer block; run vibe wikify link",
             ],
+        )
+
+    def test_ignored_target_without_block_stays_silent(self):
+        link(self.root)
+        self.write(".gitignore", "CLAUDE.md\n")
+        self.write("CLAUDE.md", "local rules\n")
+        self.write("GEMINI.md", "gemini rules\n")
+        self.assertEqual(
+            pointer.pointer_notices(self.root),
+            ["NOTICE: GEMINI.md has no wikify pointer block; run vibe wikify link"],
+        )
+
+    def test_ignore_check_error_still_notifies(self):
+        link(self.root)
+        self.write(".gitignore", "CLAUDE.md\n")
+        self.write("CLAUDE.md", "local rules\n")
+        fake = mock.Mock(returncode=128, stdout="", stderr="fatal")
+        with mock.patch.object(gitview, "run_git", return_value=fake):
+            notes = pointer.pointer_notices(self.root)
+        self.assertEqual(
+            notes, ["NOTICE: CLAUDE.md has no wikify pointer block; run vibe wikify link"]
         )
 
     def test_symlinked_target_covered_stays_silent(self):
