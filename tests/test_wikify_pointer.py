@@ -5,7 +5,8 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from agents.wikify import commands, gitview, pointer
+from agents.wikify import commands, gitview, init_cmd, pointer, state
+from tests.test_wikify_hook import bash, guard
 from tests.test_wikify_state import RepoCase, git
 
 BLOCK = pointer.BEGIN + pointer.TEMPLATE + pointer.END
@@ -539,3 +540,43 @@ class NoticeTests(LinkCase):
         rc, lines = commands.run_verify(self.root)
         self.assertEqual(rc, rc0)
         self.assertIn("POINTER STALE: AGENTS.md; run vibe wikify link", lines)
+
+
+class EndToEndTests(RepoCase):
+    """Spec flow: init, page, map, link, then the two commit orders (spec R4)."""
+
+    def quiet(self, fn, *args):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return fn(*args)
+
+    def setUp(self):
+        super().setUp()
+        self.commit("src/a.py", "def foo():\n    return 1\n")
+        self.assertEqual(self.quiet(init_cmd.cmd_init, self.root), 0)
+        (self.root / "docs/wiki/a.md").write_text("Foo returns one (src: src/a.py:1-2 `foo`)\n")
+        (self.root / "docs/wiki/index.md").write_text(
+            "# Wiki index\n\n<!-- wikify:map -->\n"
+            "- [Foo](a.md) — when changing foo\n<!-- /wikify:map -->\n"
+        )
+        self.assertEqual(self.quiet(pointer.cmd_link, self.root, False), 0)
+        self.assertEqual((self.root / "AGENTS.md").read_text(), BLOCK)
+
+    def push_allowed(self):
+        return guard.decide(bash("git push -u origin main", self.root)) is None
+
+    def test_readme_order_is_fresh(self):
+        git(self.root, "add", "--", "AGENTS.md")
+        git(self.root, "commit", "-q", "-m", "chore: wikify pointer")
+        self.assertEqual(self.quiet(commands.cmd_mark, self.root), 0)
+        git(self.root, "add", "--", "docs/wiki")
+        git(self.root, "commit", "-q", "-m", "docs(wiki): map")
+        self.assertEqual(commands.run_verify(self.root)[0], 0)
+        self.assertTrue(state.is_fresh(self.root))
+        self.assertTrue(self.push_allowed())
+
+    def test_one_commit_with_pointer_is_stale(self):
+        self.assertEqual(self.quiet(commands.cmd_mark, self.root), 0)
+        git(self.root, "add", "--", "AGENTS.md", "docs/wiki")
+        git(self.root, "commit", "-q", "-m", "everything")
+        self.assertFalse(state.is_fresh(self.root))
+        self.assertFalse(self.push_allowed())
