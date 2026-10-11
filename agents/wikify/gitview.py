@@ -58,12 +58,16 @@ def tracked_files(root: Path) -> list[str]:
 
 
 def regular_tracked(root: Path) -> set[str] | None:
-    """Tracked paths that are regular files (modes 100644/100755); None on error.
+    """Paths that are regular files in the HEAD tree (100644/100755); None on error.
 
-    Symlinks (120000) and gitlinks (160000) are dropped: ``git show`` returns
-    the link target or commit text for them, not file content.
+    Modes come from HEAD, the same commit ``show_head`` reads, so a path staged
+    as a regular file but a symlink at HEAD is not trusted. Symlinks (120000)
+    and gitlinks (160000) are dropped: ``git show`` returns the link target or
+    commit text for them. No commits -> empty set.
     """
-    result = run_git(root, "ls-files", "-s", "-z")
+    if head(root) is None:
+        return set()
+    result = run_git(root, "ls-tree", "-r", "-z", "HEAD")
     if result.returncode != 0:
         return None
     out: set[str] = set()

@@ -3,10 +3,14 @@ import time
 import unittest
 from unittest import mock
 
-from agents.wikify import citations, gitview
+from agents.wikify import citations, commands, gitview, plan
 
 from agents.wikify import docs_inventory as di
 from tests.test_wikify_state import RepoCase, git
+
+
+HAS_FIFO = hasattr(os, "mkfifo")
+HAS_SYMLINK = hasattr(os, "symlink")
 
 
 class InventoryTests(RepoCase):
@@ -91,6 +95,7 @@ class InventoryTests(RepoCase):
         self.write("docs/new.md")
         self.assertEqual(di.inventory(self.root).docs, ["README.md"])
 
+    @unittest.skipUnless(HAS_SYMLINK, "needs symlinks")
     def test_symlink_and_gitlink_excluded(self):
         self.write("README.md")
         os.symlink("../README.md", self.root / "docs-link.md")
@@ -120,14 +125,102 @@ class InventoryTests(RepoCase):
         self.commit_all()
         self.assertEqual(di.inventory(self.root).docs, ["docs/ok.md"])
 
-    def test_staged_uncommitted_reason(self):
+    def test_staged_uncommitted_not_eligible(self):
         self.write("README.md")
         self.commit_all()
         self.write("docs/new.md")
         git(self.root, "add", "docs/new.md")
         inv = di.inventory(self.root)
-        self.assertEqual(self.skips(inv), {"docs/new.md": "unreadable at HEAD (not committed?)"})
+        self.assertEqual((inv.docs, inv.skipped), (["README.md"], []))
 
+    @unittest.skipUnless(HAS_SYMLINK, "needs symlinks")
+    def test_staged_regular_but_symlink_at_head(self):
+        self.write("README.md")
+        os.symlink("README.md", self.root / "docs.md")
+        self.commit_all()
+        (self.root / "docs.md").unlink()
+        self.write("docs.md", "# real\n")
+        git(self.root, "add", "docs.md")
+        self.assertEqual(di.inventory(self.root).docs, ["README.md"])
+
+    def _reject(self, rel, kind):
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if kind == "oversized":
+            path.write_bytes(b"#" * (64 * 1024 + 1))
+        elif kind == "binary":
+            path.write_bytes(b"\xff\xfe\n")
+        elif kind == "symlink":
+            os.symlink(self.root / "README.md", path)
+        elif kind == "fifo":
+            os.mkfifo(path)
+
+    def _kinds(self):
+        kinds = ["oversized", "binary"]
+        if HAS_SYMLINK:
+            kinds.append("symlink")
+        if HAS_FIFO:
+            kinds.append("fifo")
+        return kinds
+
+    def test_rejected_ignore_file_surfaces_everywhere(self):
+        self.write("README.md")
+        self.write("docs/secret.md")
+        self.commit_all()
+        for kind in self._kinds():
+            with self.subTest(kind=kind):
+                path = self.root / citations.IGNORE_REL
+                if path.is_symlink() or path.exists():
+                    path.unlink()
+                self._reject(citations.IGNORE_REL, kind)
+                self.assertEqual(citations.ignore_status(self.root), "rejected")
+                rc, lines = commands.run_verify(self.root)
+                self.assertEqual(rc, 1)
+                self.assertIn(
+                    "docs/wiki/.wikifyignore: rejected (symlink, not a regular file, "
+                    "not valid UTF-8, or over 64 KiB); ignore rules were NOT applied",
+                    lines,
+                )
+                inv = di.inventory(self.root)
+                self.assertEqual(inv.docs, [])
+                self.assertEqual(
+                    inv.skipped,
+                    [di.Skip(".wikifyignore", "ignore file rejected; ignore rules not applied")],
+                )
+                self.assertIn("rejected", plan.build_plan(self.root)["error"])
+
+    def test_ignore_file_at_cap_and_absent_are_clean(self):
+        self.write("README.md")
+        self.write("docs/secret.md")
+        self.commit_all()
+        self.assertEqual(citations.ignore_status(self.root), "absent")
+        rc, lines = commands.run_verify(self.root)
+        self.assertEqual(rc, 0)
+        self.assertIsNone(plan.build_plan(self.root)["error"])
+        body = "docs/secret.md\n" + "#" * (64 * 1024 - len("docs/secret.md\n"))
+        self.write(citations.IGNORE_REL, body)
+        self.assertEqual(len(body.encode()), 64 * 1024)
+        self.assertEqual(citations.ignore_status(self.root), "ok")
+        self.assertEqual(di.inventory(self.root).docs, ["README.md"])
+        self.assertEqual(commands.run_verify(self.root)[0], 0)
+
+    def test_rejected_includes_file_is_skipped_entry_only(self):
+        self.write("README.md")
+        self.commit_all()
+        for kind in self._kinds():
+            with self.subTest(kind=kind):
+                path = self.root / di.INCLUDES_REL
+                if path.is_symlink() or path.exists():
+                    path.unlink()
+                self._reject(di.INCLUDES_REL, kind)
+                self.assertEqual(di.includes_status(self.root), "rejected")
+                inv = di.inventory(self.root)
+                self.assertEqual(inv.docs, ["README.md"])
+                self.assertEqual(
+                    inv.skipped, [di.Skip(di.INCLUDES_REL, "includes file rejected")]
+                )
+
+    @unittest.skipUnless(HAS_FIFO and HAS_SYMLINK, "needs mkfifo and symlinks")
     def test_control_files_hardened(self):
         wiki = self.root / "docs/wiki"
         wiki.mkdir(parents=True)

@@ -84,6 +84,10 @@ def _map_missing(root: Path) -> list[str]:
     return sorted(rel for rel, _ in walked if rel != "index.md" and rel not in listed)
 
 
+def _join(prev: str | None, msg: str) -> str:
+    return f"{prev}; {msg}" if prev else msg
+
+
 def build_plan(root: Path, full: bool = False) -> dict:
     root = Path(root)
     head = gitview.head(root)
@@ -100,12 +104,14 @@ def build_plan(root: Path, full: bool = False) -> dict:
         "symbols": {},
         "error": None,
     }
+    if citations.ignore_status(root) == "rejected":
+        plan["error"] = f"{citations.IGNORE_REL} rejected; ignore rules were NOT applied"
     if head is None:
         return plan
     ignore = citations.load_ignore(root)
     listing = gitview.tracked_files_or_none(root)
     if listing is None:
-        plan["error"] = "git ls-files failed or timed out; plan is incomplete"
+        plan["error"] = _join(plan["error"], "git ls-files failed or timed out; plan is incomplete")
         return plan
     tracked = [p for p in listing if _keep(p, ignore)]
     plan["contexts"] = _contexts(tracked)
@@ -113,7 +119,7 @@ def build_plan(root: Path, full: bool = False) -> dict:
     changed = gitview.changed_since(root, base) if base else None
     pages = citations.index(root)
     if base and changed is None:
-        plan["error"] = "git diff failed or timed out; fell back to full plan"
+        plan["error"] = _join(plan["error"], "git diff failed or timed out; fell back to full plan")
     if changed is None:  # full requested, no state, or unusable base
         plan["changed"] = sorted(tracked)
         plan["refresh_pages"] = sorted(pages)

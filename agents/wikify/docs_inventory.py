@@ -38,9 +38,12 @@ class Inventory:
 
 def load_includes(root: Path) -> list[str]:
     """Extra include globs from the working-tree control file; missing -> []."""
-    lines = citations.read_control_lines(Path(root) / INCLUDES_REL)
-    globs = (line.strip() for line in lines)
-    return [g for g in globs if g and not g.startswith("#")]
+    lines, _ = citations.read_control_lines(Path(root) / INCLUDES_REL)
+    return citations._globs(lines)
+
+
+def includes_status(root: Path) -> str:
+    return citations.read_control_lines(Path(root) / INCLUDES_REL)[1]
 
 
 def _default_eligible(path: str) -> bool:
@@ -57,10 +60,14 @@ def inventory(root: Path) -> Inventory:
     regular = gitview.regular_tracked(root)
     if regular is None:  # fail closed: modes unknown, so no path can be trusted
         return Inventory([], [Skip("", "could not read file modes")])
+    if citations.ignore_status(root) == "rejected":  # fail closed: privacy control
+        return Inventory([], [Skip(".wikifyignore", "ignore file rejected; ignore rules not applied")])
     includes = load_includes(root)
     ignore = citations.load_ignore(root)
     candidates: list[str] = []
     skipped: list[Skip] = []
+    if includes_status(root) == "rejected":  # fewer docs, never more
+        skipped.append(Skip(INCLUDES_REL, "includes file rejected"))
     for path in sorted(regular):
         if not path.lower().endswith(SUFFIXES):
             continue

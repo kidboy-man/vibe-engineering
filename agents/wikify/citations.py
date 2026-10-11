@@ -129,31 +129,45 @@ def _shape_error(path: str) -> str | None:
 MAX_CONTROL_BYTES = 64 * 1024
 
 
-def read_control_lines(path: Path) -> list[str]:
-    """Lines of a small control file; [] unless a regular non-symlink file.
+def read_control_lines(path: Path) -> tuple[list[str], str]:
+    """(lines, status) of a small control file; status ok | absent | rejected.
 
-    lstat first and open non-blocking without following links, so a FIFO or a
-    symlink planted in the working tree can neither hang nor redirect the read.
+    Rejected = symlink, not a regular file, over the cap, not UTF-8, or a read
+    error. lstat first and open non-blocking without following links, so a FIFO
+    or a symlink planted in the working tree can neither hang nor redirect the
+    read. Callers that guard a privacy control must not treat rejected as absent.
     """
     try:
         st = os.lstat(path)
+    except FileNotFoundError:
+        return [], "absent"
+    except OSError:
+        return [], "rejected"
+    try:
         if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_CONTROL_BYTES:
-            return []
+            return [], "rejected"
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path, flags)
-        with os.fdopen(fd, "rb") as handle:
+        with os.fdopen(os.open(path, flags), "rb") as handle:
             data = handle.read(MAX_CONTROL_BYTES + 1)
         if len(data) > MAX_CONTROL_BYTES:
-            return []
-        return data.decode("utf-8").splitlines()
+            return [], "rejected"
+        return data.decode("utf-8").splitlines(), "ok"
     except (OSError, UnicodeDecodeError):
-        return []
+        return [], "rejected"
+
+
+def _globs(lines: list[str]) -> list[str]:
+    globs = (line.strip() for line in lines)
+    return [g for g in globs if g and not g.startswith("#")]
+
+
+def ignore_status(root: Path) -> str:
+    return read_control_lines(Path(root) / IGNORE_REL)[1]
 
 
 def load_ignore(root: Path) -> list[str]:
-    lines = read_control_lines(Path(root) / IGNORE_REL)
-    globs = (line.strip() for line in lines)
-    return [g for g in globs if g and not g.startswith("#")]
+    return _globs(read_control_lines(Path(root) / IGNORE_REL)[0])
+
 
 
 def _ignored(path: str, glob: str) -> bool:
