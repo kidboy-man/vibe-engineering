@@ -1,5 +1,6 @@
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -61,6 +62,31 @@ class ParseTests(unittest.TestCase):
         cites, unc = citations.parse(text)
         self.assertEqual([(c.path, c.line) for c in cites], [("x.py", 6)])
         self.assertEqual(unc, [8])
+
+
+class LinearParseTests(unittest.TestCase):
+    MIB = 1 << 20
+
+    def test_hostile_markup_is_linear(self):
+        cases = [
+            "[" * self.MIB,
+            "[[" * (self.MIB // 2),
+            "[a](" * (self.MIB // 4),
+            "[a](b" * (self.MIB // 5),
+        ]
+        for text in cases:
+            with self.subTest(head=text[:6]):
+                t = time.perf_counter()
+                citations.parse(text)
+                self.assertLess(time.perf_counter() - t, 2.0)
+
+    def test_pure_link_paragraph_still_exempt(self):
+        _, uncited = citations.parse("[a](a.md) [[b]]\n\n[c](d/c.md#x)\n")
+        self.assertEqual(uncited, [])
+
+    def test_nested_bracket_link_text_fails_closed(self):
+        _, uncited = citations.parse("[a [b]](a.md)\n")
+        self.assertEqual(uncited, [1])
 
 
 class VerifyTests(RepoCase):

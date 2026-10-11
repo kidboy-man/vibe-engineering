@@ -21,7 +21,10 @@ from agents.wikify.state import WIKI_DIR
 CITE = re.compile(r"\(src: ([^\s:`()]+):([0-9]{1,9})(?:-([0-9]{1,9}))?(?: `([^`]+)`)?\)")
 HUMAN = re.compile(r"<!-- wikify:human -->.*?<!-- /wikify:human -->", re.S)
 HEADING = re.compile(r"^#{1,6} ")
-LINK = re.compile(r"\[\[[^\]]*\]\]|\[[^\]]*\]\([^)]*\)")
+# No '[' or '(' inside the classes: an attempt never scans past the next
+# bracket, so hostile text stays linear. Nested brackets / parens in a link
+# are not a "pure link" and the paragraph falls to the citation rule.
+LINK = re.compile(r"\[\[[^\[\]]*\]\]|\[[^\[\]]*\]\([^()]*\)")
 IGNORE_REL = WIKI_DIR + ".wikifyignore"
 
 

@@ -4,6 +4,10 @@ The map is a delimited block of one-line navigation entries. Entries are
 untrusted text written by an agent; the strict grammar keeps them inert: a
 link target can never be an ``@`` import (Claude Code expands those eagerly),
 a URL, or an escape from the wiki directory.
+
+Reachability follows only plain ``[text](path.md)`` and ``[text](path.md#anchor)``
+links; titled (``"t"``), angle (``<a.md>``) and reference-style links are not
+recognised and fail closed (the page stays unreachable).
 """
 
 from __future__ import annotations
@@ -21,7 +25,9 @@ MAX_BYTES = 6144
 MAX_TITLE = 60
 MAX_HINT = 80
 ENTRY = re.compile(r"^- \[([^\[\]()\n]{1,60})\]\(([^\s()\[\]<>]+)\) — ([^\[\]()\n]{1,80})$")
-LINK = re.compile(r"\]\(([^)\s#]+\.md)(?:#[^)\s]*)?\)", re.I)
+# Brackets, parens and whitespace are excluded from the target so a match attempt
+# never scans past the next delimiter: the whole scan stays linear on hostile text.
+LINK = re.compile(r"\]\(([^()\[\]\s#]+\.md)(?:#[^()\[\]\s]*)?\)", re.I)
 MAX_LINKS = 5000  # per page: bounds a hostile page of links
 _FORBIDDEN_PATHS = {"index.md", "WIKIFY.md"}  # exact case: matches the control-file exemptions
 

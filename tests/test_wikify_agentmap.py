@@ -1,4 +1,5 @@
 import random
+import re
 import time
 import unittest
 
@@ -425,6 +426,52 @@ class ReachablePerformanceTests(unittest.TestCase):
         links = agentmap.page_links("p.md", text)
         self.assertLess(time.perf_counter() - t, 2.0)
         self.assertEqual(links, {"a.md"})
+
+
+class LinearLinkScanTests(unittest.TestCase):
+    MIB = 1 << 20
+    OLD = re.compile(r"\]\(([^)\s#]+\.md)(?:#[^)\s]*)?\)", re.I)
+
+    def timed(self, fn, *args, limit=2.0):
+        t = time.perf_counter()
+        out = fn(*args)
+        self.assertLess(time.perf_counter() - t, limit)
+        return out
+
+    def test_hostile_page_links(self):
+        cases = [
+            "](" * (self.MIB // 2),
+            "](a" * (self.MIB // 3),
+            "](a.md" * (self.MIB // 6),
+            "](" + "a" * self.MIB,
+        ]
+        for text in cases:
+            with self.subTest(head=text[:8]):
+                self.timed(agentmap.page_links, "p.md", text)
+
+    def test_many_links_still_found(self):
+        got = self.timed(agentmap.page_links, "p.md", "[x](a.md) " * 100_000)
+        self.assertEqual(got, {"a.md"})
+
+    def test_ordinary_links_match_like_the_old_regex(self):
+        samples = [
+            "[a](a.md)",
+            "[a](a.md#sec) and [b](d/e/b.MD)",
+            "x [a](a.md) y [b](./b.md#t) z [c](c.md)\nnext [d](sub/d.md)",
+            "- [a](a.md)\n- [b](b.md)",
+            "end [z](z.md)",
+            "[a](http://x/a.md) [b](a.txt) [c](a.md#)",
+        ]
+        for text in samples:
+            with self.subTest(text=text):
+                self.assertEqual(
+                    [m.groups() for m in agentmap.LINK.finditer(text)],
+                    [m.groups() for m in self.OLD.finditer(text)],
+                )
+
+    def test_titled_angle_and_reference_links_not_recognised(self):
+        text = '[a](a.md "t") [b](<b.md>) [c][ref]\n\n[ref]: c.md\n'
+        self.assertEqual(agentmap.page_links("p.md", text), set())
 
 
 if __name__ == "__main__":

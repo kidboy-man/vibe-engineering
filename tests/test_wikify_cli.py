@@ -235,6 +235,22 @@ class AgentMapVerifyTests(VerifyCase):
         self.assertEqual(plan.build_plan(self.root)["map_missing"], ["lonely.md"])
 
 
+class HostilePageTests(VerifyCase):
+    def test_megabyte_of_link_openers_is_bounded(self):
+        import time
+
+        from agents.wikify import plan
+
+        self.page("](" * (1 << 19))
+        self.commit_wiki()
+        t = time.perf_counter()
+        self.verify()
+        self.assertLess(time.perf_counter() - t, 3.0)
+        t = time.perf_counter()
+        plan.build_plan(self.root)
+        self.assertLess(time.perf_counter() - t, 3.0)
+
+
 class MarkTests(VerifyCase):
     def test_refuses_when_failing(self):
         self.page("Claim (src: src/missing.py:1)\n")
