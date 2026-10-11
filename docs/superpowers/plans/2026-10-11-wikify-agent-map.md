@@ -1,506 +1,116 @@
 # Wikify Agent Map Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Steps use `- [ ]`.
+> **Execution method chosen by user: subagent-driven** (fresh implementer + fresh reviewer per task, scoped re-review per fix round, whole-branch review at the end; ledger rulings as in the wikify v1 run).
+> **Step 0 of execution:** copy this file to `docs/superpowers/plans/2026-10-11-wikify-agent-map.md` and commit it on `feat/wikify` (plan mode forbids writing there now).
 
-**Goal:** Make `docs/wiki/index.md` a verified agent map and add `vibe wikify link`, which writes a small marked pointer block into `AGENTS.md` (and existing `CLAUDE.md` / `GEMINI.md`), so agents load wiki pages on demand instead of bloating context.
+**Goal:** make `docs/wiki/index.md` a verified agent map and add `vibe wikify link`, which writes a small marked pointer block into `AGENTS.md` (and existing `CLAUDE.md`/`GEMINI.md`), so agents load wiki pages on demand instead of a bloated instruction file.
 
-**Architecture:** A new pure module `agents/wikify/agentmap.py` owns the map grammar, validation and pointer-block template. `verify` and `plan` consume it; `link` is a new command that writes only a marked block via `marked_section_strategy`. No change to freshness (`state.is_fresh`), the hook, or the parity test.
+**Architecture:** a pure grammar/validation module (`agentmap.py`) feeds `verify` and `plan`; a separate `pointer.py` owns the pointer template, target discovery, merge (via `merge_strategies.marked_section_strategy`) and the `link` command. No change to freshness (`state.is_fresh`), the hook, or the parity test.
 
 **Tech Stack:** Python 3.10+ stdlib, `unittest`, git CLI.
 
-**Spec:** `docs/superpowers/specs/2026-10-11-wikify-agent-map-design.md` (extends `docs/superpowers/specs/2026-10-04-wikify-design.md`).
+**Spec:** `docs/superpowers/specs/2026-10-11-wikify-agent-map-design.md` (committed, 758f2b2). Builds on `feat/wikify` (26+ commits, unpushed: SSH auth failed).
 
 ## Global Constraints
-- Python 3.10+, stdlib only, 4-space indent, no new dependencies; match surrounding style in `agents/wikify/`.
-- Test commands in this environment MUST be prefixed `FORCE_COLOR= NO_COLOR=1 PYTHON_COLORS=0` (the shell has `FORCE_COLOR=3`, which colours argparse help on Python 3.14 and breaks help snapshots). Full suite: `python3 -m unittest discover -s tests`; baseline **806 tests OK**.
-- Map block markers exactly `<!-- wikify:map -->` / `<!-- /wikify:map -->` in top-level `docs/wiki/index.md`; entry grammar `- [<title>](<path>.md) — <when-hint>` with an em dash (U+2014) between spaces; title 1-60 chars, hint 1-80 chars, neither containing ``[ ] ( ) ` < > @`` or newline; caps 60 entries and 6 KiB.
-- Pointer block markers exactly `<!-- wikify:pointer -->` / `<!-- /wikify:pointer -->`; static template, plain relative links, never `@` imports.
-- `link` writes only inside the marked block, never creates `CLAUDE.md`/`GEMINI.md`, refuses symlinks / gitignored / outside-root targets, and never touches `.wikify.json`.
-- Notices about pointer blocks never change `verify`'s exit code.
-- Commits: Conventional Commits, scope `wikify`; end every message with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. Stage explicit paths only; never `.superpowers/`.
-- Repo conventions (AGENTS.md): installer safety, dry-run side-effect free, help fixtures updated by hand/regeneration when a help string changes.
+- Python 3.10+, stdlib only, no new dependencies; match surrounding style (`agents/wikify/*.py`).
+- Map entry grammar, verbatim: `- [<title>](<path>.md) — <when-hint>`; separator is space, U+2014, space; title 1-60 chars; hint 1-80 chars, required; neither contains `[`, `]`, `(`, `)` or newline; path relative to `docs/wiki/`, forward slashes, ends `.md` (any case), no `..`, no scheme/colon, no `@`, no backslash, not `index.md`/`WIKIFY.md` at top level.
+- Map block delimiters: `<!-- wikify:map -->` / `<!-- /wikify:map -->`; caps: at most 60 entries and 6144 bytes inside the block; at most one block per `index.md`; a block inside a `<!-- wikify:human -->` block is ignored.
+- Pointer block delimiters: `<!-- wikify:pointer -->` / `<!-- /wikify:pointer -->`; template is static (no repo-derived content), plain relative links, no `@`, 5 lines.
+- Pointer checks in `verify` are notices only (rc unchanged). `link` writes only `AGENTS.md`, plus `CLAUDE.md`/`GEMINI.md` only if they already exist; never creates the latter two.
+- `AGENTS.md`/`CLAUDE.md`/`GEMINI.md` text outside the marked block is preserved byte for byte.
+- Test commands prefix: `FORCE_COLOR= NO_COLOR=1 PYTHON_COLORS=0` (env has FORCE_COLOR=3). Full suite: `python3 -m unittest discover -s tests` (baseline 806 OK).
+- Commits: Conventional Commits, scope `wikify`; trailer `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`; commit explicit paths, never `.superpowers/`.
+
+## Rulings made while planning (confirm at review)
+- R1 Backup: `installer_core.backup(path, base)` writes `backups/` **inside the repo**, which would pollute a committed tree. `link` instead copies an existing target to `<git-dir>/wikify-backups/<UTC ts>/<name>` (untracked by construction), via a new `gitview.git_dir(root)`.
+- R2 Symlinks: `CLAUDE.md -> AGENTS.md` is a common pattern. A target that is a symlink resolving to another target file inside the repo is skipped with a note (covered by its target); any other symlink, or one resolving outside the repo, makes `link` refuse (rc 1, nothing written).
+- R3 `init` writes an empty map block into the new `index.md` so agents see where entries go; existing wikis (no block) get a notice, not an error (opt-in rule).
+- R4 Pointer notices are emitted by `verify` only; `plan` stays about pages.
 
 ## Review Focus
-1. Entry with a non-em-dash separator (`-`, en dash, double hyphen) must give a clear error, not silently parse (Task 1).
-2. Title/hint carrying markup that could act as an import or injection: `@path`, `[x](y)`, backticks, HTML, `(src: ...)` — grammar rejects (Task 1).
-3. Unicode control/format characters (bidi overrides U+202E, zero-width) in title/hint or path are rejected (Task 1).
-4. CRLF line endings in `index.md` and in `AGENTS.md` (Tasks 1, 3).
-5. Map block inside a human block is ignored and does not satisfy reachability (Task 2).
-6. `AGENTS.md` with exactly one of the two markers (hand-edited): `link` must refuse, not prepend a second block (Task 3).
-7. `AGENTS.md` that is not UTF-8 or is huge: refuse, never corrupt (Task 3).
-8. `link` backup must not create a `backups/` directory in the user's repo (Task 3).
-9. Orphan pages when no map block exists: opt-in rule, notice only (Task 2).
-
-## File Structure
-- Create `agents/wikify/agentmap.py` — map grammar, validation, `strip_map`, pointer template/markers, pointer inspection helpers. Pure (no git, no writes). One responsibility: the format.
-- Create `agents/wikify/link_cmd.py` — `cmd_link`: target discovery, refusals, diff, backup, write. Depends on `agentmap`, `gitview`, `state`.
-- Modify `agents/wikify/citations.py` — add public `strip_human(text)`; no behaviour change.
-- Modify `agents/wikify/commands.py` — `_verify` map rule + pointer notices; `cmd_wikify` dispatches `link`.
-- Modify `agents/wikify/plan.py` — `map_missing` key + render.
-- Modify `agents/wikify/init_cmd.py` — print one-line hint to run `link`.
-- Modify `agents/cli.py` — `link` subparser (`--dry-run`); fixtures `tests/fixtures/cli_help/wikify_help.txt` (+ new `wikify_link_help.txt` and its test).
-- Modify `agents/kits/wikify/templates/wikify/WIKIFY.md` (map protocol, keep scanning clean, <= ~140 lines) and `README.md`.
-- Tests: create `tests/test_wikify_agentmap.py`, `tests/test_wikify_link.py`; extend `tests/test_wikify_cli.py`, `tests/test_wikify_plan.py`, `tests/test_wikify_init.py`, `tests/test_cli_contract.py`.
+1. Map path `@x`, `../x`, `/abs`, `http://..`, `a:b.md`, backslash: rejected (eager `@` imports would defeat the goal) — Task 1.
+2. Map block in a human block ignored; prose OUTSIDE the block is still an uncited paragraph — Task 2.
+3. Existing `AGENTS.md` with CRLF, no trailing newline, or a stale pointer block: bytes outside the block preserved, block updated in place — Task 4.
+4. `CLAUDE.md` symlinked to `AGENTS.md`, symlink to elsewhere, gitignored target, missing index — Task 4.
+5. `link` followed by mark in the same commit makes the base commit mixed (stale): `link` output must say commit pointer files separately first — Task 4.
+6. Orphan page after the agent adds a page but no entry; duplicate entry; entry pointing at a deleted page — Task 2.
 
 ---
-### Task 1: Map grammar and validator (`agentmap.py`, pure)
+### Task 0: Plan committed
+- [ ] Copy this plan to `docs/superpowers/plans/2026-10-11-wikify-agent-map.md`; `git add` that path; commit `docs(wikify): add agent-map implementation plan`.
 
-**Files:**
-- Create: `agents/wikify/agentmap.py`
-- Test: `tests/test_wikify_agentmap.py`
-
-**Interfaces:**
-- Produces:
-  - `MAP_BEGIN: str`, `MAP_END: str`, `MAX_ENTRIES = 60`, `MAX_BYTES = 6 * 1024`
-  - `class MapEntry(NamedTuple): title: str; path: str; hint: str; line: int`
-  - `strip_map(text: str) -> str` — replaces every map block (markers included) with the same number of newlines; text without a block is returned unchanged.
-  - `check_map(clean: str, pages: set[str]) -> MapReport` where `clean` is the index text with human blocks already removed (line numbers preserved) and `pages` are page paths relative to `docs/wiki` (may include `index.md`).
-  - `class MapReport(NamedTuple): has_block: bool; entries: list[MapEntry]; errors: list[str]; mapped: set[str]; missing: list[str]` — `errors` are `"index.md:<line>: <reason>"`; `missing` = sorted pages not in the map and not `index.md`/`WIKIFY.md` (empty when `has_block` is False).
-
-- [ ] **Step 1: Write the failing tests** (`tests/test_wikify_agentmap.py`)
-
+### Task 1: Map grammar module (pure)
+**Files:** Create `agents/wikify/agentmap.py`; Test `tests/test_wikify_agentmap.py`.
+**Produces:**
 ```python
-import unittest
-
-from agents.wikify import agentmap
-
-PAGES = {"index.md", "domain/pay.md", "technical/idem.md"}
-
-
-def block(*lines: str) -> str:
-    return "# Wiki index\n\n" + agentmap.MAP_BEGIN + "\n" + "\n".join(lines) + "\n" + agentmap.MAP_END + "\n"
-
-
-def entry(path: str, title: str = "T", hint: str = "when touching x") -> str:
-    return f"- [{title}]({path}) — {hint}"
-
-
-class GrammarTests(unittest.TestCase):
-    def test_valid_map_reaches_all_pages(self):
-        rep = agentmap.check_map(block(entry("domain/pay.md"), entry("technical/idem.md")), PAGES)
-        self.assertTrue(rep.has_block)
-        self.assertEqual(rep.errors, [])
-        self.assertEqual(rep.mapped, {"domain/pay.md", "technical/idem.md"})
-        self.assertEqual(rep.missing, [])
-
-    def test_no_block_is_opt_in(self):
-        rep = agentmap.check_map("# Wiki index\n", PAGES)
-        self.assertFalse(rep.has_block)
-        self.assertEqual(rep.errors, [])
-        self.assertEqual(rep.missing, [])
-
-    def test_orphan_page_is_an_error(self):
-        rep = agentmap.check_map(block(entry("domain/pay.md")), PAGES)
-        self.assertEqual(rep.missing, ["technical/idem.md"])
-        self.assertTrue(any("technical/idem.md" in e and "not reachable" in e for e in rep.errors))
-
-    def test_bad_lines(self):
-        cases = {
-            "hyphen separator": "- [T](domain/pay.md) - when x",
-            "en dash": "- [T](domain/pay.md) – when x",
-            "missing hint": "- [T](domain/pay.md) — ",
-            "prose line": "Some prose here",
-            "import": "- [T](@domain/pay.md) — when x",
-            "scheme": "- [T](https://x.y/pay.md) — when x",
-            "dotdot": "- [T](../pay.md) — when x",
-            "absolute": "- [T](/pay.md) — when x",
-            "backslash": "- [T](domain\\pay.md) — when x",
-            "not md": "- [T](domain/pay.txt) — when x",
-            "paren in hint": "- [T](domain/pay.md) — see (src: a.py:1)",
-            "bracket in title": "- [T [x]](domain/pay.md) — when x",
-            "backtick link": "- [`T`](domain/pay.md) — when x ",
-            "at in hint": "- [T](domain/pay.md) — load @docs/wiki/x.md",
-            "html in hint": "- [T](domain/pay.md) — <b>when</b> x",
-            "bidi": "- [T](domain/pay.md) — when ‮x",
-            "zero width": "- [T](domain/pay.md) — wh​en x",
-            "long hint": "- [T](domain/pay.md) — " + "x" * 81,
-            "long title": "- [" + "t" * 61 + "](domain/pay.md) — when x",
-        }
-        for name, line in cases.items():
-            with self.subTest(name):
-                rep = agentmap.check_map(block(line), {"index.md", "domain/pay.md"})
-                self.assertTrue(rep.errors, name)
-
-    def test_unknown_page_and_duplicate(self):
-        rep = agentmap.check_map(block(entry("domain/nope.md"), entry("domain/pay.md"), entry("domain/pay.md")), PAGES)
-        text = "\n".join(rep.errors)
-        self.assertIn("domain/nope.md", text)
-        self.assertIn("duplicate", text)
-
-    def test_caps(self):
-        many = [entry(f"p{i}.md") for i in range(61)]
-        rep = agentmap.check_map(block(*many), {"index.md"} | {f"p{i}.md" for i in range(61)})
-        self.assertTrue(any("60 entries" in e for e in rep.errors))
-        fat = [entry("domain/pay.md", hint="y" * 80)] * 1  # one entry, but pad the block with blanks
-        rep = agentmap.check_map(block(*fat) .replace("\n-", "\n" + "\n" * 7000 + "-", 1), PAGES)
-        self.assertTrue(any("6144 bytes" in e or "6 KiB" in e for e in rep.errors))
-
-    def test_two_blocks(self):
-        one = block(entry("domain/pay.md"))
-        rep = agentmap.check_map(one + one, PAGES)
-        self.assertTrue(any("more than one map block" in e for e in rep.errors))
-
-    def test_unclosed_block(self):
-        rep = agentmap.check_map("# I\n" + agentmap.MAP_BEGIN + "\n" + entry("domain/pay.md") + "\n", PAGES)
-        self.assertTrue(any("unclosed" in e for e in rep.errors))
-
-    def test_crlf(self):
-        rep = agentmap.check_map(block(entry("domain/pay.md"), entry("technical/idem.md")).replace("\n", "\r\n"), PAGES)
-        self.assertEqual(rep.errors, [])
-
-    def test_line_numbers_are_original(self):
-        text = "# I\n\n\n" + agentmap.MAP_BEGIN + "\nprose\n" + agentmap.MAP_END + "\n"
-        rep = agentmap.check_map(text, PAGES)
-        self.assertTrue(rep.errors[0].startswith("index.md:5:"))
-
-    def test_strip_map_preserves_line_count(self):
-        text = "a\n" + block(entry("domain/pay.md")) + "tail\n"
-        out = agentmap.strip_map(text)
-        self.assertEqual(out.count("\n"), text.count("\n"))
-        self.assertNotIn("pay.md", out)
-        self.assertIn("tail", out)
-        self.assertEqual(agentmap.strip_map("no block\n"), "no block\n")
-
-
-if __name__ == "__main__":
-    unittest.main()
+MAP_BEGIN = "<!-- wikify:map -->"; MAP_END = "<!-- /wikify:map -->"
+MAX_ENTRIES = 60; MAX_BYTES = 6144; MAX_TITLE = 60; MAX_HINT = 80
+@dataclass(frozen=True)
+class Entry: path: str; title: str; hint: str; line: int
+@dataclass(frozen=True)
+class MapBlock: entries: list[Entry]; errors: list[str]; blocks: int  # errors are "index.md:<line>: <reason>"
+def parse_map(text: str) -> MapBlock          # ignores blocks inside wikify:human blocks; line numbers are original
+def strip_map(text: str) -> str               # replaces the (first valid-delimited) block with the same number of newlines
+def validate_map(block: MapBlock, pages: set[str]) -> list[str]   # pages = rels from citations.walk_wiki
 ```
+Grammar regex (use verbatim): `ENTRY = re.compile(r"^- \[([^\[\]()\n]{1,60})\]\(([^\s()\[\]]+)\) — ([^\[\]()\n]{1,80})$")`; then `_path_error(path)` rejects: leading `/`, `..` segment, `\\`, `@`, `:` anywhere, not ending `.md` (case-insensitive), equal to `index.md`/`WIKIFY.md`.
+`parse_map` rules: find blocks after removing human blocks (`citations.HUMAN`; import it, no copy); more than one block -> error `more than one map block`; unterminated begin marker -> error; lines inside: blank allowed, other lines must match ENTRY else error `invalid map entry`; byte cap and entry cap errors (`map exceeds 60 entries`, `map exceeds 6144 bytes`).
+`validate_map`: each path must be in `pages` (`link target missing: <path>`), no duplicates (`duplicate entry: <path>`), and when the block exists every page except top-level `index.md` must appear (`page not reachable from the map: <rel>`). A text with no block returns `[]` (opt-in).
+- [ ] Write failing table tests (`subTest` per row): valid single entry; 60 entries ok / 61 error; 6144 bytes ok / 6145 error; missing hint; hint 81 chars; title 61 chars; each bad path (`@a.md`, `../a.md`, `/a.md`, `http://x/a.md`, `a:b.md`, `a\\b.md`, `a.txt`, `index.md`, `WIKIFY.md`); parens/brackets in title or hint; wrong dash (`-`, en dash); stray prose line inside block; two blocks; unterminated begin; block inside a human block ignored (entries empty, no error); line numbers correct with a human block above; validate: missing target, duplicate, orphan page, no-block returns []; `strip_map` keeps line count.
+- [ ] Run -> FAIL (ImportError); implement; run -> PASS; commit `feat(wikify): agent map grammar and validation`.
 
-- [ ] **Step 2: Run to verify failure**
+### Task 2: verify integration, init, WIKIFY.md map section
+**Files:** Modify `agents/wikify/commands.py` (`_verify` ~L43-64), `agents/wikify/init_cmd.py` (`INDEX` L16), `agents/kits/wikify/templates/wikify/WIKIFY.md`; Test `tests/test_wikify_cli.py` (+ `tests/test_wikify_init.py` if INDEX is pinned).
+**Consumes:** `agentmap.parse_map/strip_map/validate_map`, `citations.walk_wiki`, `citations.verify_page`.
+**Behaviour:**
+- In `_verify`, for the top-level page `index.md` only: `block = agentmap.parse_map(text)`; call `citations.verify_page(root, rel, agentmap.strip_map(text), ignore)` (map lines are navigation, exempt from the citation rule; prose outside the block is still checked); extend errors with `block.errors` and `agentmap.validate_map(block, {rel for rel, _ in pages})`.
+- When `index.md` has no map block and the wiki has more than the index page: add the notice `NOTICE: docs/wiki/index.md has no wikify:map block; N page(s) are not reachable from a map` (rc unchanged).
+- `init_cmd.INDEX = "# Wiki index\n\n<!-- wikify:map -->\n<!-- /wikify:map -->\n"`; init still verifies clean (a fresh wiki scans and verifies rc 0). `cmd_init` also prints one final hint line: `Next: run vibe wikify link to add the agent pointer block to AGENTS.md` (test: printed on first init and on re-init, never writes outside docs/wiki).
+- WIKIFY.md: new "Agent map" section (<= 20 lines): the grammar with one example, "add an entry for every page you create", hint = when to load, never use `@`, entries are navigation not claims, caps; keep file scanning clean and total under ~140 lines; update the template test that pins phrases.
+- [ ] Failing tests: after `init`, `verify` rc 0; page `a.md` added without entry -> error `page not reachable from the map: a.md`; with `- [A](a.md) — when changing foo` -> rc 0 and no citation error on that line; duplicate -> error; entry to missing page -> error; prose paragraph outside the block in index.md -> `uncited paragraph`; map inside human block -> ignored, no reachability errors for pages (block count 0, notice shown); existing wiki without block + pages -> notice only, rc 0; 61 entries -> error; WIKIFY.md contains the map section text.
+- [ ] Run -> FAIL; implement; run focused (`tests.test_wikify_cli tests.test_wikify_init tests.test_wikify_agentmap`) then full suite; fix any exact-output assertions that now see the new notice lines (only update expectations that include the new notice, nothing else); commit `feat(wikify): verify the agent map and scaffold it in init`.
 
-Run: `FORCE_COLOR= NO_COLOR=1 PYTHON_COLORS=0 python3 -m unittest tests.test_wikify_agentmap`
-Expected: ImportError / ERROR (module `agents.wikify.agentmap` missing).
+### Task 3: plan reports pages missing from the map
+**Files:** Modify `agents/wikify/plan.py` (`build_plan` ~L74-122, `render` ~L125); Test `tests/test_wikify_plan.py`.
+**Produces:** plan dict key `map_missing: list[str]` = sorted pages (excluding top-level `index.md`) not listed in the map entries (all pages when there is no block); `render` prints `map_missing (N):` after `uncovered`.
+**Consumes:** `agentmap.parse_map`; read `docs/wiki/index.md` from the working tree via `citations.walk_wiki` page list (no new file reads outside the shared walk).
+- [ ] Failing tests: no block -> every page in `map_missing`; block listing some pages -> only the rest; no pages -> `[]`; unreadable/absent index -> `[]` and no exception; JSON output includes the key; render line present.
+- [ ] Implement; run `tests.test_wikify_plan` + full suite; commit `feat(wikify): plan lists pages missing from the agent map`.
 
-- [ ] **Step 3: Implement `agents/wikify/agentmap.py`**
-
+### Task 4: pointer block + `vibe wikify link`
+**Files:** Create `agents/wikify/pointer.py`; Modify `agents/wikify/gitview.py` (add `git_dir`), `agents/wikify/commands.py` (`cmd_wikify` dispatch, `_verify` pointer notices), `agents/cli.py` (`link` subparser ~L104-109 with `--dry-run`), `tests/fixtures/cli_help/wikify_help.txt` (+ new `wikify_link_help.txt`), `tests/test_cli_contract.py`; Test `tests/test_wikify_pointer.py`.
+**Produces:**
 ```python
-"""Agent map: the navigation block in docs/wiki/index.md and the pointer block
-written into AGENTS.md. Pure: no git, no file writes.
-
-The map is navigation, not a factual claim, so its lines are validated by a strict
-grammar instead of the citation rule. Entry text is agent-written and untrusted:
-the grammar bans markup that could act as an import, link or HTML.
-"""
-
-from __future__ import annotations
-
-import re
-import unicodedata
-from typing import NamedTuple
-
-MAP_BEGIN = "<!-- wikify:map -->"
-MAP_END = "<!-- /wikify:map -->"
-MAX_ENTRIES = 60
-MAX_BYTES = 6 * 1024
-EXEMPT_FROM_REACHABILITY = {"index.md", "WIKIFY.md"}
-
-POINTER_BEGIN = "<!-- wikify:pointer -->"
-POINTER_END = "<!-- /wikify:pointer -->"
-POINTER_BODY = (
-    "\n## Repo docs (wikify)\n"
-    "Repo knowledge lives in `docs/wiki/`. Start at [docs/wiki/index.md](docs/wiki/index.md): it is a map.\n"
-    "Load only the pages whose \"when\" hint matches your task; do not read the whole wiki.\n"
-)
-
-_BLOCK = re.compile(re.escape(MAP_BEGIN) + r"(.*?)" + re.escape(MAP_END), re.S)
-_ENTRY = re.compile(r"^- \[([^\[\]()`<>@]{1,60})\]\(([^()\s]+)\) — ([^\[\]()`<>@]{1,80})$")
-
-
-class MapEntry(NamedTuple):
-    title: str
-    path: str
-    hint: str
-    line: int
-
-
-class MapReport(NamedTuple):
-    has_block: bool
-    entries: list
-    errors: list
-    mapped: set
-    missing: list
-
-
-def strip_map(text: str) -> str:
-    """Blank every map block (markers included), keeping the line count."""
-    return _BLOCK.sub(lambda m: "\n" * m.group(0).count("\n"), text)
-
-
-def _bad_chars(s: str) -> bool:
-    return any(unicodedata.category(c) in {"Cc", "Cf"} for c in s)
-
-
-def _path_error(path: str) -> str | None:
-    if path.startswith("/") or "\\" in path or ":" in path or "@" in path:
-        return "path must be relative to docs/wiki, with no scheme, backslash or @"
-    if any(seg in {"", ".", ".."} for seg in path.split("/")):
-        return "path must not contain empty, . or .. segments"
-    if not path.lower().endswith(".md"):
-        return "path must end in .md"
-    if _bad_chars(path):
-        return "path contains control or format characters"
-    return None
-
-
-def check_map(clean: str, pages: set[str]) -> MapReport:
-    """Validate the map in ``clean`` (index.md text, human blocks already removed)."""
-    errors: list[str] = []
-    entries: list[MapEntry] = []
-    mapped: set[str] = set()
-    opens = clean.count(MAP_BEGIN)
-    blocks = list(_BLOCK.finditer(clean))
-    if opens == 0 and MAP_END not in clean:
-        return MapReport(False, [], [], set(), [])
-    if opens > 1 or len(blocks) > 1:
-        errors.append("index.md:1: more than one map block")
-    if opens != len(blocks) or (opens == 0 and MAP_END in clean):
-        errors.append(f"index.md:{clean.count(chr(10), 0, clean.find(MAP_BEGIN)) + 1 if MAP_BEGIN in clean else 1}: unclosed or stray map marker")
-    if not blocks:
-        return MapReport(opens > 0, [], errors, set(), [])
-    block = blocks[0]
-    body = block.group(1)
-    if len(body.encode("utf-8")) > MAX_BYTES:
-        errors.append(f"index.md:{clean.count(chr(10), 0, block.start()) + 1}: map block exceeds {MAX_BYTES} bytes (6 KiB cap)")
-    first = clean.count("\n", 0, block.start(1))  # 0-based line of the text after BEGIN
-    for offset, raw in enumerate(body.split("\n")):
-        line = first + offset + 1
-        text = raw.rstrip("\r")
-        if offset == 0 or not text.strip():
-            if text.strip():
-                errors.append(f"index.md:{line}: text on the marker line")
-            continue
-        m = _ENTRY.match(text)
-        if not m or _bad_chars(text):
-            errors.append(
-                f"index.md:{line}: not a map entry; expected "
-                "`- [title](path.md) — when-hint` with an em dash, no brackets or parentheses in title/hint"
-            )
-            continue
-        title, path, hint = m.group(1), m.group(2), m.group(3)
-        problem = _path_error(path)
-        if problem:
-            errors.append(f"index.md:{line}: {problem}")
-            continue
-        if path in mapped:
-            errors.append(f"index.md:{line}: duplicate entry for {path}")
-            continue
-        if path not in pages:
-            errors.append(f"index.md:{line}: {path} is not a page under docs/wiki")
-            continue
-        mapped.add(path)
-        entries.append(MapEntry(title, path, hint, line))
-    if len(entries) > MAX_ENTRIES:
-        errors.append(f"index.md:{first + 1}: map has {len(entries)} entries; the cap is {MAX_ENTRIES} entries")
-    missing = sorted(p for p in pages if p not in mapped and p not in EXEMPT_FROM_REACHABILITY)
-    errors.extend(f"index.md:{first + 1}: {p} is not reachable from the map" for p in missing)
-    return MapReport(True, entries, errors, mapped, missing)
+BEGIN = "<!-- wikify:pointer -->\n"; END = "<!-- /wikify:pointer -->\n"
+TEMPLATE = ("## Repo docs (wikify)\n"
+            "Repo knowledge lives in `docs/wiki/`. Start at [docs/wiki/index.md](docs/wiki/index.md): it is a map.\n"
+            "Load only the pages whose \"when\" hint matches your task; do not read the whole wiki.\n")
+TARGETS = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")
+def plan_link(root: Path) -> tuple[list[Change], list[str]]   # Change(rel, action: create|merge|unchanged, old, new); second value = notes/refusals
+def cmd_link(cwd=None, dry_run: bool = False) -> int
+def pointer_notices(root: Path) -> list[str]                  # for verify: STALE / BROKEN / none
 ```
+`gitview.git_dir(root) -> Path | None` runs `git rev-parse --absolute-git-dir` (timeout via `run_git`).
+**Behaviour (spec + R1/R2):**
+- Refuse (rc 1, nothing written, message names repo-relative path): `docs/wiki/index.md` missing; any target that is a symlink resolving outside the repo or to a non-target file; target gitignored (`gitview.ignored`) when it does not exist yet or is untracked-ignored; target resolving outside repo root. A symlink resolving to another target in the repo is skipped with note `CLAUDE.md -> AGENTS.md: covered by its target`.
+- Targets: `AGENTS.md` always (created with the block only when absent); `CLAUDE.md`, `GEMINI.md` only if they exist as regular files.
+- Merge: `marked_section_strategy(TEMPLATE, existing, BEGIN, END)` from `agents/merge_strategies.py:380`; text outside markers byte-preserved (read/write as bytes-safe: decode utf-8 with `newline=""`-equivalent handling so CRLF survives; if the file is not valid UTF-8, refuse that file).
+- Output: for every changed file print `create|update <rel>` and a unified diff (`difflib`); `--dry-run` writes nothing and says so; otherwise before overwriting an existing file copy it to `<git_dir>/wikify-backups/<UTC ts>/<rel>`; write with plain `write_text` (no symlink following: target is verified a regular file or absent).
+- Final lines: `Next: commit <changed files> in their own commit (not with docs/wiki), then run vibe wikify mark.` (so the base commit stays docs-only; freshness unchanged).
+- `pointer_notices`: for each existing regular target: block present but differs from TEMPLATE -> `POINTER STALE: <rel>; run vibe wikify link`; none of the targets has a block -> `NOTICE: no wikify pointer block in AGENTS.md/CLAUDE.md/GEMINI.md; run vibe wikify link`; `docs/wiki/index.md` missing while a block exists -> `POINTER BROKEN: <rel> points at a missing docs/wiki/index.md`. Never changes rc; never raises (OSError -> skipped note).
+- [ ] Failing tests (temp git repos via `tests.test_wikify_state.RepoCase`): no AGENTS.md -> created with block only, rc 0; existing AGENTS.md with user text -> user bytes preserved after the block (compare tail bytes), CRLF file keeps CRLF; re-run -> `unchanged`, no write, no backup; stale block updated in place; existing CLAUDE.md gets block, absent GEMINI.md not created; `CLAUDE.md` symlink to `AGENTS.md` -> skipped note, rc 0; symlink to `/etc/hostname` or `../x` -> rc 1 nothing written; gitignored AGENTS.md (`.gitignore` has `AGENTS.md`) -> rc 1; missing `docs/wiki/index.md` -> rc 1; `--dry-run` writes nothing and prints diff; backup file exists in git dir after a merge and no `backups/` dir appears in the work tree; output contains the commit-separately line; non-UTF-8 AGENTS.md -> refused; `pointer_notices` cases (stale, none, broken, clean -> []); `verify` prints the notices and rc unchanged; parity test file untouched.
+- [ ] Run -> FAIL; implement; regenerate ONLY `wikify_help.txt` and new `wikify_link_help.txt` with the colour-off prefix (eyeball diff = only `link` added); run `tests.test_cli_contract` + full suite; commit `feat(wikify): link command writes the agent pointer block`.
 
-Note for the implementer: the oversize test in Step 1 pads the block with blank lines to exceed 6144 bytes; the message must contain `6 KiB cap` or `6144 bytes` — adjust the test's `assertTrue` to match the exact text above (`exceeds 6144 bytes (6 KiB cap)`).
-
-- [ ] **Step 4: Run to verify pass**
-
-Run: `FORCE_COLOR= NO_COLOR=1 PYTHON_COLORS=0 python3 -m unittest tests.test_wikify_agentmap -v`
-Expected: all tests PASS. Fix grammar edge cases until the table passes; do not weaken the table.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add agents/wikify/agentmap.py tests/test_wikify_agentmap.py
-git commit -m "feat(wikify): agent map grammar and validator
-
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
-```
-
----
-### Task 2: Wire the map rule into `verify` and `plan`
-
-**Files:**
-- Modify: `agents/wikify/citations.py` (add `strip_human`), `agents/wikify/commands.py` (`_verify`), `agents/wikify/plan.py` (`build_plan`, `render`)
-- Test: `tests/test_wikify_cli.py`, `tests/test_wikify_plan.py`
-
-**Interfaces:**
-- Consumes: `agentmap.check_map`, `agentmap.strip_map`, `agentmap.MapReport` (Task 1); `citations.walk_wiki`, `citations.verify_page`.
-- Produces: `citations.strip_human(text) -> str` (public alias of `_strip_human`); `plan["map_missing"]: list[str]` (always present; sorted pages not in the map, `[]` when there is no map block); `render` prints `map_missing (N):` after `uncovered`.
-
-Behavior:
-- In `_verify`, for the page whose rel is exactly `index.md`: run `citations.verify_page` on `agentmap.strip_map(citations.strip_human(text))` (so map lines are not "uncited paragraphs"); run `agentmap.check_map(citations.strip_human(text), {rel for rel, _ in pages})` and append its `errors`. Other pages unchanged. Human-block notices still use the original text. The scan still reads the whole file.
-- No map block: no errors; if there is at least one page besides `index.md`, add the notice `MAP: no map block in docs/wiki/index.md; N page(s) are not reachable from an agent map` (notice only).
-- `plan.map_missing`: use `agentmap.check_map` on the working-tree `index.md` (read via `walk_wiki` page list; absent -> `[]`).
-
-- [ ] **Step 1: Write failing tests**
-
-In `tests/test_wikify_cli.py` (reuse that file's repo helpers; names: use whatever `RepoCase`/`commit`/`init` helpers it already defines — read the file first) add a `MapRuleTests` class with these cases, each asserting on `run_verify(root)` output lines and rc:
-1. After `init`, writing `index.md` with a valid map block listing one cited page → rc 0.
-2. Map entry line does NOT produce `uncited paragraph` (assert no line containing `uncited`).
-3. Page exists but is not in the map block → rc 1 and a line containing `is not reachable from the map`.
-4. Entry pointing at a missing page → rc 1 (`is not a page under docs/wiki`).
-5. No map block, one extra page → rc 0 and a `MAP:` notice line present.
-6. Map block wrapped inside a human block → ignored: not counted as a map (so reachability not enforced) and the `MAP:` notice appears.
-7. A secret-shaped string placed in a hint is still caught by the scan (build the fake token by string concatenation).
-8. Prose paragraph outside the block in `index.md` without citation → still `uncited paragraph` error (exemption is only for the block).
-
-In `tests/test_wikify_plan.py`: `map_missing` lists pages absent from the map; `[]` with no block; key always present; `render` contains `map_missing (`.
-
-- [ ] **Step 2: Run to verify failure** — `... python3 -m unittest tests.test_wikify_cli tests.test_wikify_plan` → new tests FAIL (map rule absent).
-
-- [ ] **Step 3: Implement**
-
-`citations.py`: add below `_strip_human`:
-
-```python
-def strip_human(text: str) -> str:
-    """Blank human blocks, keeping the line count (public wrapper)."""
-    return _strip_human(text)
-```
-
-`commands.py` `_verify` loop becomes:
-
-```python
-        index_text = None
-        for rel, path in pages:
-            text = path.read_text(encoding="utf-8")
-            body = text
-            if rel == "index.md":
-                index_text = text
-                body = agentmap.strip_map(citations.strip_human(text))
-            errors.extend(citations.verify_page(root, rel, body, ignore))
-            notices.extend(_notices(root, rel, text))
-        if index_text is not None:
-            report = agentmap.check_map(
-                citations.strip_human(index_text), {rel for rel, _ in pages}
-            )
-            errors.extend(report.errors)
-            others = [rel for rel, _ in pages if rel not in agentmap.EXEMPT_FROM_REACHABILITY]
-            if not report.has_block and others:
-                notices.append(
-                    f"MAP: no map block in docs/wiki/index.md; {len(others)} page(s) "
-                    "are not reachable from an agent map"
-                )
-```
-
-(import `agentmap` from `agents.wikify`). `plan.py`: add `"map_missing": []` to the dict, compute with `agentmap.check_map` from the `index.md` working-tree text when present (use `citations.walk_wiki(root)[1]` to find it; wrap read in try/except OSError -> `[]`), and extend `render`'s key loop to `("changed", "refresh_pages", "uncovered", "map_missing", "contexts")`.
-
-- [ ] **Step 4: Run to verify pass** — focused modules, then the full suite (expect baseline + new tests, all OK). `test_wikify_plan.py` equality assertions on the plan dict may need the new key; update them minimally.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add agents/wikify/citations.py agents/wikify/commands.py agents/wikify/plan.py tests/test_wikify_cli.py tests/test_wikify_plan.py
-git commit -m "feat(wikify): verify the agent map and report unmapped pages
-
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
-```
-
----
-### Task 3: `vibe wikify link` and pointer notices
-
-**Files:**
-- Create: `agents/wikify/link_cmd.py`
-- Modify: `agents/wikify/agentmap.py` (pointer helpers), `agents/wikify/commands.py` (dispatch + `verify` notices), `agents/cli.py` (`link` subparser), `tests/fixtures/cli_help/wikify_help.txt` (+ new `wikify_link_help.txt`)
-- Test: `tests/test_wikify_link.py`, `tests/test_cli_contract.py`, `tests/test_wikify_cli.py`
-
-**Interfaces:**
-- Consumes: `merge_strategies.marked_section_strategy(template, existing, begin_marker, end_marker) -> (merged, action)`; `gitview.repo_root`, `gitview.ignored`, `gitview.run_git`; `state.WIKI_DIR`.
-- Produces in `agentmap.py`:
-  - `pointer_block() -> str` — `POINTER_BEGIN + POINTER_BODY + POINTER_END`.
-  - `pointer_state(text: str) -> str` — one of `"missing"` (no markers), `"current"` (block equals the template), `"stale"` (markers present, content differs), `"broken"` (exactly one marker or END before BEGIN).
-- Produces in `link_cmd.py`: `cmd_link(cwd: str | Path | None = None, dry_run: bool = False) -> int`; `TARGETS = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")`.
-- Produces in `commands.py`: `_pointer_notices(root: Path) -> list[str]` used by `_verify`.
-
-Behavior of `cmd_link` (in this order; any refusal prints one line, returns 1, writes nothing):
-1. `root = gitview.repo_root(cwd)`; None -> `not a git repository`.
-2. `docs/wiki/index.md` must be a regular file, and `docs`/`docs/wiki` not symlinks -> else `run vibe wikify init first`.
-3. Targets: `AGENTS.md` always; `CLAUDE.md`, `GEMINI.md` only if `os.path.lexists`. For each target: refuse if symlink, not a regular file, resolved path outside `root`, listed by `gitview.ignored(root, [name])`, larger than 256 KiB, or not valid UTF-8; refuse if `pointer_state(existing) == "broken"` with `hand-edited wikify:pointer markers in <name>; fix or remove them`.
-4. Compute `merged, action = marked_section_strategy(POINTER_BODY, existing, POINTER_BEGIN, POINTER_END)` — note the template argument is the body only; the markers are passed separately. Preserve the file's line ending style: if the existing text uses `\r\n` throughout, convert the block's `\n` to `\r\n` before merging.
-5. Print a unified diff (`difflib.unified_diff`, `a/<name>` `b/<name>`) per changed file; print `unchanged <name>` for `action == "unchanged"`. `--dry-run`: print `dry run: no files written`, return 0.
-6. Else backup then write each changed file: backup path `<git-dir>/wikify-backups/<UTC timestamp>/<name>` where `<git-dir>` comes from `git rev-parse --absolute-git-dir` (never inside the working tree; do NOT use `installer_core.backup`, which would create `backups/` inside the repo); write with an exclusive temp file + `os.replace` in the same directory (no partial writes; keep file mode via `shutil.copymode`).
-7. Print `linked <name>` and, last: `Next: commit these files on their own, before running vibe wikify mark (they are outside docs/wiki, so they must not share the docs commit).`
-
-`verify` pointer notices (read-only, never affect rc; any OSError -> skip silently): for each existing regular non-symlink target, `pointer_state`: `stale` -> `POINTER STALE: <name> (run vibe wikify link)`; `broken` -> `POINTER BROKEN: <name> has unmatched wikify:pointer markers`; if `AGENTS.md` exists or is absent and no target is `current` and `docs/wiki/index.md` exists -> `POINTER MISSING: run vibe wikify link so agents find the map`; if a target is `current` but `docs/wiki/index.md` is missing -> `POINTER DANGLING: <name> points at docs/wiki/index.md, which does not exist`.
-
-- [ ] **Step 1: Write failing tests** (`tests/test_wikify_link.py`; build temp git repos with the helper pattern from `tests/test_wikify_state.py`; run `init` via `init_cmd.cmd_init(root)` so `index.md` exists; capture stdout with `contextlib.redirect_stdout`):
-  1. No `AGENTS.md`: created, content equals `pointer_block()`; rc 0; `CLAUDE.md`/`GEMINI.md` NOT created.
-  2. Existing `AGENTS.md` with user text: user text preserved byte-for-byte after the block; running again prints `unchanged AGENTS.md`, file bytes identical (idempotent).
-  3. Existing `CLAUDE.md` gets the block; absent `GEMINI.md` not created; existing `GEMINI.md` gets it.
-  4. Stale block (edit template text inside markers) updated in place, text outside untouched.
-  5. `--dry-run` writes nothing and prints a diff.
-  6. Refusals (rc 1, victim untouched): `AGENTS.md` is a symlink to a temp victim file; `.gitignore` containing `AGENTS.md`; target > 256 KiB; non-UTF-8 bytes; only one marker present; index.md missing (no init); outside a git repo.
-  7. CRLF `AGENTS.md`: block written with `\r\n`, no mixed endings.
-  8. Backup: after a real change, `<repo>/.git/wikify-backups/*/AGENTS.md` exists with the old bytes and the working tree has no `backups/` directory (`git status --porcelain` shows only the intended files).
-  9. `link` never modifies `.wikify.json` or anything under `docs/wiki/`.
-  10. `verify` notices: no pointer -> `POINTER MISSING`; after `link` -> no pointer notice; stale -> `POINTER STALE`; broken -> `POINTER BROKEN`; rc unchanged (0) in all cases on an otherwise clean wiki.
-  11. `agentmap.pointer_state` table test for `missing/current/stale/broken` (including END-before-BEGIN and two blocks -> `broken`).
-  Also `tests/test_cli_contract.py`: `wikify --help` fixture updated; new `wikify link --help` fixture + test method (follow the existing pattern).
-
-- [ ] **Step 2: Run to verify failure** — `... python3 -m unittest tests.test_wikify_link` → ImportError / failures.
-
-- [ ] **Step 3: Implement.** Add to `agentmap.py`:
-
-```python
-def pointer_block() -> str:
-    return POINTER_BEGIN + POINTER_BODY + POINTER_END
-
-
-def pointer_state(text: str) -> str:
-    begins, ends = text.count(POINTER_BEGIN), text.count(POINTER_END)
-    if begins == 0 and ends == 0:
-        return "missing"
-    if begins != 1 or ends != 1 or text.index(POINTER_END) < text.index(POINTER_BEGIN):
-        return "broken"
-    start = text.index(POINTER_BEGIN)
-    block = text[start : text.index(POINTER_END) + len(POINTER_END)]
-    return "current" if block.replace("\r\n", "\n") == pointer_block() else "stale"
-```
-
-`link_cmd.py` implements the numbered behavior above. `cli.py`: under the `wikify` subparsers add `link` with `--dry-run` (`store_true`, help "Show the diff without writing files"); `commands.cmd_wikify` dispatches `link` to `link_cmd.cmd_link(cwd, args.dry_run)`. Regenerate ONLY `tests/fixtures/cli_help/wikify_help.txt` and add `wikify_link_help.txt`, both with the colour-off prefix: `FORCE_COLOR= NO_COLOR=1 PYTHON_COLORS=0 python3 -m agents.cli wikify --help > tests/fixtures/cli_help/wikify_help.txt` (and `... wikify link --help > ...wikify_link_help.txt`); `git diff` on `wikify_help.txt` must only add the `link` entry.
-
-- [ ] **Step 4: Run to verify pass** — `... python3 -m unittest tests.test_wikify_link tests.test_wikify_agentmap tests.test_wikify_cli tests.test_cli_contract`, then the full suite (all OK).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add agents/wikify/link_cmd.py agents/wikify/agentmap.py agents/wikify/commands.py agents/cli.py tests/test_wikify_link.py tests/test_cli_contract.py tests/test_wikify_cli.py tests/fixtures/cli_help/wikify_help.txt tests/fixtures/cli_help/wikify_link_help.txt
-git commit -m "feat(wikify): link command writes the agent-map pointer block
-
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
-```
-
----
-### Task 4: Protocol, init hint and README
-
-**Files:**
-- Modify: `agents/kits/wikify/templates/wikify/WIKIFY.md`, `agents/wikify/init_cmd.py`, `README.md`
-- Test: `tests/test_wikify_init.py`, `tests/test_wikify_cli.py` (template phrase pins)
-
-**Interfaces:** consumes `vibe wikify link` (Task 3), the map grammar (Task 1).
-
-- [ ] **Step 1: Write failing tests**
-  - `init` output ends with a line containing `vibe wikify link`; a fresh init still verifies rc 0 and scans clean (R2): the new WIKIFY.md text must contain no email, home path or key-like assignment.
-  - A test pins these phrases in WIKIFY.md: `<!-- wikify:map -->`, `em dash`, `60 entries`, `vibe wikify link`, `never edit AGENTS.md`, `plain links`.
-- [ ] **Step 2: Run to verify failure.**
-- [ ] **Step 3: Implement.**
-  - WIKIFY.md: add a "Map" section (<= 25 lines) covering: the map block lives in `docs/wiki/index.md`; entry grammar with an em dash; one line per page, hint says WHEN to load the page; every page must appear; caps (60 entries / 6 KiB); plain links only, never `@` imports (Claude Code expands them at launch); the agent adds entries after creating pages and `plan` lists `map_missing`; the agent never edits `AGENTS.md`/`CLAUDE.md`/`GEMINI.md` — only the user runs `vibe wikify link`, and those files are committed separately before `mark`. Keep the whole file <= ~140 lines.
-  - `init_cmd.cmd_init`: after the file loop print `next: run vibe wikify link to add the agent-map pointer to AGENTS.md`.
-  - README: add to the wikify section: the map format, `vibe wikify link [--dry-run]`, the commit-separately rule, the verified tool facts with dates and sources (Claude Code `@` imports eager, 200-line target, AGENTS.md read only when no CLAUDE.md; Codex 32 KiB chain; Cursor nested AGENTS.md; agents.md nearest wins) marked "as of 2026-10-11", and limitations: the pointer is static, the cap numbers are v1 defaults, no per-directory maps, and `link` is explicit (init does not call it).
-- [ ] **Step 4: Run to verify pass** — focused modules, then the full suite.
-- [ ] **Step 5: Commit**
-
-```bash
-git add agents/kits/wikify/templates/wikify/WIKIFY.md agents/wikify/init_cmd.py README.md tests/test_wikify_init.py tests/test_wikify_cli.py
-git commit -m "docs(wikify): agent-map protocol, init hint and README
-
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
-```
-
----
-### Task 5: End-to-end smoke and spec note (no code unless a defect is found)
-
-- [ ] **Step 1:** In a scratch git repo under `$CLAUDE_JOB_DIR/tmp`: `vibe wikify init` -> write one cited page `domain/pay.md` and an `index.md` with a map block listing it -> `vibe wikify verify` (rc 0) -> remove the entry (rc 1, `not reachable`) -> restore -> `vibe wikify link --dry-run` (diff printed, nothing written) -> `vibe wikify link` -> commit `AGENTS.md` alone -> `vibe wikify mark` -> docs-only commit -> hook script allows (rc 0); `AGENTS.md` change after mark does not break freshness of the wiki commit ordering (record observed behaviour). Never touch the real home or the real `~/.claude`.
-- [ ] **Step 2:** Append a short "As built" note to `docs/superpowers/specs/2026-10-11-wikify-agent-map-design.md` (backups go to `.git/wikify-backups/`, `link` refusals list, `MAP:`/`POINTER ...` notice texts). Commit `docs(wikify): record agent-map as-built notes`.
+### Task 5: docs and end-to-end smoke
+**Files:** Modify `README.md` (wikify section), `docs/superpowers/specs/2026-10-11-wikify-agent-map-design.md` (only if a ruling above changed behaviour: R1 backup location, R2 symlink handling, R3 init block); smoke in a scratch dir under `$CLAUDE_JOB_DIR/tmp`.
+- [ ] README: document the map block grammar and caps, `vibe wikify link [--dry-run]`, the commit-separately rule, `CLAUDE.md` precedence (Claude Code reads `AGENTS.md` only when no `CLAUDE.md` exists), plain links not `@` (eager import), the notice-only pointer checks; no claims beyond the implementation. Re-verify the cited tool-behaviour facts against the primary docs the spec lists before writing them; date the claim.
+- [ ] Spec: amend R1/R2/R3 where they differ from the written spec (backup under the git dir; symlink-to-target skip; init writes an empty block).
+- [ ] Smoke: scratch repo `git init`, commit `src/a.py`; `vibe wikify init`; write `docs/wiki/architecture/overview.md` with one citation; add the map entry; `verify` rc 0; remove the entry -> orphan error; `link --dry-run` (no write) then `link`; existing-`AGENTS.md` variant keeps user text; `verify` shows no STALE/none notice; commit pointer files, then `mark`, docs commit; `plan` shows empty `map_missing`; paste output into the report. Full suite once more.
+- [ ] Commit `docs(wikify): document the agent map and link command`.
 
 ## Verification summary
-`FORCE_COLOR= NO_COLOR=1 PYTHON_COLORS=0 python3 -m unittest discover -s tests` (baseline 806 + new, all OK); scratch-repo smoke above; `git status` shows no `backups/` directory in the working tree after `link`.
+`FORCE_COLOR= NO_COLOR=1 PYTHON_COLORS=0 python3 -m unittest discover -s tests` (806 baseline + new, all OK); `tests.test_cli_contract` with regenerated `wikify_help.txt`/`wikify_link_help.txt`; Task 5 smoke transcript; confirm `git diff` touches no hook/state files (`agents/kits/wikify/templates/.../wikify_guard.py`, `agents/wikify/state.py`) so freshness parity is untouched. Open verification gaps to state at the end: tool-loading behaviour is documented, not observed live; 60/6144 caps are unmeasured defaults.
 
 ## Self-review (spec coverage)
-Map grammar, caps, reachability, opt-in, human-block rule: Tasks 1-2. `plan` map_missing: Task 2. Pointer block, link command, refusals, backup, byte-preservation, no CLAUDE/GEMINI creation: Task 3. `verify` pointer notices (notice-only): Task 3. Freshness/hook untouched: no task edits `state.py` or the hook; Task 3 prints the commit-separately instruction; Task 5 observes it. WIKIFY.md/README/init hint and dated facts: Task 4. Out of scope (B migration, nested AGENTS.md, rewriting user files): not implemented. Known deviation from the spec text: backups go to `.git/wikify-backups/` rather than `installer_core.backup` (which would create `backups/` inside the repo); recorded in Task 5.
+Map grammar/caps/reachability/dup/size/human-block: T1+T2; `plan` map_missing: T3; pointer template, `link`, targets, refusals, marked-section merge, diff/dry-run/backup, commit-separately: T4; verify pointer notices: T4; init hint (spec: init only hints) -> R3 refines: init writes an empty map block and prints a one-line hint to run `link` (add that print to `cmd_init` in Task 2 with a test); no freshness/hook change: verified in verification summary; safety (static text, grammar bans `@`/scheme): T1+T4; B out of scope: not in plan.
