@@ -396,6 +396,56 @@ class HardeningTests(LinkCase):
                 self.assertIn("nothing written", out)
                 self.assertEqual(self.read("AGENTS.md"), text.encode())
 
+    def test_backtick_info_string_with_backtick_is_not_a_fence(self):
+        user = "```inline` code\n"
+        self.write("AGENTS.md", user + pointer.BEGIN + "old\n" + pointer.END + "tail\n")
+        rc, out = link(self.root)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.read("AGENTS.md"), (user + BLOCK + "tail\n").encode())
+
+    def test_tilde_info_string_with_backtick_is_still_a_fence(self):
+        text = "~~~ a`b\n" + BLOCK + "~~~\n"
+        self.write("AGENTS.md", text)
+        rc, out = link(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("code fence", out)
+        self.assertEqual(self.read("AGENTS.md"), text.encode())
+
+    def test_end_marker_at_eof_without_newline(self):
+        user = "above\n"
+        self.write("AGENTS.md", user + pointer.BEGIN + "old\n" + pointer.END.rstrip("\n"))
+        rc, out = link(self.root)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("update AGENTS.md", out)
+        self.assertEqual(self.read("AGENTS.md"), (user + BLOCK).encode())
+        self.assertIn("unchanged AGENTS.md", link(self.root)[1])
+
+    def test_current_block_at_eof_without_newline_not_stale(self):
+        self.write("AGENTS.md", "x\n" + BLOCK.rstrip("\n"))
+        self.assertEqual(pointer.pointer_notices(self.root), [])
+
+    def test_unbalanced_refusal_names_cause(self):
+        B, E = pointer.BEGIN, pointer.END
+        cases = {
+            "END marker missing": B + "x\n",
+            "BEGIN marker missing": "x\n" + E,
+            "more than one block": BLOCK + "mid\n" + BLOCK,
+            "END before BEGIN": E + "mid\n" + B,
+            "bare BEGIN at eof": "x\n" + B.rstrip("\n"),
+        }
+        for cause, text in cases.items():
+            with self.subTest(cause):
+                self.write("AGENTS.md", text)
+                rc, out = link(self.root)
+                self.assertEqual(rc, 1)
+                want = "END marker missing" if cause == "bare BEGIN at eof" else cause
+                self.assertIn(
+                    f"refused: AGENTS.md has unbalanced or repeated wikify:pointer markers "
+                    f"({want}); fix by hand",
+                    out,
+                )
+                self.assertEqual(self.read("AGENTS.md"), text.encode())
+
     def test_markers_not_at_column_zero_are_text(self):
         cases = {
             "indented example": "    " + pointer.BEGIN + "    x\n    " + pointer.END,

@@ -53,7 +53,6 @@ def _safe(line: str) -> str:
 
 _FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 _FENCED = "has a wikify:pointer marker inside a code fence; move or remove the example"
-_AMBIGUOUS = "has unbalanced or repeated wikify:pointer markers; fix by hand"
 
 
 def _lines(text: str) -> list[str]:
@@ -62,30 +61,57 @@ def _lines(text: str) -> list[str]:
     return [p + "\n" for p in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
 
 
-def _markers(lines: list[str]) -> tuple[list[int], list[int], bool]:
-    """(BEGIN line indexes, END line indexes, any marker inside a code fence).
+def _scan(lines: list[str]):
+    """Yield (index, line, inside a fence) for every line that is not a fence line.
 
-    A marker is a whole line at column 0. A fence opens on 3+ backticks or
-    tildes (up to 3 spaces indent) and closes only on a run of the same char,
-    at least as long, with nothing after it.
+    A fence opens on 3+ backticks or tildes (up to 3 spaces indent; a backtick
+    opener's info string may not contain a backtick, per CommonMark) and closes
+    only on a run of the same char, at least as long, with nothing after it.
     """
-    begins: list[int] = []
-    ends: list[int] = []
-    fenced = False
     fence: tuple[str, int] | None = None
     for i, line in enumerate(lines):
         m = _FENCE.fullmatch(line.rstrip("\r\n"))
+        if m and m.group(1)[0] == "`" and "`" in m.group(2):
+            m = None
         if fence is None and m:
             fence = (m.group(1)[0], len(m.group(1)))
             continue
         if fence and m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1] and not m.group(2).strip():
             fence = None
             continue
-        kind = line.replace("\r\n", "\n")
+        yield i, line, fence is not None
+
+
+def _markers(lines: list[str]) -> tuple[list[int], list[int], bool]:
+    """(BEGIN line indexes, END line indexes, any marker inside a code fence).
+
+    A marker is a whole line at column 0, with or without a line ending (the
+    last line of a file may have none).
+    """
+    begins: list[int] = []
+    ends: list[int] = []
+    fenced = False
+    for i, line, inside in _scan(lines):
+        kind = line.rstrip("\r\n") + "\n"
         if kind in (BEGIN, END):
             (begins if kind == BEGIN else ends).append(i)
-            fenced = fenced or fence is not None
+            fenced = fenced or inside
     return begins, ends, fenced
+
+
+def _unbalanced(begins: list[int], ends: list[int]) -> str | None:
+    """Why the markers do not form exactly one block, or None when they do."""
+    if len(begins) > 1 or len(ends) > 1:
+        cause = "more than one block"
+    elif not ends:
+        cause = "END marker missing"
+    elif not begins:
+        cause = "BEGIN marker missing"
+    elif begins[0] > ends[0]:
+        cause = "END before BEGIN"
+    else:
+        return None
+    return f"has unbalanced or repeated wikify:pointer markers ({cause}); fix by hand"
 
 
 def _merge(existing: str) -> tuple[str, str] | str:
@@ -99,9 +125,10 @@ def _merge(existing: str) -> tuple[str, str] | str:
     if not begins and not ends:  # prepend; a CRLF file gets a CRLF block
         eol = "\r\n" if "\r\n" in body else "\n"
         return bom + (BEGIN + TEMPLATE + END).replace("\n", eol) + body, "merge"
-    if len(begins) != 1 or len(ends) != 1 or begins[0] > ends[0]:
-        return _AMBIGUOUS
-    b, e = begins[0], ends[0]
+    reason = _unbalanced(begins, ends)
+    if reason:
+        return reason
+    b, e = begins[0], ends[0]  # an END on the last line without "\n" gets one
     eol = "\r\n" if lines[b].endswith("\r\n") else "\n"
     block = (BEGIN + TEMPLATE + END).replace("\n", eol)
     merged = bom + "".join(lines[:b]) + block + "".join(lines[e + 1 :])
@@ -299,7 +326,7 @@ def pointer_notices(root: Path) -> list[str]:
             lacking.append(rel)
             continue
         seen = True
-        if fenced or len(begins) != 1 or len(ends) != 1 or begins[0] > ends[0]:
+        if fenced or _unbalanced(begins, ends):
             notices.append(f"NOTICE: {rel} has unusable wikify:pointer markers; run vibe wikify link")
             continue
         blocks.append(rel)
