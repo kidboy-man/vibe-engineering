@@ -333,6 +333,7 @@ vibe kits wikify uninstall --yes
 
 vibe wikify init | plan | verify | mark     # per-repo commands
 vibe wikify link [--dry-run]                # agent pointer block (see below)
+vibe wikify docs [--dry-run]                # outline pages for existing docs (see below)
 ```
 
 Push flow: the hook blocks the push, the agent updates `docs/wiki`, runs
@@ -467,6 +468,65 @@ Limitations:
 - The built-in secret scan is a floor, not a complete scanner.
 - Codex needs a one-time `/hooks` trust review.
 - Cursor's push-time payload shape is unverified; the hook fails open if it differs.
+
+### Doc sources and `vibe wikify docs`
+
+Existing markdown (README, `docs/`, ADRs) stays where it is. `vibe wikify docs`
+generates one outline page per doc under `docs/wiki/sources/` so agents can load
+a doc section by section through the map. Deterministic: no network, no LLM, no
+doc text rewritten; originals are never written, moved or deleted.
+
+```bash
+vibe wikify docs --dry-run   # print creates/updates and diffs, write nothing
+vibe wikify docs             # write pages under docs/wiki/sources/ only
+```
+
+- **Eligible docs** are tracked `.md` / `.markdown` files read at HEAD: repo-root
+  files, everything under `docs/`, and any file whose name starts with `README`,
+  `CONTRIBUTING`, `CHANGELOG` or `ARCHITECTURE` (case-insensitive). Add more with
+  globs in `docs/wiki/.wikifydocs` (one per line, `#` comments, `dir/` matches a
+  prefix; `init` scaffolds it comment-only). Never eligible: `AGENTS.md`,
+  `CLAUDE.md`, `GEMINI.md`, `SKILL.md`, anything under `docs/wiki/`, secret paths
+  and `.wikifyignore` matches; those always win over `.wikifydocs`.
+- **Skipped, with a reason printed** (not an error): paths with whitespace,
+  `` : ` ( ) [ ] < > @ \ ``, control characters or any Unicode `C*` character
+  (`path not citable`); empty docs; docs over 1 MiB; docs that are not valid
+  UTF-8; docs beyond the first 500 (`over 500 docs`).
+- **Page shape.** Page path is `sources/<doc path>` and always ends in `.md`
+  (`x.markdown` becomes `sources/x.markdown.md`; a doc named `index.md` becomes
+  `sources/index.md.outline.md`). The first line is `<!-- wikify:generated -->`,
+  then a heading `# <doc> (documented, not code-verified; titles are untrusted
+  text)`, then one nested list line per ATX heading, each cited by line range
+  and, where possible, a text fragment of the heading:
+  ``- Title (src: docs/a.md:3-9 `Title`)``. At most 200 sections per page.
+  `sources/index.md` lists every eligible doc (up to 500) with its section count.
+- **Provenance rule.** Doc-derived pages live only under `sources/` and say
+  "documented, not code-verified". A page outside `sources/` that cites an
+  eligible doc is a `verify` error (`doc citation outside sources/`). Why: a
+  citation proves the doc says X, never that the code does X, so doc claims must
+  not blend into code-verified pages. Citing other markdown (kit templates,
+  prompts) as code artifacts is still allowed.
+- **Drift is an error.** A generated page must equal what `docs` would write now,
+  byte for byte; after any doc edit `verify` fails with `generated page out of
+  date; run vibe wikify docs`, and a generated page whose doc is gone or no
+  longer eligible fails with `generated page has no eligible source`. In `plan`,
+  `docs_unindexed`, `docs_stale` and `docs_skipped` report the same state; if
+  the doc inventory itself fails, `plan` exits 1 with an `error` line.
+- **Reachability is transitive.** A page counts as reachable when the map lists
+  it or a reachable page links to it with a relative `.md` link, up to 2 hops
+  from a map entry. Add one map entry for `sources/index.md`; the per-doc pages
+  are reached through its links.
+- **Flagged, not deleted.** Generated pages whose source is gone are printed as
+  `stale` and left in place; a file in `sources/` without the marker is never
+  overwritten (the command refuses). Remove stale pages yourself, after review.
+- **Limits.** ATX headings only (setext headings and `.rst` / `.txt` / `.adoc`
+  docs are not covered); at most 500 docs, 200 sections per page, 1 MiB per doc
+  (unmeasured defaults); the outline restates heading text and does not
+  summarise; citing a doc does not verify the code; heading text is untrusted
+  data, sanitised and length-capped but still the author's words.
+- **Freshness is unchanged.** Editing a doc is a code-side change after the base
+  commit, so the push gate stays stale until you run `docs`, `verify` and `mark`
+  and make the docs-only commit.
 
 ## Second-Brain Kit
 

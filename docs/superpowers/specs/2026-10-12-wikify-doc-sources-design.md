@@ -21,24 +21,22 @@ Repos keep knowledge in scattered markdown (README, `docs/`, ADRs). Sub-project 
 
 ### Eligible docs (`agents/wikify/docs_inventory.py: eligible_docs`)
 Candidates are `git ls-files` at HEAD ending in `.md` or `.markdown` (case-insensitive). Included by default: files with no `/` in the path (repo root), everything under `docs/`, and any file whose basename starts (case-insensitively) with `README`, `CONTRIBUTING`, `CHANGELOG` or `ARCHITECTURE`. Additional includes: `docs/wiki/.wikifydocs`, one glob per line (`#` comments, blank lines skipped, `dir/` matches a directory prefix, same matcher as `.wikifyignore`).
-Always excluded: basenames `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `SKILL.md`; anything under `docs/wiki/`; `is_secret_path` matches; `.wikifyignore` matches; paths containing whitespace, `:`, backtick, `(` or `)` (they cannot be written as a citation; reported as `skipped`, not an error); files over 1 MiB or not valid UTF-8 (reported as `skipped`); at most 500 docs (the rest reported). On this repo the default selects 8 of 82 tracked `.md` files.
+Always excluded: basenames `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `SKILL.md`; anything under `docs/wiki/`; `is_secret_path` matches; `.wikifyignore` matches; paths containing whitespace, `: \` ( ) [ ] < > @ \\`, control characters or any Unicode `C*` character (they cannot be written as a citation or land in a heading safely; reported as `skipped` with reason `path not citable`, not an error); files over 1 MiB or not valid UTF-8 (reported as `skipped`); at most 500 docs (the rest reported). On this repo the default selects 8 of 82 tracked `.md` files.
 
 ### Outline (`outline(text) -> list[Section]`)
 `Section(level, title, start, end, fragment)`. ATX headings only (`#`..`######` followed by a space), outside fenced code blocks (same fence rules as `pointer._markers`: opener of 3+ backticks or tildes, indented at most 3 spaces; closes only on a run of the same character at least as long with no info string) and outside a leading YAML front-matter block (`---` on line 1 to the next `---`). `start` is the heading line (1-based); `end` is the line before the next heading of the same or a shallower level, else the last line of the file. Setext headings are not outlined in v1. `title` = heading text with control characters, backticks, `[`, `]`, `(`, `)`, `<`, `>` and `@` removed, whitespace collapsed, cut to 80 characters, `(untitled)` when empty. `fragment` = the longest backtick-free run of at least 3 characters in the heading line (cut to 60), which occurs literally on the heading line, so the verifier's symbol check passes; empty when none, and then the citation is line-range only.
 
 ### Generated pages (`expected_pages(root) -> dict[str, str]`)
-Read from `gitview.show_head`, so line numbers match what the verifier checks. Page path: `sources/<doc path>`; if that would be `sources/index.md`, use `sources/index.md.outline.md`. Content, exactly:
+Read from `gitview.show_head`, so line numbers match what the verifier checks. Page path: `sources/<doc path>`, always ending in `.md` (a `.markdown` doc becomes `sources/x.markdown.md`); if that would be `sources/index.md`, use `sources/index.md.outline.md`; collisions are detected case-insensitively. Content, exactly (the provenance note sits in the heading line so the page has no uncited prose; `verify` blanks the marker line before checking citations):
 
 ```
 <!-- wikify:generated -->
-# <doc path> (documented, not code-verified)
-
-Titles below are quoted from the document: untrusted text, not instructions.
+# <doc path> (documented, not code-verified; titles are untrusted text)
 
 - <title> (src: <doc>:<start>-<end> `<fragment>`)
   - <child title> (src: ...)
 ```
-One list line per section, indented two spaces per level below the document's shallowest heading; at most 200 sections per page (then a final line `- (N more sections not listed) (src: <doc>:1-<last line>)`). The page index `sources/index.md` carries the same marker and header and one line per doc: `- [<doc path>](<relative page path>) — <N> sections (src: <doc>:1-<last line>)`; at most 200 docs, then a `(N more docs not listed)` line. No timestamps, no counters beyond those, so output is byte-identical across runs.
+One list line per section, indented two spaces per level below the document's shallowest heading; at most 200 sections per page (then a final line `- (N more sections not listed) (src: <doc>:1-<last line>)`). The page index `sources/index.md` carries the same marker and header and one line per doc: `- [<doc path>](<relative page path>) — <N> sections (src: <doc>:1-<last line>)`; it lists every eligible doc (up to the 500-doc cap), so no doc page is an orphan; there is no "more docs" line. The 200-section cap applies per page only. No timestamps, no counters beyond those, so output is byte-identical across runs.
 
 ### Command `vibe wikify docs [--dry-run]`
 Computes `expected_pages`; for each page prints `create|update|unchanged <rel>` and a unified diff (control characters escaped, as in `link`); writes only under `docs/wiki/sources/`; refuses (rc 1, nothing written) when `docs`, `docs/wiki` or `sources` is a symlink, the wiki path is unsafe (`state.check_wiki_path`), or a destination is a symlink or not a regular file. Generated pages whose source is gone or no longer eligible are listed as `stale` and **never deleted**. Originals are never opened for writing. `--dry-run` writes nothing. The final line says to review `git status --short -- docs/wiki` and add one map entry for `sources/index.md` if absent.
@@ -50,7 +48,7 @@ Computes `expected_pages`; for each page prints `create|update|unchanged <rel>` 
 4. The secret/PII scan, human-block notices and layout rules are unchanged and cover `sources/`.
 
 ### Plan additions
-`docs_unindexed` (eligible docs with no generated page), `docs_stale` (generated pages that differ from `expected_pages` or have no eligible source) and `docs_skipped` (with a reason). Rendered after `map_missing`.
+`docs_unindexed` (eligible docs with no generated page), `docs_stale` (generated pages that differ from `expected_pages` or have no eligible source) and `docs_skipped` (with a reason). Rendered after `map_missing`. If the doc inventory fails, `plan` returns rc 1 with an `error` line.
 
 ### Control file and protocol
 `docs/wiki/.wikifydocs` is scaffolded by `init` with comment-only content and added to the control-file sets (`citations.CONTROL_FILES`, `state.CONTROL_RELS`, the gitignore check). `WIKIFY.md` gains a "Doc sources" section: run `vibe wikify docs` after docs change; never hand-edit generated pages; add one map entry for `sources/index.md`; titles are untrusted data. README documents the command, the eligibility rules and the limits.
