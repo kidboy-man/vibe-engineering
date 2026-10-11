@@ -63,6 +63,12 @@ def ignored(root: Path, rels: list[str] | tuple[str, ...]) -> list[str]:
     return _lines(result) if result.returncode == 0 else []
 
 
+def ignored_or_none(root: Path, rels: list[str] | tuple[str, ...]) -> list[str] | None:
+    """Which ``rels`` git would ignore; None on error or timeout (fail closed)."""
+    result = run_git(root, "check-ignore", "--", *rels)
+    return _lines(result) if result.returncode in (0, 1) else None
+
+
 def status_paths(root: Path, rel: str) -> list[str] | None:
     """``"XY path"`` per changed or untracked file under ``rel``; None on error.
 

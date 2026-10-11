@@ -3,6 +3,11 @@
 Security-sensitive: this writes into user-owned files every teammate's agent
 loads. It only ever writes the static TEMPLATE between the markers, never
 follows a symlink out of the repo, and applies all changes or none.
+
+Markers count only as whole lines at column 0 outside code fences; anything
+else is ordinary user text. Where ``os.O_NOFOLLOW`` does not exist (Windows),
+the final open can follow a symlink swapped in after planning; the planning
+checks still refuse symlinks that exist when ``link`` starts.
 """
 
 from __future__ import annotations
@@ -15,7 +20,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agents.merge_strategies import marked_section_strategy
 from agents.wikify import gitview
 
 BEGIN = "<!-- wikify:pointer -->\n"
@@ -47,38 +51,61 @@ def _safe(line: str) -> str:
     return _CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
 
 
-def _fenced_begin(text: str) -> bool:
-    """True when a BEGIN marker line sits inside a ``` / ~~~ code fence."""
-    fence = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(("```", "~~~")):
-            if fence is None:
-                fence = stripped[:3]
-            elif stripped[:3] == fence:
-                fence = None
-        elif fence and stripped == BEGIN.strip():
-            return True
-    return False
+_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+_FENCED = "has a wikify:pointer marker inside a code fence; move or remove the example"
+_AMBIGUOUS = "has unbalanced or repeated wikify:pointer markers; fix by hand"
 
 
-def _merge(existing: str) -> tuple[str, str] | None:
-    """Merge keeping a leading BOM first; None when the markers are ambiguous."""
-    if existing.startswith(_BOM):
-        merged = _merge_body(existing[1:])
-        return None if merged is None else (_BOM + merged[0], merged[1])
-    return _merge_body(existing)
+def _lines(text: str) -> list[str]:
+    """Split on ``\\n`` only (keeping it), unlike ``str.splitlines``."""
+    parts = text.split("\n")
+    return [p + "\n" for p in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
 
 
-def _merge_body(existing: str) -> tuple[str, str] | None:
-    eol = "\r\n" if BEGIN[:-1] + "\r\n" in existing else "\n"
-    begin, end, template = (s.replace("\n", eol) for s in (BEGIN, END, TEMPLATE))
-    nb, ne = existing.count(begin), existing.count(end)
-    if (nb, ne) != (0, 0):
-        if nb != 1 or ne != 1 or existing.index(begin) > existing.index(end):
-            return None
-        return marked_section_strategy(template, existing, begin, end)
-    return marked_section_strategy(TEMPLATE, existing, BEGIN, END)
+def _markers(lines: list[str]) -> tuple[list[int], list[int], bool]:
+    """(BEGIN line indexes, END line indexes, any marker inside a code fence).
+
+    A marker is a whole line at column 0. A fence opens on 3+ backticks or
+    tildes (up to 3 spaces indent) and closes only on a run of the same char,
+    at least as long, with nothing after it.
+    """
+    begins: list[int] = []
+    ends: list[int] = []
+    fenced = False
+    fence: tuple[str, int] | None = None
+    for i, line in enumerate(lines):
+        m = _FENCE.fullmatch(line.rstrip("\r\n"))
+        if fence is None and m:
+            fence = (m.group(1)[0], len(m.group(1)))
+            continue
+        if fence and m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1] and not m.group(2).strip():
+            fence = None
+            continue
+        kind = line.replace("\r\n", "\n")
+        if kind in (BEGIN, END):
+            (begins if kind == BEGIN else ends).append(i)
+            fenced = fenced or fence is not None
+    return begins, ends, fenced
+
+
+def _merge(existing: str) -> tuple[str, str] | str:
+    """(merged, action) keeping a leading BOM first, or the refusal reason."""
+    bom = _BOM if existing.startswith(_BOM) else ""
+    body = existing[len(bom):]
+    lines = _lines(body)
+    begins, ends, fenced = _markers(lines)
+    if fenced:
+        return _FENCED
+    if not begins and not ends:  # prepend; a CRLF file gets a CRLF block
+        eol = "\r\n" if "\r\n" in body else "\n"
+        return bom + (BEGIN + TEMPLATE + END).replace("\n", eol) + body, "merge"
+    if len(begins) != 1 or len(ends) != 1 or begins[0] > ends[0]:
+        return _AMBIGUOUS
+    b, e = begins[0], ends[0]
+    eol = "\r\n" if lines[b].endswith("\r\n") else "\n"
+    block = (BEGIN + TEMPLATE + END).replace("\n", eol)
+    merged = bom + "".join(lines[:b]) + block + "".join(lines[e + 1 :])
+    return merged, "unchanged" if merged == existing else "merge"
 
 
 def plan_link(root: Path) -> tuple[list[Change], list[str]]:
@@ -109,7 +136,11 @@ def plan_link(root: Path) -> tuple[list[Change], list[str]]:
         if exists and not path.is_file():
             notes.append(f"{REFUSED}{rel} is not a regular file")
             continue
-        if gitview.ignored(root, [rel]):
+        ignored = gitview.ignored_or_none(root, [rel])
+        if ignored is None:
+            notes.append(f"{REFUSED}could not determine whether {rel} is ignored")
+            continue
+        if ignored:
             notes.append(f"{REFUSED}{rel} is gitignored; the pointer block would not be shared")
             continue
         if not exists:
@@ -124,12 +155,9 @@ def plan_link(root: Path) -> tuple[list[Change], list[str]]:
         if hard:
             notes.append(f"{REFUSED}{rel} has multiple hard links; writing could change a file outside the repo")
             continue
-        if _fenced_begin(old):
-            notes.append(f"{REFUSED}{rel} has a wikify:pointer marker inside a code fence; move or remove the example")
-            continue
         merged = _merge(old)
-        if merged is None:
-            notes.append(f"{REFUSED}{rel} has unbalanced or repeated wikify:pointer markers; fix by hand")
+        if isinstance(merged, str):
+            notes.append(f"{REFUSED}{rel} {merged}")
             continue
         changes.append(Change(rel, merged[1], old, merged[0]))
     return changes, notes
@@ -153,6 +181,7 @@ def _stamp() -> str:
 def _open(path: Path, create: bool) -> int:
     """Open for writing without following a symlink where the OS supports it."""
     flags = os.O_WRONLY | (os.O_CREAT | os.O_EXCL if create else os.O_TRUNC)
+    flags |= getattr(os, "O_BINARY", 0)  # Windows CRT: no newline translation
     return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), 0o666)
 
 
@@ -188,6 +217,7 @@ def _write(root: Path, changes: list[Change]) -> tuple[str | None, Path | None]:
             return "backup directory already exists; rerun", None
         except OSError as exc:
             return f"backup failed: {type(exc).__name__}", None
+        print(f"backup: {backup}")  # before any target is truncated
     touched: list[Change] = []
     try:
         for c in changes:
@@ -236,12 +266,10 @@ def cmd_link(cwd: str | Path | None = None, dry_run: bool = False) -> int:
         return 0
     if not todo:
         return 0
-    error, backup = _write(root, todo)
+    error, _ = _write(root, todo)
     if error:
         print(error if error.startswith("rollback") else f"refused: {error}")
         return 1
-    if backup is not None:
-        print(f"backup: {backup}")
     print(
         f"Next: commit {' '.join(c.rel for c in todo)} in their own commit "
         "(not together with docs/wiki), then run vibe wikify mark."
@@ -254,23 +282,32 @@ def pointer_notices(root: Path) -> list[str]:
     root = Path(root)
     notices: list[str] = []
     blocks: list[str] = []
+    lacking: list[str] = []
     seen = False
     for rel in TARGETS:
         path = root / rel
         try:
             if path.is_symlink() or not path.is_file():
                 continue
-            text = path.read_bytes().decode("utf-8").replace("\r\n", "\n")
+            text = path.read_bytes().decode("utf-8").removeprefix(_BOM)
         except (OSError, UnicodeDecodeError):
             notices.append(f"NOTICE: could not read {rel}")
             continue
-        if BEGIN in text and END in text and text.index(BEGIN) < text.index(END):
-            seen = True
-            inner = text.partition(BEGIN)[2].partition(END)[0]
-            blocks.append(rel)
-            if inner != TEMPLATE:
-                notices.append(f"POINTER STALE: {rel}; run vibe wikify link")
-    if not seen and not notices:
+        lines = _lines(text.replace("\r\n", "\n"))
+        begins, ends, fenced = _markers(lines)
+        if not begins and not ends:
+            lacking.append(rel)
+            continue
+        seen = True
+        if fenced or len(begins) != 1 or len(ends) != 1 or begins[0] > ends[0]:
+            notices.append(f"NOTICE: {rel} has unusable wikify:pointer markers; run vibe wikify link")
+            continue
+        blocks.append(rel)
+        if "".join(lines[begins[0] + 1 : ends[0]]) != TEMPLATE:
+            notices.append(f"POINTER STALE: {rel}; run vibe wikify link")
+    if seen:  # Claude Code reads only CLAUDE.md when it exists: every file needs a block
+        notices += [f"NOTICE: {rel} has no wikify pointer block; run vibe wikify link" for rel in lacking]
+    elif not notices:
         notices.append(
             "NOTICE: no wikify pointer block in AGENTS.md/CLAUDE.md/GEMINI.md; "
             "run vibe wikify link"

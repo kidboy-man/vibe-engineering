@@ -363,6 +363,111 @@ class HardeningTests(LinkCase):
         self.write("AGENTS.md", "```\ncode\n```\n" + BLOCK)
         self.assertEqual(link(self.root)[0], 0)
 
+    def test_fence_probes_refuse(self):
+        B, E = pointer.BEGIN, pointer.END
+        cases = {
+            "end only inside fence": B + "x\n```\n" + E + "```\n",
+            "begin only inside fence": "~~~\n" + B + "~~~\nx\n" + E,
+            "4-backtick fence holding ```": "````\n```\n" + B + "x\n" + E + "```\n````\n",
+            "bom before fence": "﻿```\n" + B + "x\n" + E + "```\n",
+            "closing line with info string": "```\n```py\n" + B + "x\n" + E + "```\n",
+            "shorter run does not close": "~~~~\n~~~\n" + B + E + "~~~~\n",
+            "other char does not close": "```\n~~~\n" + B + E + "```\n",
+            "indented fence": "   ```\n" + B + E + "   ```\n",
+            "unclosed fence at eof": BLOCK + "```\n" + B,
+        }
+        for name, text in cases.items():
+            with self.subTest(name):
+                self.write("AGENTS.md", text)
+                rc, out = link(self.root)
+                self.assertEqual(rc, 1)
+                self.assertIn("refused: AGENTS.md has a wikify:pointer marker inside a code fence", out)
+                self.assertIn("nothing written", out)
+                self.assertEqual(self.read("AGENTS.md"), text.encode())
+
+    def test_markers_not_at_column_zero_are_text(self):
+        cases = {
+            "indented example": "    " + pointer.BEGIN + "    x\n    " + pointer.END,
+            "mid-line": "see " + pointer.BEGIN + "and " + pointer.END,
+        }
+        for name, user in cases.items():
+            with self.subTest(name):
+                self.write("AGENTS.md", user)
+                self.assertEqual(link(self.root)[0], 0)
+                self.assertEqual(self.read("AGENTS.md"), (BLOCK + user).encode())
+
+    def test_fences_closed_before_block_ok(self):
+        for fence in ("```\ncode\n`````\n", "~~~ py\ncode\n~~~\n", "````\n```\n````\n"):
+            with self.subTest(fence):
+                self.write("AGENTS.md", fence + pointer.BEGIN + "old\n" + pointer.END + "tail\n")
+                self.assertEqual(link(self.root)[0], 0)
+                self.assertEqual(self.read("AGENTS.md"), (fence + BLOCK + "tail\n").encode())
+
+    def test_block_then_fenced_code_ok(self):
+        self.write("AGENTS.md", BLOCK + "```\ncode\n```\n")
+        rc, out = link(self.root)
+        self.assertEqual(rc, 0)
+        self.assertIn("unchanged AGENTS.md", out)
+
+    def test_crlf_without_markers_gets_crlf_block(self):
+        user = "# Mine\r\nline\r\n"
+        self.write("AGENTS.md", user)
+        self.assertEqual(link(self.root)[0], 0)
+        self.assertEqual(self.read("AGENTS.md"), (BLOCK.replace("\n", "\r\n") + user).encode())
+        rc, out = link(self.root)
+        self.assertEqual(rc, 0)
+        self.assertIn("unchanged AGENTS.md", out)
+        self.assertEqual(pointer.pointer_notices(self.root), [])
+
+    def test_lf_or_no_newline_gets_lf_block(self):
+        for user in ("a\nb\n", "no newline"):
+            with self.subTest(user):
+                self.write("AGENTS.md", user)
+                self.assertEqual(link(self.root)[0], 0)
+                self.assertEqual(self.read("AGENTS.md"), (BLOCK + user).encode())
+
+    def test_ignore_check_error_refuses(self):
+        real = gitview.run_git
+
+        def run_git(root, *args):
+            if args[0] == "check-ignore":
+                return mock.Mock(returncode=128, stdout="", stderr="fatal")
+            return real(root, *args)
+
+        self.write("CLAUDE.md", "mine\n")
+        with mock.patch.object(gitview, "run_git", side_effect=run_git):
+            rc, out = link(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("refused: could not determine whether AGENTS.md is ignored", out)
+        self.assertFalse((self.root / "AGENTS.md").exists())
+        self.assertEqual(self.read("CLAUDE.md"), b"mine\n")
+
+    def test_ignored_or_none(self):
+        self.write(".gitignore", "AGENTS.md\n")
+        self.assertEqual(gitview.ignored_or_none(self.root, ["AGENTS.md"]), ["AGENTS.md"])
+        self.assertEqual(gitview.ignored_or_none(self.root, ["CLAUDE.md"]), [])
+        for rc in (128, 124):
+            fake = mock.Mock(returncode=rc, stdout="AGENTS.md\n")
+            with mock.patch.object(gitview, "run_git", return_value=fake):
+                self.assertIsNone(gitview.ignored_or_none(self.root, ["AGENTS.md"]))
+                self.assertEqual(gitview.ignored(self.root, ["AGENTS.md"]), [])
+
+    def test_backup_printed_before_failed_write(self):
+        out = self.outside()
+        self.write("CLAUDE.md", "mine\n")
+        with self.swap_to_symlink("CLAUDE.md", out):
+            rc, text = link(self.root)
+        self.assertEqual(rc, 1)
+        self.assertRegex(text, r"backup: .*wikify-backups.*\n(.*\n)*refused: write failed")
+        self.assertEqual(text.count("backup: "), 1)
+
+    def test_backup_printed_once_on_success(self):
+        self.write("AGENTS.md", "mine\n")
+        rc, text = link(self.root)
+        self.assertEqual(rc, 0)
+        self.assertEqual(text.count("backup: "), 1)
+        self.assertLess(text.index("backup: "), text.index("Next:"))
+
 
 class NoticeTests(LinkCase):
     def test_none_when_block_current(self):
@@ -375,6 +480,34 @@ class NoticeTests(LinkCase):
             pointer.pointer_notices(self.root),
             ["NOTICE: no wikify pointer block in AGENTS.md/CLAUDE.md/GEMINI.md; "
              "run vibe wikify link"],
+        )
+
+    def test_target_without_block_when_another_has_one(self):
+        link(self.root)
+        self.write("CLAUDE.md", "claude rules\n")
+        self.write("GEMINI.md", "gemini rules\n")
+        self.assertEqual(
+            pointer.pointer_notices(self.root),
+            [
+                "NOTICE: CLAUDE.md has no wikify pointer block; run vibe wikify link",
+                "NOTICE: GEMINI.md has no wikify pointer block; run vibe wikify link",
+            ],
+        )
+
+    def test_symlinked_target_covered_stays_silent(self):
+        link(self.root)
+        os.symlink("AGENTS.md", self.root / "CLAUDE.md")
+        self.assertEqual(pointer.pointer_notices(self.root), [])
+
+    def test_crlf_block_not_stale(self):
+        self.write("AGENTS.md", BLOCK.replace("\n", "\r\n") + "x\r\n")
+        self.assertEqual(pointer.pointer_notices(self.root), [])
+
+    def test_fenced_marker_only_is_not_a_block(self):
+        self.write("AGENTS.md", "```\n" + BLOCK + "```\n")
+        self.assertEqual(
+            pointer.pointer_notices(self.root),
+            ["NOTICE: AGENTS.md has unusable wikify:pointer markers; run vibe wikify link"],
         )
 
     def test_no_targets_at_all(self):
