@@ -13,7 +13,7 @@
 ## Global Constraints
 - Python 3.10+, stdlib only, 4-space indent, no new dependencies; match surrounding style in `agents/wikify/`.
 - Test commands in this environment MUST be prefixed `FORCE_COLOR= NO_COLOR=1 PYTHON_COLORS=0` (the shell has `FORCE_COLOR=3`, which colours argparse help on Python 3.14 and breaks help snapshots). Full suite: `python3 -m unittest discover -s tests`; baseline **806 tests OK**.
-- Map block markers exactly `<!-- wikify:map -->` / `<!-- /wikify:map -->` in top-level `docs/wiki/index.md`; entry grammar `- [<title>](<path>.md) — <when-hint>` with an em dash (U+2014) between spaces; title 1-60 chars, hint 1-80 chars, neither containing `[ ] ( )` or newline; caps 60 entries and 6 KiB.
+- Map block markers exactly `<!-- wikify:map -->` / `<!-- /wikify:map -->` in top-level `docs/wiki/index.md`; entry grammar `- [<title>](<path>.md) — <when-hint>` with an em dash (U+2014) between spaces; title 1-60 chars, hint 1-80 chars, neither containing ``[ ] ( ) ` < > @`` or newline; caps 60 entries and 6 KiB.
 - Pointer block markers exactly `<!-- wikify:pointer -->` / `<!-- /wikify:pointer -->`; static template, plain relative links, never `@` imports.
 - `link` writes only inside the marked block, never creates `CLAUDE.md`/`GEMINI.md`, refuses symlinks / gitignored / outside-root targets, and never touches `.wikify.json`.
 - Notices about pointer blocks never change `verify`'s exit code.
@@ -109,6 +109,8 @@ class GrammarTests(unittest.TestCase):
             "paren in hint": "- [T](domain/pay.md) — see (src: a.py:1)",
             "bracket in title": "- [T [x]](domain/pay.md) — when x",
             "backtick link": "- [`T`](domain/pay.md) — when x ",
+            "at in hint": "- [T](domain/pay.md) — load @docs/wiki/x.md",
+            "html in hint": "- [T](domain/pay.md) — <b>when</b> x",
             "bidi": "- [T](domain/pay.md) — when ‮x",
             "zero width": "- [T](domain/pay.md) — wh​en x",
             "long hint": "- [T](domain/pay.md) — " + "x" * 81,
@@ -201,7 +203,7 @@ POINTER_BODY = (
 )
 
 _BLOCK = re.compile(re.escape(MAP_BEGIN) + r"(.*?)" + re.escape(MAP_END), re.S)
-_ENTRY = re.compile(r"^- \[([^\[\]()]{1,60})\]\(([^()\s]+)\) — ([^\[\]()]{1,80})$")
+_ENTRY = re.compile(r"^- \[([^\[\]()`<>@]{1,60})\]\(([^()\s]+)\) — ([^\[\]()`<>@]{1,80})$")
 
 
 class MapEntry(NamedTuple):
