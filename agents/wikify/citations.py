@@ -72,16 +72,15 @@ def _strip_human(text: str) -> str:
 
 
 def _citations(clean: str) -> list[Citation]:
-    return [
-        Citation(
-            m.group(1),
-            int(m.group(2)),
-            int(m.group(3) or m.group(2)),
-            m.group(4),
-            clean.count("\n", 0, m.start()) + 1,
+    out: list[Citation] = []
+    pos, line = 0, 1  # finditer is ordered: count newlines only since the last match
+    for m in CITE.finditer(clean):
+        line += clean.count("\n", pos, m.start())
+        pos = m.start()
+        out.append(
+            Citation(m.group(1), int(m.group(2)), int(m.group(3) or m.group(2)), m.group(4), line)
         )
-        for m in CITE.finditer(clean)
-    ]
+    return out
 
 
 def _uncited(clean: str) -> list[int]:
@@ -130,6 +129,8 @@ def _shape_error(path: str) -> str | None:
 
 
 MAX_CONTROL_BYTES = 64 * 1024
+MAX_CITE_PATH = 4096
+MAX_CITATIONS = 20_000  # per page: bounds verify cost by count
 
 
 def read_control_lines(path: Path) -> tuple[list[str], str]:
@@ -187,6 +188,8 @@ def is_ignored(path: str, globs: list[str]) -> bool:
 
 
 def _check(root: Path, cite: Citation, tracked: set[str], ignore: list[str]) -> str | None:
+    if len(cite.path) > MAX_CITE_PATH:  # before any glob matching
+        return "path too long"
     bad = _shape_error(cite.path)
     if bad:
         return bad
@@ -213,6 +216,8 @@ def verify_page(root: Path, page_rel: str, text: str, ignore: list[str]) -> list
     """Error strings ``"<page_rel>:<line>: <reason>"``; empty when the page verifies."""
     root = Path(root)
     cites, uncited = parse(text)
+    if len(cites) > MAX_CITATIONS:
+        return [f"{page_rel}:1: too many citations (limit {MAX_CITATIONS})"]
     tracked = set(gitview.tracked_files(root))
     errors: list[tuple[int, str]] = []
     for cite in cites:

@@ -61,8 +61,11 @@ RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
 def _scan(text: str) -> list[tuple[int, str, str]]:
     hits = []
     for rule, pattern in RULES:
+        pos, line = 0, 1  # finditer is ordered: count newlines only since the last hit
         for m in pattern.finditer(text):
-            hits.append((text.count("\n", 0, m.start()) + 1, rule, m.group(0)))
+            line += text.count("\n", pos, m.start())
+            pos = m.start()
+            hits.append((line, rule, m.group(0)))
     return sorted(hits, key=lambda h: (h[0], h[1]))
 
 

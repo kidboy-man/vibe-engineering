@@ -1,0 +1,169 @@
+"""Permanent guard: 1 MiB hostile inputs must stay linear through public entry points."""
+
+import importlib.util
+import subprocess
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+from agents.wikify import agentmap, citations, docs_inventory, gitview, pointer, scan, state
+
+MIB = 1 << 20
+LIMIT = 2.0
+HOOK = (
+    Path(__file__).resolve().parent.parent
+    / "agents/kits/wikify/templates/wikify/hooks/vibe-wikify/wikify_guard.py"
+)
+
+
+def load_guard():
+    spec = importlib.util.spec_from_file_location("wikify_guard_perf", HOOK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def fill(unit: str, size: int = MIB) -> str:
+    return unit * (size // len(unit) + 1)
+
+
+class Timed(unittest.TestCase):
+    def timed(self, fn, *args, limit=LIMIT):
+        start = time.perf_counter()
+        out = fn(*args)
+        elapsed = time.perf_counter() - start
+        self.assertLess(elapsed, limit, f"{elapsed:.2f}s")
+        return out
+
+
+class ScanPerfTests(Timed):
+    CASES = {
+        "email": "a@b.",
+        "email-lines": "a@b.c\n",
+        "jwt": "_eyJa.b.",
+        "bearer": "Bearer " + "a" * 19,
+        "aws": "AKIA" + "A" * 15,
+        "assign": 'token="aaaaaaa',
+    }
+
+    def test_each_rule_worst_case(self):
+        for name, unit in self.CASES.items():
+            with self.subTest(rule=name):
+                self.timed(scan.scan_text, fill(unit))
+
+
+class ScanEquivalenceTests(unittest.TestCase):
+    @staticmethod
+    def reference(text):
+        hits = []
+        for rule, pattern in scan.RULES:
+            for m in pattern.finditer(text):
+                hits.append((text.count("\n", 0, m.start()) + 1, rule, m.group(0)))
+        return sorted(hits, key=lambda h: (h[0], h[1]))
+
+    def test_matches_straightforward_implementation(self):
+        corpus = (
+            "intro\n" + "a@b.co and x\n" * 3 + "Bearer " + "q" * 24 + "\n\n"
+            "AKIA" + "B" * 16 + "\nline\n" + 'api_key = "' + "x" * 12 + '"\n'
+            "password: abcdef1234567\n" + "-----BEGIN RSA PRIVATE KEY-----\n" + "tail"
+        )
+        for text in ("", "no hits\n", corpus, corpus * 3, "a@b.c\n" * 50):
+            with self.subTest(n=len(text)):
+                self.assertEqual(scan._scan(text), self.reference(text))
+        self.assertTrue(self.reference(corpus))
+
+
+class CitationPerfTests(Timed):
+    def test_parse_hostile(self):
+        for unit in ("(src: a:1)\n", "[", "[[", "[a](", "[a](b", "](a.md"):
+            with self.subTest(unit=unit):
+                self.timed(citations.parse, fill(unit))
+
+    def test_citation_lines_unchanged(self):
+        text = "".join(f"p{i} (src: a.py:{i + 1})\n\n" for i in range(40)) + "end (src: b.py:2-3 `x`)"
+        cites, _ = citations.parse(text)
+        want = [m.start() for m in citations.CITE.finditer(text)]
+        self.assertEqual([c.line for c in cites], [text.count("\n", 0, s) + 1 for s in want])
+        self.assertEqual(len(cites), 41)
+
+    def test_verify_page_hostile(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            (root / "a.py").write_text("x\n")
+            subprocess.run(["git", "add", "a.py"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                 "commit", "-q", "-m", "x"],
+                cwd=root, check=True,
+            )
+            ignore = [f"g{i}*/z" for i in range(8000)]
+            cases = {
+                "many-cites": fill("(src: a.py:1)\n"),
+                "long-path": "(src: " + "a" * MIB + ":1)\n",
+            }
+            for name, text in cases.items():
+                with self.subTest(case=name):
+                    errs = self.timed(citations.verify_page, root, "p.md", text, ignore)
+                    self.assertTrue(errs)
+            long_path = citations.verify_page(root, "p.md", "(src: " + "a" * 5000 + ":1)\n", [])
+            self.assertIn("path too long", long_path[0])
+            many = citations.verify_page(root, "p.md", "(src: a.py:1)\n" * 20001, [])
+            self.assertEqual([e for e in many if "too many citations" in e], many)
+            self.assertEqual(len(many), 1)
+
+
+class MapAndDocsPerfTests(Timed):
+    def test_agentmap(self):
+        for unit in ("](", "](a", "](a.md", "[x](a.md) ", "<!-- wikify:map -->\n"):
+            with self.subTest(unit=unit):
+                text = fill(unit)
+                self.timed(agentmap.page_links, "p.md", text)
+                self.timed(agentmap.parse_map, text)
+
+    def test_docs_outline_and_pointer_fences(self):
+        for unit in ("# h\n", "```\n", "~~~\n", "#", "  \t"):
+            with self.subTest(unit=unit):
+                text = fill(unit)
+                self.timed(docs_inventory.outline, text)
+                self.timed(pointer._markers, text.splitlines(keepends=True))
+
+
+class HookPerfTests(Timed):
+    @classmethod
+    def setUpClass(cls):
+        cls.guard = load_guard()
+
+    def decide(self, command, cwd="/"):
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+        return self.timed(self.guard.decide, payload)
+
+    def test_hostile_commands_allowed_fast(self):
+        for command in ("a" * MIB, fill(";&|<>()"), "'" + fill("<<a "), fill("git push; ")):
+            with self.subTest(head=command[:8]):
+                self.assertIsNone(self.decide(command))
+
+    def test_heredoc_word_linear_below_cap(self):
+        line = "'" + "<<a " * 15000
+        self.timed(self.guard._heredoc_word, line)
+
+    def test_large_legitimate_command_still_blocked_when_stale(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+            subprocess.run([*git, "init", "-q"], cwd=root, check=True)
+            (root / "src").mkdir()
+            (root / "src/a.py").write_text("x\n")
+            subprocess.run([*git, "add", "src/a.py"], cwd=root, check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "c"], cwd=root, check=True)
+            state.save(root, gitview.head(root))  # never committed -> stale
+            body = "x" * (60 * 1024)
+            blocked = self.decide(f'git commit -m "{body}" && git push', str(root))
+            self.assertEqual(blocked, self.guard.MESSAGE)
+            over = f'git commit -m "{"x" * (70 * 1024)}" && git push'
+            self.assertIsNone(self.decide(over, str(root)))
+
+
+if __name__ == "__main__":
+    unittest.main()

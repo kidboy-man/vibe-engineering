@@ -23,7 +23,9 @@ Known false-allow limits (heuristic parsing): `env -i git push`,
 `if ...; then git push; fi`, `$(git push)`, `bash -c "git push"`, combined
 short flags such as `-nf` are treated as a normal push, and refspec deletions
 (`git push origin :old`) are gated like a normal push. Heredoc bodies are
-dropped on a best-effort basis. The hook never creates any file and only runs in repos whose working
+dropped on a best-effort basis. Commands over 64 KiB are allowed unparsed (the
+tokenizer is pure Python and slow on huge input), so a push hidden in such a
+command is not gated. The hook never creates any file and only runs in repos whose working
 tree has docs/wiki/.wikify.json.
 """
 
@@ -44,6 +46,7 @@ NO_CHECK_FLAGS = {"--delete", "-d", "--dry-run", "-n"}
 WIKI_DIR = "docs/wiki/"
 STATE_REL = "docs/wiki/.wikify.json"
 TIMEOUT_SECONDS = 10
+MAX_COMMAND_CHARS = 64 * 1024  # longer commands are allowed unparsed (fail open)
 BUDGET_SECONDS = 20  # total git time per hook invocation
 _deadline = 0.0
 MESSAGE = (
@@ -69,10 +72,14 @@ HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 
 def _heredoc_word(line: str) -> str | None:
     """Terminator of an unquoted `<<WORD` opener on this line, if any."""
+    singles = doubles = pos = 0
     for match in HEREDOC.finditer(line):
-        prefix = line[: match.start()]
-        # an odd count of quote characters before the match means it is quoted
-        if prefix.count("'") % 2 == 0 and prefix.count('"') % 2 == 0:
+        # an odd count of quote characters before the match means it is quoted;
+        # count only the text since the previous match so the scan stays linear
+        singles += line.count("'", pos, match.start())
+        doubles += line.count('"', pos, match.start())
+        pos = match.start()
+        if singles % 2 == 0 and doubles % 2 == 0:
             return match.group(2)
     return None
 
@@ -245,7 +252,7 @@ def decide(payload: object) -> str | None:
     if not isinstance(tool_input, dict):
         tool_input = {}
     command = tool_input.get("command", payload.get("command"))
-    if not isinstance(command, str) or not command:
+    if not isinstance(command, str) or not command or len(command) > MAX_COMMAND_CHARS:
         return None
     cwd = str(payload.get("cwd") or os.getcwd())
     return MESSAGE if _shell_stale(command, cwd) else None
