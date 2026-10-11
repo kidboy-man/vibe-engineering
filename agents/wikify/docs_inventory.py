@@ -22,7 +22,7 @@ MAX_DOC_BYTES = 1 << 20
 SUFFIXES = (".md", ".markdown")
 EXCLUDED_NAMES = {"agents.md", "claude.md", "gemini.md", "skill.md"}  # casefolded
 DEFAULT_PREFIXES = ("readme", "contributing", "changelog", "architecture")
-UNCITABLE = re.compile(r"[\s:`()\x00-\x1f\x7f-\x9f]")
+_PATH_BAD = frozenset(":`()[]<>@\\")
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,16 @@ def load_includes(root: Path) -> list[str]:
 
 def includes_status(root: Path) -> str:
     return citations.read_control_lines(Path(root) / INCLUDES_REL)[1]
+
+
+def _citable(path: str) -> bool:
+    """Doc paths are untrusted text that lands in headings and links: allow no
+    whitespace, markup or citation-syntax characters, and no control, format,
+    surrogate, private-use or unassigned characters (bidi, zero-width, NEL, ...)."""
+    return not any(
+        ch.isspace() or ch in _PATH_BAD or unicodedata.category(ch)[0] == "C"
+        for ch in path
+    )
 
 
 def _default_eligible(path: str) -> bool:
@@ -81,7 +91,7 @@ def inventory(root: Path) -> Inventory:
             or citations.is_ignored(path, ignore)
         ):
             continue
-        if UNCITABLE.search(path):
+        if not _citable(path):
             skipped.append(Skip(path, "path not citable"))
         else:
             candidates.append(path)
@@ -115,7 +125,7 @@ MAX_FRAGMENT = 60
 NOTE = "documented, not code-verified; titles are untrusted text"
 INDEX_PAGE = "sources/index.md"
 _HEADING = re.compile(r" {0,3}(#{1,6})(?:[ \t]+(.*))?")
-_CLOSING = re.compile(r"[ \t]+#+[ \t]*$")
+_FRONT_MATTER = re.compile(r"[A-Za-z0-9_-]+\s*:|#|-(?:[ \t]|$)")
 _STRIPPED = frozenset("`[]()<>@")  # never shown in a title or fragment
 _SPACE = re.compile(r"\s+")
 
@@ -131,6 +141,15 @@ class Section:
 
 def _drop(ch: str) -> bool:
     return ch in _STRIPPED or unicodedata.category(ch)[0] == "C" or ch in "\u2028\u2029"
+
+
+def _unclose(raw: str) -> str:
+    """Strip the optional ATX closing ``#`` run (linear; only after space/tab or alone)."""
+    s = raw.rstrip(" \t")
+    t = s.rstrip("#")
+    if t != s and (not t or t[-1] in " \t"):
+        s = t.rstrip(" \t")
+    return s
 
 
 def _title(raw: str) -> str:
@@ -175,7 +194,8 @@ def outline(text: str) -> list[Section]:
     first = 0
     if lines and lines[0].rstrip() == "---":
         close = next((i for i, ln in enumerate(lines[1:], 1) if ln.rstrip() in ("---", "...")), None)
-        if close is not None:
+        body = next((ln for ln in lines[1:close] if ln.strip()), "") if close else ""
+        if close is not None and _FRONT_MATTER.match(body):
             first = close + 1
     found: list[tuple[int, int, str]] = []  # (line number, level, heading line)
     for i, line, fenced in pointer._scan(lines[first:]):
@@ -190,7 +210,7 @@ def outline(text: str) -> list[Section]:
         end = later[-1][1] - 1 if later else len(lines)
         later.append((level, start))
         m = _HEADING.fullmatch(line)
-        sections.append(Section(level, _title(_CLOSING.sub("", m.group(2) or "")), start, end, _fragment(line)))
+        sections.append(Section(level, _title(_unclose(m.group(2) or "")), start, end, _fragment(line)))
     sections.reverse()
     return sections
 
@@ -204,8 +224,9 @@ def _cite(doc: str, start: int, end: int, fragment: str = "") -> str:
     return f"(src: {doc}:{start}-{end}" + (f" `{fragment}`" if fragment else "") + ")"
 
 
-def render_doc_page(doc: str, text: str) -> str:
-    sections = outline(text)
+def render_doc_page(doc: str, text: str, sections: list[Section] | None = None) -> str:
+    if sections is None:
+        sections = outline(text)
     last = max(len(_lines(text)), 1)
     out = [MARKER, f"# {doc} ({NOTE})", ""]
     base = min((s.level for s in sections), default=1)
@@ -246,12 +267,15 @@ def expected_pages(root: Path) -> tuple[dict[str, str], Inventory]:
         text = gitview.show_head(root, doc)
         if text is None:
             skipped.append(Skip(doc, "unreadable at HEAD (not committed?)"))
+        elif citations._shape_error(doc):  # defensive: never emit a page that cannot verify
+            skipped.append(Skip(doc, "path not citable"))
         elif rel in pages:
             skipped.append(Skip(doc, "page path collision"))
         else:
             docs.append(doc)
-            pages[rel] = render_doc_page(doc, text)
-            rows.append((doc, rel, len(outline(text)), max(len(_lines(text)), 1)))
+            sections = outline(text)
+            pages[rel] = render_doc_page(doc, text, sections)
+            rows.append((doc, rel, len(sections), max(len(_lines(text)), 1)))
     if rows:
         pages[INDEX_PAGE] = render_index(rows)
     return pages, Inventory(docs, sorted(skipped, key=lambda s: s.path))

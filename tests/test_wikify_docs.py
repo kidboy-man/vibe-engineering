@@ -371,6 +371,37 @@ class OutlineTests(unittest.TestCase):
             citations.parse(page.replace(di.MARKER, ""))[1], []
         )
 
+    def assertFast(self, text):
+        start = time.perf_counter()
+        secs = di.outline(text)
+        di.render_doc_page("a.md", text)
+        elapsed = time.perf_counter() - start
+        self.assertLess(elapsed, 1)
+        return secs
+
+    def test_pathological_heading_lines_are_linear(self):
+        n = 1 << 20
+        for filler in (" ", " \t", "# ", "`", "#", "\t"):
+            body = (filler * (n // len(filler)))[:n]
+            self.assertFast("# a" + body + "x\n")
+            self.assertFast("# a" + body + "\n")
+        mixed = "".join(f"# a{f * 5000}x\n" for f in (" ", " \t", "# ", "`", "#") * 20)
+        self.assertFast(mixed[: 1 << 20])
+
+    def test_closing_sequence(self):
+        for raw, title in [
+            ("## foo ##", "foo"), ("# foo#", "foo#"), ("### ###", "(untitled)"),
+            ("# #", "(untitled)"), ("# foo \\#", "foo \\#"), ("# foo #  ", "foo"),
+            ("# foo\t#", "foo"), ("# #foo", "#foo"),
+        ]:
+            self.assertEqual(di.outline(raw + "\n")[0].title, title, raw)
+
+    def test_thematic_break_is_not_front_matter(self):
+        text = "---\nsome prose here\n---\n# Real\n"
+        self.assertEqual([s.title for s in di.outline(text)], ["Real"])
+        for fm in ("---\nkey: v\n# c\n---\n# Real\n", "---\n# c\n---\n# Real\n", "---\n- a\n# c\n...\n# Real\n"):
+            self.assertEqual([s.title for s in di.outline(fm)], ["Real"], fm)
+
     def test_page_rel(self):
         self.assertEqual(di.page_rel("index.md"), "sources/index.md.outline.md")
         self.assertEqual(di.page_rel("docs/index.md"), "sources/docs/index.md")
@@ -533,6 +564,41 @@ class PagesTests(RepoCase):
         inv = di.inventory(self.root)
         self.assertEqual(inv.docs, ["docs/ok.md"])
         self.assertEqual([s.reason for s in inv.skipped], ["path not citable"])
+
+    def test_path_not_citable_untrusted_chars(self):
+        bad = [
+            "back\\slash.md", "<script>.md", "<img_src=x>.md", "<!--x.md", "a-->b.md",
+            "a].md", "a[.md", "@mention.md", "README@v2.md", "ev‮il.md",
+            "zw​x.md", "nel\x85.md", "ls .md", "ps .md", "del\x7f.md",
+            "tab\t.md", "c:d.md",
+        ]
+        good = ["a-b_c.d+e,f.md", "éü.md", "日本語.md"]
+        self.commit_files({f"docs/{n}": "# A\n" for n in bad + good})
+        pages, inv = di.expected_pages(self.root)
+        self.assertEqual(sorted(inv.docs), sorted(f"docs/{n}" for n in good))
+        self.assertEqual(
+            {s.path for s in inv.skipped}, {f"docs/{n}" for n in bad}
+        )
+        self.assertEqual({s.reason for s in inv.skipped}, {"path not citable"})
+        for rel in pages:
+            self.assertFalse(any(n in rel for n in bad), rel)
+        for rel, text in pages.items():
+            blanked = "\n" + text.split("\n", 1)[1]
+            self.assertEqual(citations.verify_page(self.root, rel, blanked, ignore=[]), [], rel)
+
+    def test_unverifiable_path_guard(self):
+        self.commit_files({"docs/a.md": "# A\n"})
+        with mock.patch.object(di, "_citable", return_value=True), \
+                mock.patch.object(citations, "_shape_error", return_value="bad"):
+            pages, inv = di.expected_pages(self.root)
+        self.assertEqual(pages, {})
+        self.assertEqual([(s.path, s.reason) for s in inv.skipped], [("docs/a.md", "path not citable")])
+
+    def test_outline_once_per_doc(self):
+        self.commit_files({"README.md": "# A\n"})
+        with mock.patch.object(di, "outline", wraps=di.outline) as spy:
+            di.expected_pages(self.root)
+        self.assertEqual(spy.call_count, 1)
 
     def test_one_mb_doc_outline_fast(self):
         text = "".join(f"## H{i}\n" + "x" * 90 + "\n" for i in range(5000))
