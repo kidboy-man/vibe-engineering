@@ -19,7 +19,7 @@ INCLUDES_REL = WIKI_DIR + ".wikifydocs"
 MAX_DOCS = 500
 MAX_DOC_BYTES = 1 << 20
 SUFFIXES = (".md", ".markdown")
-EXCLUDED_NAMES = {"AGENTS.md", "CLAUDE.md", "GEMINI.md", "SKILL.md"}
+EXCLUDED_NAMES = {"agents.md", "claude.md", "gemini.md", "skill.md"}  # casefolded
 DEFAULT_PREFIXES = ("readme", "contributing", "changelog", "architecture")
 UNCITABLE = re.compile(r"[\s:`()]")
 
@@ -38,10 +38,7 @@ class Inventory:
 
 def load_includes(root: Path) -> list[str]:
     """Extra include globs from the working-tree control file; missing -> []."""
-    try:
-        lines = (Path(root) / INCLUDES_REL).read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
-        return []
+    lines = citations.read_control_lines(Path(root) / INCLUDES_REL)
     globs = (line.strip() for line in lines)
     return [g for g in globs if g and not g.startswith("#")]
 
@@ -57,17 +54,20 @@ def _default_eligible(path: str) -> bool:
 
 def inventory(root: Path) -> Inventory:
     root = Path(root)
+    regular = gitview.regular_tracked(root)
+    if regular is None:  # fail closed: modes unknown, so no path can be trusted
+        return Inventory([], [Skip("", "could not read file modes")])
     includes = load_includes(root)
     ignore = citations.load_ignore(root)
-    docs: list[str] = []
+    candidates: list[str] = []
     skipped: list[Skip] = []
-    for path in sorted(gitview.tracked_files(root)):
+    for path in sorted(regular):
         if not path.lower().endswith(SUFFIXES):
             continue
         if not (_default_eligible(path) or citations.is_ignored(path, includes)):
             continue
         if (
-            path.rsplit("/", 1)[-1] in EXCLUDED_NAMES
+            path.rsplit("/", 1)[-1].casefold() in EXCLUDED_NAMES
             or path.startswith(WIKI_DIR)
             or is_secret_path(path)
             or citations.is_ignored(path, ignore)
@@ -75,20 +75,25 @@ def inventory(root: Path) -> Inventory:
             continue
         if UNCITABLE.search(path):
             skipped.append(Skip(path, "path not citable"))
-            continue
+        else:
+            candidates.append(path)
+    docs: list[str] = []
+    for n, path in enumerate(candidates):
+        if len(docs) >= MAX_DOCS:  # stop reading; the rest are only reported
+            skipped.extend(Skip(p, f"over {MAX_DOCS} docs") for p in candidates[n:])
+            break
         text = gitview.show_head(root, path)
         if text is None:
-            reason = "unreadable"
+            reason = "unreadable at HEAD (not committed?)"
         elif not text.strip():
             reason = "empty"
         elif len(text.encode("utf-8")) > MAX_DOC_BYTES:
             reason = "larger than 1 MiB"
-        elif "�" in text:
+        elif "\ufffd" in text:
+            # show_head decodes with replacement, so a literal U+FFFD lands here too
             reason = "not valid UTF-8"
         else:
             docs.append(path)
             continue
         skipped.append(Skip(path, reason))
-    for extra in docs[MAX_DOCS:]:
-        skipped.append(Skip(extra, f"over {MAX_DOCS} docs"))
-    return Inventory(docs[:MAX_DOCS], sorted(skipped, key=lambda s: s.path))
+    return Inventory(docs, sorted(skipped, key=lambda s: s.path))

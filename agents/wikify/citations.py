@@ -126,11 +126,32 @@ def _shape_error(path: str) -> str | None:
     return None
 
 
-def load_ignore(root: Path) -> list[str]:
+MAX_CONTROL_BYTES = 64 * 1024
+
+
+def read_control_lines(path: Path) -> list[str]:
+    """Lines of a small control file; [] unless a regular non-symlink file.
+
+    lstat first and open non-blocking without following links, so a FIFO or a
+    symlink planted in the working tree can neither hang nor redirect the read.
+    """
     try:
-        lines = (Path(root) / IGNORE_REL).read_text(encoding="utf-8").splitlines()
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_CONTROL_BYTES:
+            return []
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as handle:
+            data = handle.read(MAX_CONTROL_BYTES + 1)
+        if len(data) > MAX_CONTROL_BYTES:
+            return []
+        return data.decode("utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
         return []
+
+
+def load_ignore(root: Path) -> list[str]:
+    lines = read_control_lines(Path(root) / IGNORE_REL)
     globs = (line.strip() for line in lines)
     return [g for g in globs if g and not g.startswith("#")]
 

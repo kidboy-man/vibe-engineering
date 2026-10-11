@@ -57,6 +57,23 @@ def tracked_files(root: Path) -> list[str]:
     return tracked_files_or_none(root) or []
 
 
+def regular_tracked(root: Path) -> set[str] | None:
+    """Tracked paths that are regular files (modes 100644/100755); None on error.
+
+    Symlinks (120000) and gitlinks (160000) are dropped: ``git show`` returns
+    the link target or commit text for them, not file content.
+    """
+    result = run_git(root, "ls-files", "-s", "-z")
+    if result.returncode != 0:
+        return None
+    out: set[str] = set()
+    for entry in result.stdout.split("\0"):
+        meta, _, path = entry.partition("\t")
+        if path and meta.split(" ", 1)[0] in ("100644", "100755"):
+            out.add(path)
+    return out
+
+
 def ignored(root: Path, rels: list[str] | tuple[str, ...]) -> list[str]:
     """Which untracked ``rels`` git would ignore; [] on error or timeout."""
     result = run_git(root, "check-ignore", "--", *rels)
