@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-from agents.wikify import agentmap, citations, docs_cmd, gitview, init_cmd, plan, pointer, scan, state
+from agents.wikify import agentmap, citations, docs_cmd, docs_inventory, gitview, init_cmd, plan, pointer, scan, state
 
 
 def _human_blocks(text: str) -> list[tuple[int, str]]:
@@ -57,6 +57,11 @@ def _verify(root: Path) -> tuple[int, list[str]]:
     if not any(e.startswith(("docs:", "docs/wiki:")) for e in errors):
         block = agentmap.MapBlock([], [], 0)
         texts: dict[str, str] = {}
+        expected: dict[str, str] = {}
+        eligible: set[str] = set()
+        if (root / state.WIKI_DIR).is_dir():  # no wiki, no doc pages to compare
+            expected, inv = docs_inventory.expected_pages(root)  # once per run
+            eligible = set(inv.docs)
         for rel, path in pages:
             text = path.read_text(encoding="utf-8")
             texts[rel] = text
@@ -64,7 +69,22 @@ def _verify(root: Path) -> tuple[int, list[str]]:
             if rel == "index.md":  # only the top-level index carries the map
                 block = agentmap.parse_map(text)
                 checked = agentmap.strip_map(text)  # map lines are navigation
+            elif docs_inventory.is_generated(text):
+                checked = docs_inventory.blank_marker(text)  # keep line numbers
+                if text != expected.get(rel):
+                    reason = (
+                        "generated page out of date; run vibe wikify docs"
+                        if rel in expected
+                        else "generated page has no eligible source"
+                    )
+                    errors.append(f"{rel}: {reason}")
             errors.extend(citations.verify_page(root, rel, checked, ignore))
+            if not rel.startswith("sources/") and eligible:
+                errors.extend(
+                    f"{rel}:{c.line}: doc citation outside sources/: {c.path}"
+                    for c in citations.parse(checked)[0]
+                    if c.path in eligible
+                )
             notices.extend(_notices(root, rel, text))
         errors.extend(block.errors)
         reachable = agentmap.reachable_pages({e.path for e in block.entries}, texts)

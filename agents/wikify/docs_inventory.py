@@ -284,3 +284,33 @@ def expected_pages(root: Path) -> tuple[dict[str, str], Inventory]:
     if rows:
         pages[INDEX_PAGE] = render_index(rows)
     return pages, Inventory(docs, sorted(skipped, key=lambda s: s.path))
+
+
+def is_generated(text: str) -> bool:
+    return text.split("\n", 1)[0] == MARKER
+
+
+def blank_marker(text: str) -> str:
+    """Marker line emptied, newline kept, so citation line numbers still hold."""
+    return "\n" + text.split("\n", 1)[1] if "\n" in text else ""
+
+
+def status(
+    root: Path,
+    texts: dict[str, str],
+    built: tuple[dict[str, str], Inventory] | None = None,
+) -> dict:
+    """Generated-doc state against the pages present (``texts``, keyed by wiki rel).
+
+    ``built`` is an ``expected_pages`` result, so callers that already have one
+    do not recompute it.
+    """
+    expected, inv = built if built is not None else expected_pages(root)
+    return {
+        "unindexed": [d for d in inv.docs if page_rel(d) not in texts],
+        "stale": sorted(
+            rel for rel, text in texts.items()
+            if is_generated(text) and text != expected.get(rel)
+        ),
+        "skipped": [{"path": s.path, "reason": s.reason} for s in inv.skipped],
+    }

@@ -909,3 +909,180 @@ class DocsCmdTests(RepoCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DocsVerifyTests(RepoCase):
+    """verify and plan against generated doc pages."""
+
+    MAP = (
+        "# Wiki index\n\n<!-- wikify:map -->\n"
+        "- [Sources](sources/index.md) — doc outlines\n"
+        "{extra}<!-- /wikify:map -->\n"
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.write({
+            "README.md": "# Proj\n\n## Usage\n",
+            "docs/a.md": "# A\n\n## One\n",
+            "src/a.py": "def foo():\n    return 1\n",
+            "agents/kits/x/rules/r.md": "# R\n",
+        })
+        self.commit_all()
+        out_init = io.StringIO()
+        with contextlib.redirect_stdout(out_init):
+            init_cmd.cmd_init(cwd=self.root)
+        self.index()
+        self.docs()
+        self.commit_all()
+
+    def write(self, files):
+        for rel, content in files.items():
+            p = self.root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, newline="")
+
+    def commit_all(self):
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "c")
+
+    def index(self, extra=""):
+        self.write({"docs/wiki/index.md": self.MAP.format(extra=extra)})
+
+    def docs(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return docs_cmd.cmd_docs(cwd=self.root)
+
+    def verify(self):
+        return commands.run_verify(self.root)
+
+    def errors(self):
+        rc, lines = self.verify()
+        return rc, [ln for ln in lines if ".md:" in ln or "generated page" in ln]
+
+    def test_clean(self):
+        self.assertEqual(self.errors(), (0, []))
+
+    def test_out_of_date_then_regenerated(self):
+        self.write({"README.md": "# Project\n\n## Usage\n"})
+        self.commit_all()
+        rc, errs = self.errors()
+        self.assertEqual(rc, 1)
+        self.assertIn("sources/README.md: generated page out of date; run vibe wikify docs", errs)
+        p = plan.build_plan(self.root)
+        self.assertEqual(p["docs_stale"], ["sources/README.md"])
+        self.assertIn("docs_stale (1):\n  sources/README.md\n", plan.render(p))
+        self.assertEqual(self.docs(), 0)
+        self.commit_all()
+        self.assertEqual(self.errors(), (0, []))
+        self.assertEqual(plan.build_plan(self.root)["docs_stale"], [])
+
+    def test_deleted_doc_has_no_source(self):
+        git(self.root, "rm", "-q", "docs/a.md")
+        git(self.root, "commit", "-q", "-m", "rm")
+        rc, errs = self.errors()
+        self.assertEqual(rc, 1)
+        self.assertIn("sources/docs/a.md: generated page has no eligible source", errs)
+        self.assertTrue(any(e.startswith("sources/docs/a.md:") and "not tracked" in e for e in errs))
+        self.assertIn("sources/docs/a.md", plan.build_plan(self.root)["docs_stale"])
+
+    def test_newly_ignored_doc_has_no_source(self):
+        self.write({"docs/wiki/.wikifyignore": "docs/a.md\n"})
+        rc, errs = self.errors()
+        self.assertEqual(rc, 1)
+        self.assertIn("sources/docs/a.md: generated page has no eligible source", errs)
+
+    def test_hand_edited_generated_page(self):
+        p = self.root / "docs/wiki/sources/README.md"
+        p.write_text(p.read_text() + "- extra (src: README.md:1)\n")
+        rc, errs = self.errors()
+        self.assertEqual(rc, 1)
+        self.assertIn("sources/README.md: generated page out of date; run vibe wikify docs", errs)
+
+    def test_domain_page_citing_doc(self):
+        self.write({"docs/wiki/a.md": "Docs say (src: README.md:1)\n"})
+        self.index("- [A](a.md) — a\n")
+        rc, errs = self.errors()
+        self.assertEqual(rc, 1)
+        self.assertEqual(errs, ["a.md:1: doc citation outside sources/: README.md"])
+
+    def test_domain_page_citing_ineligible_doc_and_code_ok(self):
+        self.write({"docs/wiki/a.md": "Rule (src: agents/kits/x/rules/r.md:1) and code (src: src/a.py:1)\n"})
+        self.index("- [A](a.md) — a\n")
+        self.assertEqual(self.errors(), (0, []))
+
+    def test_hand_written_sources_page_may_cite_docs(self):
+        self.write({"docs/wiki/sources/notes.md": "Both (src: README.md:1) (src: src/a.py:1)\n"})
+        self.index("- [Notes](sources/notes.md) — n\n")
+        self.assertEqual(self.errors(), (0, []))
+
+    def test_doc_citation_in_human_block_not_flagged(self):
+        self.write({
+            "docs/wiki/a.md": "<!-- wikify:human -->\nsee (src: README.md:1)\n<!-- /wikify:human -->\n"
+        })
+        self.index("- [A](a.md) — a\n")
+        rc, lines = self.verify()
+        self.assertEqual(rc, 0)
+        self.assertFalse(any("doc citation" in ln for ln in lines))
+
+    def test_unindexed_and_skipped(self):
+        self.write({"docs/b.md": "# B\n", "docs/empty.md": "\n"})
+        self.commit_all()
+        p = plan.build_plan(self.root)
+        self.assertEqual(p["docs_unindexed"], ["docs/b.md"])
+        self.assertEqual(p["docs_skipped"], [{"path": "docs/empty.md", "reason": "empty"}])
+        self.assertIn("docs_skipped (1):\n  docs/empty.md: empty\n", plan.render(p))
+        self.assertLess(plan.render(p).index("map_missing ("), plan.render(p).index("docs_unindexed ("))
+
+    def test_plan_keys_without_commits_or_wiki(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as d:
+            git(Path(d), "init", "-q")
+            p = plan.build_plan(Path(d))
+        for key in ("docs_unindexed", "docs_stale", "docs_skipped"):
+            self.assertEqual(p[key], [])
+        self.write({"extra.md": "# E\n"})
+        self.commit_all()
+        with mock.patch.object(di, "expected_pages", side_effect=OSError("boom")):
+            p = plan.build_plan(self.root)
+            rc, lines = self.verify()
+        self.assertEqual((p["docs_unindexed"], p["docs_stale"], p["docs_skipped"]), ([], [], []))
+        self.assertEqual((rc, lines[0]), (1, "verify failed: OSError"))
+
+    def test_expected_pages_called_once(self):
+        with mock.patch.object(di, "expected_pages", wraps=di.expected_pages) as spy:
+            self.verify()
+        self.assertEqual(spy.call_count, 1)
+        with mock.patch.object(di, "expected_pages", wraps=di.expected_pages) as spy:
+            plan.build_plan(self.root)
+        self.assertEqual(spy.call_count, 1)
+
+    def test_300_docs_verify_under_three_seconds(self):
+        self.write({f"docs/d{i:03d}.md": f"# D{i}\n\n## S\n" for i in range(300)})
+        self.commit_all()
+        self.assertEqual(self.docs(), 0)
+        self.commit_all()
+        start = time.perf_counter()
+        rc, lines = self.verify()
+        elapsed = time.perf_counter() - start
+        # the generated index lists at most 200 docs, so the rest are unreachable
+        # by design; nothing else may be wrong (no stale pages, no bad citations)
+        errs = [ln for ln in lines if ".md:" in ln or "generated page" in ln]
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(errs), 102)
+        self.assertTrue(all("not reachable from the map" in e for e in errs), errs[:3])
+        self.assertLess(elapsed, 3, f"{elapsed:.2f}s")
+
+    def test_one_mb_doc_verify_under_one_second(self):
+        text = "".join(f"## H{i}\n" + "x" * 90 + "\n" for i in range(5000))
+        self.write({"docs/big.md": text[: (1 << 20) - 1]})
+        self.commit_all()
+        self.assertEqual(self.docs(), 0)
+        self.commit_all()
+        start = time.perf_counter()
+        rc, _ = self.verify()
+        elapsed = time.perf_counter() - start
+        self.assertEqual(rc, 0)
+        self.assertLess(elapsed, 1, f"{elapsed:.2f}s")

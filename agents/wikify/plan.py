@@ -10,9 +10,11 @@ import ast
 from pathlib import Path
 
 from agents.secret_policies import is_secret_path
-from agents.wikify import agentmap, citations, gitview, state
+from agents.wikify import agentmap, citations, docs_inventory, gitview, state
+from agents.wikify.pointer import _safe
 
 # ponytail: repos using these roots get the sub-directory as the context.
+MAX_SKIPPED_SHOWN = 50
 CONTEXT_ROOTS = ("src", "app", "agents", "cmd", "internal", "pkg", "lib")
 
 
@@ -71,18 +73,35 @@ def _symbols(root: Path, paths: list[str]) -> dict[str, list[str]]:
     return out
 
 
-def _map_missing(root: Path) -> list[str]:
-    """Pages (excluding top-level index.md) not reachable from the index.md agent map."""
-    walked = citations.walk_wiki(root)[1]
+def _page_texts(root: Path) -> tuple[list[str], list[str], dict[str, str]]:
+    layout_errors, walked = citations.walk_wiki(root)
     texts: dict[str, str] = {}
     for rel, path in walked:
         try:
             texts[rel] = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             pass
+    return layout_errors, [rel for rel, _ in walked], texts
+
+
+def _map_missing(rels: list[str], texts: dict[str, str]) -> list[str]:
+    """Pages (excluding top-level index.md) not reachable from the index.md agent map."""
     listed = {e.path for e in agentmap.parse_map(texts.get("index.md", "")).entries}
     reachable = agentmap.reachable_pages(listed, texts)
-    return sorted(rel for rel, _ in walked if rel != "index.md" and rel not in reachable)
+    return sorted(rel for rel in rels if rel != "index.md" and rel not in reachable)
+
+
+def _docs_status(
+    root: Path, head: str | None, layout_errors: list[str], texts: dict[str, str]
+) -> dict:
+    """Same guard as verify: no inventory when the wiki layout is already broken."""
+    empty = {"unindexed": [], "stale": [], "skipped": []}
+    if head is None or not (root / state.WIKI_DIR).is_dir() or any(e.startswith(("docs:", "docs/wiki:")) for e in layout_errors):
+        return empty
+    try:
+        return docs_inventory.status(root, texts)
+    except Exception:  # plan is advisory; verify is the fail-closed gate
+        return empty
 
 
 def _join(prev: str | None, msg: str) -> str:
@@ -92,6 +111,8 @@ def _join(prev: str | None, msg: str) -> str:
 def build_plan(root: Path, full: bool = False) -> dict:
     root = Path(root)
     head = gitview.head(root)
+    layout_errors, rels, texts = _page_texts(root)
+    docs = _docs_status(root, head, layout_errors, texts)
     plan: dict = {
         "mode": "full",
         "base": None,
@@ -99,7 +120,10 @@ def build_plan(root: Path, full: bool = False) -> dict:
         "changed": [],
         "refresh_pages": [],
         "uncovered": [],
-        "map_missing": _map_missing(root),
+        "map_missing": _map_missing(rels, texts),
+        "docs_unindexed": docs["unindexed"],
+        "docs_stale": docs["stale"],
+        "docs_skipped": docs["skipped"],
         "stale_deleted": [],
         "contexts": [],
         "symbols": {},
@@ -150,9 +174,16 @@ def render(plan: dict) -> str:
         f"base: {plan['base'] or '-'}",
         f"head: {plan['head'] or '-'}",
     ]
-    for key in ("changed", "refresh_pages", "uncovered", "map_missing", "contexts"):
+    keys = ("changed", "refresh_pages", "uncovered", "map_missing", "docs_unindexed", "docs_stale")
+    for key in keys + ("docs_skipped", "contexts"):
         lines.append(f"{key} ({len(plan[key])}):")
-        lines.extend(f"  {item}" for item in plan[key])
+        if key == "docs_skipped":  # paths are untrusted text; JSON carries them all
+            shown = plan[key][:MAX_SKIPPED_SHOWN]
+            lines.extend(f"  {_safe(i['path'])}: {_safe(i['reason'])}" for i in shown)
+            if len(plan[key]) > len(shown):
+                lines.append(f"  ... and {len(plan[key]) - len(shown)} more")
+        else:
+            lines.extend(f"  {item}" for item in plan[key])
     lines.append(f"stale_deleted ({len(plan['stale_deleted'])}):")
     lines.extend(
         f"  {item['page']}: {', '.join(item['missing'])}" for item in plan["stale_deleted"]
