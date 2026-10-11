@@ -14,7 +14,7 @@
 
 ## Global Constraints
 - Python 3.10+, stdlib only, no new dependencies; match surrounding style (`agents/wikify/*.py`).
-- Map entry grammar, verbatim: `- [<title>](<path>.md) — <when-hint>`; separator is space, U+2014, space; title 1-60 chars; hint 1-80 chars, required; neither contains `[`, `]`, `(`, `)` or newline; path relative to `docs/wiki/`, forward slashes, ends `.md` (any case), no `..`, no scheme/colon, no `@`, no backslash, not `index.md`/`WIKIFY.md` at top level.
+- Map entry grammar, verbatim: `- [<title>](<path>.md) — <when-hint>`; separator is space, U+2014, space; title 1-60 chars; hint 1-80 chars, required; neither contains `[`, `]`, `(`, `)` or newline; path relative to `docs/wiki/`, forward slashes, ends `.md` (any case), no `..`, no scheme/colon, no `@`, no backslash, not `index.md`/`WIKIFY.md` at top level. Title and hint also may not contain `@`, `<!--` or `-->`; nothing but whitespace may share a line with the begin/end markers; a human block inside a map block is an error.
 - Map block delimiters: `<!-- wikify:map -->` / `<!-- /wikify:map -->`; caps: at most 60 entries and 6144 bytes inside the block; at most one block per `index.md`; a block inside a `<!-- wikify:human -->` block is ignored.
 - Pointer block delimiters: `<!-- wikify:pointer -->` / `<!-- /wikify:pointer -->`; template is static (no repo-derived content), plain relative links, no `@`, 5 lines.
 - Pointer checks in `verify` are notices only (rc unchanged). `link` writes only `AGENTS.md`, plus `CLAUDE.md`/`GEMINI.md` only if they already exist; never creates the latter two.

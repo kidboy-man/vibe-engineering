@@ -28,6 +28,7 @@ Delimited by `<!-- wikify:map -->` and `<!-- /wikify:map -->`. One entry per lin
 - `<title>` 1-60 chars; `<when-hint>` 1-80 chars and required (it tells an agent when to load the page). Neither may contain `[`, `]`, `(`, `)`, or a newline.
 - The separator is a space, an em dash (U+2014) and a space.
 - Lines inside the block that do not match the grammar are errors; blank lines are allowed.
+- Title and hint may also not contain `@`, `<!--` or `-->`; nothing but whitespace may share a line with the begin or end marker; a `wikify:human` block inside a map block is an error.
 
 The existing uncited-paragraph rule would flag these lines (the hint is prose, so the pure-link-list exemption does not apply). `verify` therefore gets a **map rule**: lines inside the block are validated by the grammar and are exempt from the citation rule, because they are navigation, not factual claims. All checks are deterministic:
 1. every link resolves to a page listed by `citations.walk_wiki` (regular file, not a symlink, `.md`);

@@ -1,6 +1,8 @@
+import random
+import time
 import unittest
 
-from agents.wikify import agentmap
+from agents.wikify import agentmap, citations, commands
 from agents.wikify.agentmap import MAP_BEGIN, MAP_END, parse_map, strip_map, validate_map
 
 DASH = "—"
@@ -127,6 +129,107 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(strip_map("hello\n"), "hello\n")
         human = "<!-- wikify:human -->\n" + block(entry()) + "<!-- /wikify:human -->\n"
         self.assertEqual(strip_map(human), human)
+
+
+class InertTests(unittest.TestCase):
+    def test_markup_in_title_or_hint(self):
+        cases = {
+            "@ title": (entry(title="@secret.md"), "'@' in title"),
+            "@ hint": (entry(hint="see @~/.ssh/id_rsa"), "'@' in hint"),
+            "open comment title": (entry(title="a <!-- b"), "'<!--' in title"),
+            "close comment hint": (entry(hint="x --> y"), "'-->' in hint"),
+        }
+        for name, (line, reason) in cases.items():
+            with self.subTest(name):
+                res = parse_map(block(line, entry("z.md")))
+                self.assertEqual([e.path for e in res.entries], ["z.md"])
+                self.assertEqual(len(res.errors), 1, res.errors)
+                self.assertIn("invalid map entry: ", res.errors[0])
+                self.assertIn(reason, res.errors[0])
+
+    def test_early_close_probe(self):
+        text = block(entry(hint="x " + MAP_END), "- [z](@q.md) " + DASH + " h")
+        res = parse_map(text)
+        self.assertEqual(res.entries, [])
+        self.assertTrue(res.errors)
+
+    def test_text_on_marker_lines(self):
+        cases = {
+            "after end": (MAP_BEGIN + "\n" + entry() + "\n" + MAP_END + " tail\n",
+                          "index.md:3: text after map end marker"),
+            "before begin": ("pre " + MAP_BEGIN + "\n" + MAP_END + "\n",
+                             "index.md:1: text before map begin marker"),
+            "after begin": (MAP_BEGIN + " " + entry() + "\n" + MAP_END + "\n",
+                            "index.md:1: text after map begin marker"),
+            "before end": (MAP_BEGIN + "\n" + entry() + MAP_END + "\n",
+                           "index.md:2: text before map end marker"),
+        }
+        for name, (text, err) in cases.items():
+            with self.subTest(name):
+                self.assertIn(err, parse_map(text).errors)
+
+    def test_whitespace_on_marker_lines_ok(self):
+        text = "  " + MAP_BEGIN + "  \n" + entry() + "\n" + MAP_END + "  \n"
+        self.assertEqual(parse_map(text).errors, [])
+
+    def test_reserved_names_exact_case(self):
+        for path in ("Index.md", "wikify.md", "sub/index.md"):
+            with self.subTest(path):
+                self.assertEqual(parse_map(block(entry(path))).errors, [])
+
+    def test_human_block_inside_map(self):
+        text = block(
+            entry(), "<!-- wikify:human -->\nnote\n<!-- /wikify:human -->", entry("b.md")
+        )
+        res = parse_map(text)
+        self.assertEqual(res.errors, ["index.md:3: human block inside map"])
+        self.assertEqual([e.path for e in res.entries], ["a.md", "b.md"])
+
+
+class HumanSpanTests(unittest.TestCase):
+    B = "<!-- wikify:human -->"
+    E = "<!-- /wikify:human -->"
+
+    def regex_spans(self, text):
+        return [m.span() for m in citations.HUMAN.finditer(text)]
+
+    def test_equivalence_table(self):
+        B, E = self.B, self.E
+        cases = {
+            "nested begin": B + "a" + B + "b" + E,
+            "adjacent": B + E + B + "x" + E,
+            "unterminated": "t " + B + " x",
+            "empty": B + E,
+            "crlf": B + "\r\nx\r\n" + E + "\r\n",
+            "begin only": B,
+            "end only": E,
+            "marker inside": B + "x " + B + E + " y" + E,
+            "two blocks": B + "1" + E + "mid" + B + "2" + E,
+            "begin after": B + "1" + E + B + "oops",
+            "none": "plain",
+        }
+        for name, text in cases.items():
+            with self.subTest(name):
+                self.assertEqual(citations.human_spans(text), self.regex_spans(text))
+
+    def test_equivalence_fuzz(self):
+        rng = random.Random(1234)
+        parts = [self.B, self.E, "x", "\n", " ", "<!--", "-->"]
+        for _ in range(300):
+            text = "".join(rng.choice(parts) for _ in range(rng.randint(0, 30)))
+            self.assertEqual(citations.human_spans(text), self.regex_spans(text), text)
+
+    def test_linear_on_repeated_unterminated(self):
+        text = (self.B + "x") * (1_000_000 // (len(self.B) + 1))
+        for name, fn in (
+            ("parse_map", parse_map),
+            ("_strip_human", citations._strip_human),
+            ("_human_blocks", commands._human_blocks),
+        ):
+            with self.subTest(name):
+                t0 = time.perf_counter()
+                fn(text)
+                self.assertLess(time.perf_counter() - t0, 1.0)
 
 
 class ValidateTests(unittest.TestCase):

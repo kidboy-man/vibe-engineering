@@ -34,8 +34,38 @@ class Citation:
     line: int
 
 
+HUMAN_BEGIN = "<!-- wikify:human -->"
+HUMAN_END = "<!-- /wikify:human -->"
+
+
+def human_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) of each human block, left to right, end exclusive.
+
+    Same semantics as ``HUMAN.finditer`` but linear: an unterminated begin
+    marker ends the scan instead of being retried at every later marker.
+    """
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    while True:
+        begin = text.find(HUMAN_BEGIN, pos)
+        if begin < 0:
+            return spans
+        end = text.find(HUMAN_END, begin + len(HUMAN_BEGIN))
+        if end < 0:
+            return spans
+        pos = end + len(HUMAN_END)
+        spans.append((begin, pos))
+
+
 def _strip_human(text: str) -> str:
-    return HUMAN.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    out: list[str] = []
+    last = 0
+    for start, end in human_spans(text):
+        out.append(text[last:start])
+        out.append("\n" * text.count("\n", start, end))
+        last = end
+    out.append(text[last:])
+    return "".join(out)
 
 
 def _citations(clean: str) -> list[Citation]:

@@ -12,8 +12,8 @@ from agents.wikify import citations, gitview, init_cmd, plan, scan, state
 
 def _human_blocks(text: str) -> list[tuple[int, str]]:
     return [
-        (text.count("\n", 0, m.start()) + 1, m.group(0))
-        for m in citations.HUMAN.finditer(text)
+        (text.count("\n", 0, start) + 1, text[start:end])
+        for start, end in citations.human_spans(text)
     ]
 
 

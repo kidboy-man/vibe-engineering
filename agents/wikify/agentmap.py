@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from agents.wikify.citations import HUMAN
+from agents.wikify.citations import human_spans
 
 MAP_BEGIN = "<!-- wikify:map -->"
 MAP_END = "<!-- /wikify:map -->"
@@ -20,7 +20,7 @@ MAX_BYTES = 6144
 MAX_TITLE = 60
 MAX_HINT = 80
 ENTRY = re.compile(r"^- \[([^\[\]()\n]{1,60})\]\(([^\s()\[\]]+)\) — ([^\[\]()\n]{1,80})$")
-_FORBIDDEN_PATHS = {"index.md", "wikify.md"}  # compared case-insensitively
+_FORBIDDEN_PATHS = {"index.md", "WIKIFY.md"}  # exact case: matches the control-file exemptions
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,23 @@ class MapBlock:
 
 def _mask(text: str) -> str:
     """Blank human blocks to spaces, keeping offsets and newlines intact."""
-    return HUMAN.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+    out: list[str] = []
+    last = 0
+    for start, end in human_spans(text):
+        out.append(text[last:start])
+        out.append(re.sub(r"[^\n]", " ", text[start:end]))
+        last = end
+    out.append(text[last:])
+    return "".join(out)
+
+
+def _markup_error(title: str, hint: str) -> str | None:
+    """Title and hint stay inert: no '@' import, no comment markers."""
+    for where, value in (("title", title), ("hint", hint)):
+        for token in ("@", "<!--", "-->"):
+            if token in value:
+                return f"'{token}' in {where}"
+    return None
 
 
 def _path_error(path: str) -> str | None:
@@ -57,7 +73,7 @@ def _path_error(path: str) -> str | None:
         return "'..' segment in path"
     if not path.lower().endswith(".md"):
         return "not a markdown page"
-    if path.lower() in _FORBIDDEN_PATHS:
+    if path in _FORBIDDEN_PATHS:
         return "reserved page"
     return None
 
@@ -84,6 +100,9 @@ def parse_map(text: str) -> MapBlock:
     errors: list[str] = []
     entries: list[Entry] = []
     first_line = _line(masked, begins[0])
+    line_start = masked.rfind("\n", 0, begins[0]) + 1
+    if masked[line_start : begins[0]].strip():
+        errors.append(f"index.md:{first_line}: text before map begin marker")
     if len(begins) > 1:
         errors.append(f"index.md:{_line(masked, begins[1])}: more than one map block")
     found = _first_block(masked)
@@ -92,16 +111,33 @@ def parse_map(text: str) -> MapBlock:
         return MapBlock(entries, errors, len(begins), first_line)
     _, body_start, end = found
     body = masked[body_start:end]
+    tail = masked.find("\n", end)
+    if masked[end + len(MAP_END) : len(masked) if tail < 0 else tail].strip():
+        errors.append(f"index.md:{_line(masked, end)}: text after map end marker")
+    for start, _ in human_spans(text):
+        if body_start <= start < end:
+            errors.append(f"index.md:{_line(text, start)}: human block inside map")
     if len(body.encode("utf-8")) > MAX_BYTES:
         errors.append(f"index.md:{first_line}: map exceeds {MAX_BYTES} bytes")
-    for i, raw in enumerate(body.split("\n")):
+    pieces = body.split("\n")
+    for i, raw in enumerate(pieces):
         line = raw.rstrip("\r")
         if not line.strip():
             continue
         n = first_line + i
+        if i == 0:
+            errors.append(f"index.md:{n}: text after map begin marker")
+            continue
+        if i == len(pieces) - 1:
+            errors.append(f"index.md:{n}: text before map end marker")
+            continue
         m = ENTRY.match(line)
         if not m:
             errors.append(f"index.md:{n}: invalid map entry")
+            continue
+        markup = _markup_error(m.group(1), m.group(3))
+        if markup:
+            errors.append(f"index.md:{n}: invalid map entry: {markup}")
             continue
         reason = _path_error(m.group(2))
         if reason:
