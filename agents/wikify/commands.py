@@ -71,6 +71,7 @@ def _verify(root: Path) -> tuple[int, list[str]]:
         notices.extend(_allow_notices(root))
         allowed = scan.allowed_hits(root)
     notices.extend(pointer.pointer_notices(root))
+    notices.extend(pointer.size_notices(root))
     lines = errors + notices
     if allowed:
         lines += ["ALLOW-LISTED:", *(f"  {a}" for a in allowed)]

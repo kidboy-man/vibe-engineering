@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from agents.wikify import commands, gitview, init_cmd, pointer, state
+from agents.wikify import commands, gitview, init_cmd, pointer, scan, state
 from tests.test_wikify_hook import bash, guard
 from tests.test_wikify_state import RepoCase, git
 
@@ -576,6 +576,122 @@ class HardeningTests(LinkCase):
         self.assertEqual(rc, 0)
         self.assertEqual(text.count("backup: "), 1)
         self.assertLess(text.index("backup: "), text.index("Next:"))
+
+
+BUDGET = (
+    "Claude Code recommends under 200 lines per file and Codex stops adding "
+    "files at 32 KiB combined (as of 2026-10-11)"
+)
+
+
+def section(title, n):
+    return f"## {title}\n" + "x\n" * (n - 1)
+
+
+class SizeNoticeTests(LinkCase):
+    def test_long_file_lists_three_largest_sections(self):
+        text = (
+            BLOCK
+            + "intro\n"
+            + section("Small", 9)
+            + section("Big", 120)
+            + "```\n## not a heading\n```\n"  # fenced: not a heading, so Big runs to Mid
+            + section("Mid", 80)
+            + section("Tie A", 15)
+            + section("Tie B", 15)
+            + "# Top level\n" + "y\n" * 3
+        )
+        self.write("AGENTS.md", text)
+        n = len(text.splitlines())
+        self.assertGreater(n, 200)
+        self.assertEqual(
+            pointer.size_notices(self.root),
+            [
+                f"NOTICE: AGENTS.md is {n} lines / 1 KiB; {BUDGET}; sections that could "
+                "move into docs/wiki pages: Big (123 lines), Mid (80 lines), Tie A (15 lines)"
+            ],
+        )
+
+    def test_large_byte_file_with_few_lines(self):
+        text = section("Wide", 40).replace("x\n", "x" * 1023 + "\n")
+        self.write("AGENTS.md", text + "z" * (40 * 1024 - len(text)))
+        self.assertEqual(
+            pointer.size_notices(self.root),
+            [
+                f"NOTICE: AGENTS.md is 41 lines / 40 KiB; {BUDGET}; sections that could "
+                "move into docs/wiki pages: Wide (41 lines)"
+            ],
+        )
+
+    def test_one_byte_over_rounds_up(self):
+        self.write("AGENTS.md", "a" * (32 * 1024 + 1))
+        self.assertEqual(
+            pointer.size_notices(self.root),
+            [
+                f"NOTICE: AGENTS.md is 1 lines / 33 KiB; {BUDGET}; sections that could "
+                "move into docs/wiki pages: none found (no `## ` headings)"
+            ],
+        )
+
+    def test_small_files_have_no_notice(self):
+        self.write("AGENTS.md", "x\n" * 50)
+        self.write("GEMINI.md", "x\n" * 200)
+        self.assertEqual(pointer.size_notices(self.root), [])
+
+    def test_symlink_not_analysed(self):
+        self.write("AGENTS.md", "x\n" * 300)
+        os.symlink("AGENTS.md", self.root / "CLAUDE.md")
+        notes = pointer.size_notices(self.root)
+        self.assertEqual(len(notes), 1)
+        self.assertTrue(notes[0].startswith("NOTICE: AGENTS.md is 300 lines"))
+
+    def test_heading_control_characters_escaped(self):
+        self.write("AGENTS.md", section("bad\x1b[31m", 250))
+        (note,) = pointer.size_notices(self.root)
+        self.assertNotIn("\x1b", note)
+        self.assertIn("bad\\x1b[31m (250 lines)", note)
+
+    def test_over_cap_not_analysed(self):
+        self.write("AGENTS.md", b"x\n" * (1 << 20))  # 2 MiB
+        self.assertEqual(
+            pointer.size_notices(self.root),
+            ["NOTICE: AGENTS.md is larger than 1 MiB; not analysed"],
+        )
+        self.assertEqual(pointer.pointer_notices(self.root), [])
+
+    def test_reads_are_capped(self):
+        self.write("AGENTS.md", b"x\n" * (1 << 20))
+        sizes = []
+        real = pointer._read_capped
+
+        def spy(path):
+            data = real(path)
+            sizes.append(None if data is None else len(data))
+            return data
+
+        with mock.patch.object(pointer, "_read_capped", side_effect=spy):
+            pointer.size_notices(self.root)
+            pointer.pointer_notices(self.root)
+        self.assertEqual(sizes, [None, None])
+
+    def test_read_error_is_silent_and_never_fails_verify(self):
+        self.write("AGENTS.md", "x\n" * 300)
+        rc0, _ = commands.run_verify(self.root)
+        with mock.patch.object(pointer, "_read_capped", side_effect=PermissionError):
+            self.assertEqual(pointer.size_notices(self.root), [])
+            rc, lines = commands.run_verify(self.root)
+        self.assertEqual(rc, rc0)
+        self.assertIn("NOTICE: could not read AGENTS.md", lines)
+
+    def test_verify_prints_size_notice_rc_unchanged(self):
+        self.write("AGENTS.md", BLOCK)
+        rc0, lines0 = commands.run_verify(self.root)
+        self.write("AGENTS.md", BLOCK + "x\n" * 300)
+        rc, lines = commands.run_verify(self.root)
+        self.assertEqual(rc, rc0)
+        (note,) = [ln for ln in lines if ln.startswith("NOTICE: AGENTS.md is ")]
+        self.assertEqual([ln for ln in lines if ln != note], lines0)
+        self.assertEqual(lines.index(note) + 1, lines.index(scan.FLOOR_NOTICE))
 
 
 class NoticeTests(LinkCase):

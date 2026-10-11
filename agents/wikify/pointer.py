@@ -34,6 +34,15 @@ TARGETS = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")
 INDEX_REL = "docs/wiki/index.md"
 REFUSED = "refused: "
 
+# Startup budgets from primary docs fetched 2026-10-11; tools change these, so
+# re-verify and update the date. Claude Code: "under 200 lines per CLAUDE.md"
+# (https://code.claude.com/docs/en/memory). Codex: project_doc_max_bytes,
+# default 32 KiB for the combined instruction chain (OpenAI Codex AGENTS.md guide).
+BUDGETS_AS_OF = "2026-10-11"
+MAX_LINES = 200
+MAX_BYTES = 32 * 1024
+READ_CAP = 1 << 20  # verify reads at most 1 MiB of a target
+
 
 @dataclass(frozen=True)
 class Change:
@@ -308,6 +317,63 @@ def cmd_link(cwd: str | Path | None = None, dry_run: bool = False) -> int:
     return 0
 
 
+def _read_capped(path: Path) -> bytes | None:
+    """At most READ_CAP bytes of ``path``; None when the file is larger."""
+    with path.open("rb") as fh:
+        data = fh.read(READ_CAP + 1)
+    return None if len(data) > READ_CAP else data
+
+
+def _sections(lines: list[str]) -> list[tuple[str, int]]:
+    """(title, line count) of each ``## `` section, in document order.
+
+    Only column-0 ``#``/``##`` headings outside code fences start a section;
+    the pointer block is skipped and its markers end the section before them.
+    """
+    starts: list[tuple[int, str | None]] = []  # None: a boundary, not a candidate
+    in_block = False
+    for i, line, inside in _scan(lines):
+        bare = line.rstrip("\r\n")
+        if inside:
+            continue
+        if bare + "\n" in (BEGIN, END):
+            in_block = bare + "\n" == BEGIN
+            starts.append((i, None))
+        elif not in_block and bare.startswith(("# ", "## ")):
+            starts.append((i, bare[3:].strip() if bare.startswith("## ") else None))
+    stops = [i for i, _ in starts[1:]] + [len(lines)]
+    return [(title, stop - i) for (i, title), stop in zip(starts, stops) if title is not None]
+
+
+def size_notices(root: Path) -> list[str]:
+    """Notices for targets over the startup budgets; read-only, never raises."""
+    notices: list[str] = []
+    for rel in TARGETS:
+        path = Path(root) / rel
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            data = _read_capped(path)
+            if data is None:
+                notices.append(f"NOTICE: {rel} is larger than 1 MiB; not analysed")
+                continue
+            lines = _lines(data.decode("utf-8").removeprefix(_BOM))
+        except (OSError, UnicodeDecodeError):
+            continue  # pointer_notices already reports an unreadable target
+        if len(lines) <= MAX_LINES and len(data) <= MAX_BYTES:
+            continue
+        largest = sorted(_sections(lines), key=lambda s: -s[1])[:3]  # stable: ties keep order
+        found = ", ".join(f"{_safe(title[:60])} ({n} lines)" for title, n in largest)
+        notices.append(
+            f"NOTICE: {rel} is {len(lines)} lines / {-(-len(data) // 1024)} KiB; "
+            f"Claude Code recommends under {MAX_LINES} lines per file and Codex stops "
+            f"adding files at {MAX_BYTES // 1024} KiB combined (as of {BUDGETS_AS_OF}); "
+            "sections that could move into docs/wiki pages: "
+            + (found or "none found (no `## ` headings)")
+        )
+    return notices
+
+
 def pointer_notices(root: Path) -> list[str]:
     """Verify notices about the pointer block; never raises, never fails verify."""
     root = Path(root)
@@ -315,12 +381,17 @@ def pointer_notices(root: Path) -> list[str]:
     blocks: list[str] = []
     lacking: list[str] = []
     seen = False
+    oversized = False
     for rel in TARGETS:
         path = root / rel
         try:
             if path.is_symlink() or not path.is_file():
                 continue
-            text = path.read_bytes().decode("utf-8").removeprefix(_BOM)
+            data = _read_capped(path)
+            if data is None:  # size_notices reports it; its block state is unknown
+                oversized = True
+                continue
+            text = data.decode("utf-8").removeprefix(_BOM)
         except (OSError, UnicodeDecodeError):
             notices.append(f"NOTICE: could not read {rel}")
             continue
@@ -341,7 +412,7 @@ def pointer_notices(root: Path) -> list[str]:
         lacking = [rel for rel in lacking if rel not in (ignored or [])]
     if seen:
         notices += [f"NOTICE: {rel} has no wikify pointer block; run vibe wikify link" for rel in lacking]
-    elif not notices:
+    elif not notices and not oversized:
         notices.append(
             "NOTICE: no wikify pointer block in AGENTS.md/CLAUDE.md/GEMINI.md; "
             "run vibe wikify link"
