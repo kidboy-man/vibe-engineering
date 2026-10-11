@@ -32,7 +32,7 @@ class InitTests(RepoCase):
 
     def test_template_copied_byte_for_byte(self):
         self.assertTrue(TEMPLATE.is_file())
-        self.assertLessEqual(len(TEMPLATE.read_text().splitlines()), 120)
+        self.assertLessEqual(len(TEMPLATE.read_text().splitlines()), 140)
         init_cmd.cmd_init(cwd=self.root)
         self.assertEqual(self.wiki("WIKIFY.md").read_bytes(), TEMPLATE.read_bytes())
 
@@ -40,6 +40,42 @@ class InitTests(RepoCase):
         text = TEMPLATE.read_text()
         self.assertIn("git status --short -- docs/wiki", text)
         self.assertIn("git add -N -- docs/wiki && git diff -- docs/wiki", text)
+
+    def test_index_scaffolds_empty_map(self):
+        init_cmd.cmd_init(cwd=self.root)
+        self.assertEqual(
+            self.wiki("index.md").read_text(),
+            "# Wiki index\n\n<!-- wikify:map -->\n<!-- /wikify:map -->\n",
+        )
+
+    def test_next_hint_on_init_and_reinit_writes_nothing_else(self):
+        import contextlib
+        import io
+
+        hint = "Next: run vibe wikify link to add the agent pointer block to AGENTS.md"
+        for _ in range(2):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(init_cmd.cmd_init(cwd=self.root), 0)
+            self.assertEqual(buf.getvalue().splitlines()[-1], hint)
+        self.assertFalse((self.root / "AGENTS.md").exists())
+
+    def test_template_documents_agent_map(self):
+        text = " ".join(TEMPLATE.read_text().split())
+        for phrase in (
+            "## Agent map",
+            "<!-- wikify:map -->",
+            "<!-- /wikify:map -->",
+            "- [Title](path.md) — hint",
+            "Add an entry for every page you create",
+            "when an agent should load",
+            "navigation, not factual claims",
+            "60 entries",
+            "6144 bytes",
+            "Never use `@` imports",
+        ):
+            with self.subTest(phrase):
+                self.assertIn(phrase, text)
 
     def test_template_states_limits_and_batching(self):
         text = " ".join(TEMPLATE.read_text().split())

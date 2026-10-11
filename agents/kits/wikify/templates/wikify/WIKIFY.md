@@ -40,8 +40,29 @@ page only after the user agrees.
 - `architecture/` for the overall structure.
 - Classification rule: a concern used by two or more bounded contexts, or that
   lives in shared or infrastructure code, goes to `technical/`.
-- `index.md` lists the pages: headings and link lists only, or cited prose
-  (it is verified like every other page).
+- `index.md` holds the agent map (next section); prose outside the map block
+  needs citations like every other page.
+
+## Agent map
+
+The top-level `index.md` carries one map block that agents read to decide
+which page to load:
+
+    <!-- wikify:map -->
+    - [Title](path.md) — hint
+    <!-- /wikify:map -->
+
+- Add an entry for every page you create, in the same change. `verify`
+  rejects pages the map does not reach, duplicate entries and missing targets.
+- One entry per line: `- [Title](path.md) — hint`, with an em dash. `path` is
+  relative to `docs/wiki/`, ends in `.md`, and is not `index.md` or `WIKIFY.md`.
+- The hint says when an agent should load the page, for example "when
+  changing the order lifecycle". Title up to 60 characters, hint up to 80.
+- No `@`, `<!--` or `-->` in a title or hint, and the markers sit alone on
+  their lines. Never use `@` imports: they are expanded eagerly.
+- Entries are navigation, not factual claims: they are exempt from citation
+  checks. Keep claims in the pages themselves.
+- Caps: 60 entries and 6144 bytes. One block only, and not inside a human block.
 
 ## Citations
 

@@ -25,6 +25,8 @@ class VerifyCase(RepoCase):
         super().setUp()
         self.commit("src/a.py", "def foo():\n    return 1\n")
         out(init_cmd.cmd_init, cwd=self.root)
+        # legacy index without a map: these tests are about citations, not the map
+        (self.root / "docs/wiki/index.md").write_text("# Wiki index\n")
 
     def page(self, text, rel=PAGE):
         p = self.root / rel
@@ -91,6 +93,108 @@ class VerifyTests(VerifyCase):
         self.assertTrue(any("email (allow-listed)" in ln for ln in lines))
         self.commit_wiki()
         self.assertFalse(any("ALLOW-LIST CHANGED" in ln for ln in self.verify()[1]))
+
+
+class AgentMapVerifyTests(VerifyCase):
+    NOTICE = "NOTICE: docs/wiki/index.md has no wikify:map block"
+    EMPTY = "# Wiki index\n\n<!-- wikify:map -->\n<!-- /wikify:map -->\n"
+
+    def setUp(self):
+        super().setUp()
+        self.index(self.EMPTY)
+
+    def index(self, text):
+        self.page(text, "docs/wiki/index.md")
+
+    def mapped(self, *entries):
+        body = "".join(f"{e}\n" for e in entries)
+        return f"# Wiki index\n\n<!-- wikify:map -->\n{body}<!-- /wikify:map -->\n"
+
+    def errs(self):
+        rc, lines = self.verify()
+        return rc, [ln for ln in lines if ".md:" in ln]
+
+    def test_fresh_init_verifies_clean(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            git(root, "init", "-q")
+            out(init_cmd.cmd_init, cwd=root)
+            rc, lines = commands.run_verify(root)
+        self.assertEqual((rc, lines[-1]), (0, "ok: wiki verified"))
+        self.assertEqual(scan.scan_wiki(root), [])
+
+    def test_unmapped_page_is_error(self):
+        self.page("Foo (src: src/a.py:1)\n")
+        rc, errs = self.errs()
+        self.assertEqual(rc, 1)
+        self.assertEqual(errs, ["index.md:3: page not reachable from the map: a.md"])
+
+    def test_mapped_entry_is_navigation_not_cited(self):
+        self.page("Foo (src: src/a.py:1)\n")
+        self.index(self.mapped("- [A](a.md) — when changing foo"))
+        self.assertEqual(self.errs(), (0, []))
+
+    def test_duplicate_and_missing_targets(self):
+        self.page("Foo (src: src/a.py:1)\n")
+        self.index(self.mapped(
+            "- [A](a.md) — when changing foo",
+            "- [A](a.md) — again",
+            "- [B](b.md) — nothing there",
+        ))
+        rc, errs = self.errs()
+        self.assertEqual(rc, 1)
+        self.assertEqual(
+            errs,
+            ["index.md:5: duplicate entry: a.md", "index.md:6: link target missing: b.md"],
+        )
+
+    def test_prose_outside_block_still_needs_citation(self):
+        self.index(self.EMPTY + "\nUncited claim here.\n")
+        rc, errs = self.errs()
+        self.assertEqual(rc, 1)
+        self.assertEqual(errs, ["index.md:6: uncited paragraph"])
+
+    def test_map_inside_human_block_is_ignored(self):
+        self.page("Foo (src: src/a.py:1)\n")
+        self.index(
+            "# Wiki index\n\n<!-- wikify:human -->\n"
+            "<!-- wikify:map -->\n<!-- /wikify:map -->\n<!-- /wikify:human -->\n"
+        )
+        rc, lines = self.verify()
+        self.assertEqual(rc, 0)
+        self.assertTrue(any(ln.startswith(self.NOTICE) and "1 page(s)" in ln for ln in lines))
+
+    def test_legacy_wiki_without_block_gets_notice_only(self):
+        self.page("Foo (src: src/a.py:1)\n")
+        self.index("# Wiki index\n")
+        rc, lines = self.verify()
+        self.assertEqual(rc, 0)
+        self.assertIn(self.NOTICE + "; 1 page(s) are not reachable from a map", lines)
+
+    def test_no_notice_when_only_index_or_map_present(self):
+        self.index("# Wiki index\n")
+        self.assertFalse(any(ln.startswith(self.NOTICE) for ln in self.verify()[1]))
+        self.page("Foo (src: src/a.py:1)\n")
+        self.index(self.mapped("- [A](a.md) — when changing foo"))
+        self.assertFalse(any(ln.startswith(self.NOTICE) for ln in self.verify()[1]))
+
+    def test_cap_of_sixty_entries(self):
+        for i in range(61):
+            self.page(f"Foo (src: src/a.py:1)\n", f"docs/wiki/p{i}.md")
+        self.index(self.mapped(*(f"- [P{i}](p{i}.md) — hint" for i in range(61))))
+        rc, errs = self.errs()
+        self.assertEqual(rc, 1)
+        self.assertIn("index.md:3: map exceeds 60 entries", errs)
+
+    def test_nested_index_is_an_ordinary_page(self):
+        self.page("Foo (src: src/a.py:1)\n", "docs/wiki/sub/index.md")
+        rc, errs = self.errs()
+        self.assertEqual(errs, ["index.md:3: page not reachable from the map: sub/index.md"])
+        self.index(self.mapped("- [S](sub/index.md) — when in sub"))
+        self.assertEqual(self.errs(), (0, []))
 
 
 class MarkTests(VerifyCase):

@@ -13,7 +13,8 @@ TEMPLATE = (
     / "kits" / "wikify" / "templates" / "wikify" / "WIKIFY.md"
 )
 
-INDEX = "# Wiki index\n"  # headings only: prose here needs citations too
+# headings and the map block only: prose here needs citations too
+INDEX = "# Wiki index\n\n<!-- wikify:map -->\n<!-- /wikify:map -->\n"
 STATE = '{\n  "version": 1,\n  "covered": null\n}\n'
 IGNORE = (
     "# Repo paths the wiki must not cite, one glob per line.\n"
@@ -65,4 +66,5 @@ def cmd_init(cwd: str | Path | None = None) -> int:
             print(f"already initialized: {WIKI_DIR}{name}")
         else:
             print(f"created {WIKI_DIR}{name}")
+    print("Next: run vibe wikify link to add the agent pointer block to AGENTS.md")
     return 0

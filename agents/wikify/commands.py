@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-from agents.wikify import citations, gitview, init_cmd, plan, scan, state
+from agents.wikify import agentmap, citations, gitview, init_cmd, plan, scan, state
 
 
 def _human_blocks(text: str) -> list[tuple[int, str]]:
@@ -47,10 +47,23 @@ def _verify(root: Path) -> tuple[int, list[str]]:
     notices: list[str] = []
     allowed: list[str] = []
     if not any(e.startswith(("docs:", "docs/wiki:")) for e in errors):
+        block = agentmap.MapBlock([], [], 0)
         for rel, path in pages:
             text = path.read_text(encoding="utf-8")
-            errors.extend(citations.verify_page(root, rel, text, ignore))
+            checked = text
+            if rel == "index.md":  # only the top-level index carries the map
+                block = agentmap.parse_map(text)
+                checked = agentmap.strip_map(text)  # map lines are navigation
+            errors.extend(citations.verify_page(root, rel, checked, ignore))
             notices.extend(_notices(root, rel, text))
+        errors.extend(block.errors)
+        errors.extend(agentmap.validate_map(block, {rel for rel, _ in pages}))
+        others = sum(1 for rel, _ in pages if rel != "index.md")
+        if block.blocks == 0 and others:
+            notices.append(
+                f"NOTICE: {state.WIKI_DIR}index.md has no wikify:map block; "
+                f"{others} page(s) are not reachable from a map"
+            )
         errors.extend(scan.scan_wiki(root))
         notices.extend(_allow_notices(root))
         allowed = scan.allowed_hits(root)
