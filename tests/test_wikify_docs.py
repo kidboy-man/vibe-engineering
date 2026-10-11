@@ -460,11 +460,11 @@ class RenderTests(unittest.TestCase):
             "- [docs/b.md](docs/b.md) — 0 sections (src: docs/b.md:1-4)\n",
         )
 
-    def test_index_cap(self):
+    def test_index_lists_every_doc(self):
         rows = [(f"d{i:03d}.md", f"sources/d{i:03d}.md", 1, 3) for i in range(205)]
         lines = di.render_index(rows).split("\n")[3:-1]
-        self.assertEqual(len(lines), 201)
-        self.assertEqual(lines[-1], "- (5 more docs not listed) (src: d000.md:1-3)")
+        self.assertEqual(len(lines), 205)
+        self.assertNotIn("more docs", lines[-1])
 
 
 class PagesTests(RepoCase):
@@ -907,10 +907,6 @@ class DocsCmdTests(RepoCase):
         self.assertTrue(any(".wikifydocs" in e for e in state.ignored_control_files(self.root)))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class DocsVerifyTests(RepoCase):
     """verify and plan against generated doc pages."""
 
@@ -958,7 +954,8 @@ class DocsVerifyTests(RepoCase):
 
     def errors(self):
         rc, lines = self.verify()
-        return rc, [ln for ln in lines if ".md:" in ln or "generated page" in ln]
+        noise = ("NOTICE", "HUMAN BLOCK", "ALLOW", "ok: ", scan.FLOOR_NOTICE)
+        return rc, [ln for ln in lines if not ln.startswith(noise)]
 
     def test_clean(self):
         self.assertEqual(self.errors(), (0, []))
@@ -1049,6 +1046,8 @@ class DocsVerifyTests(RepoCase):
             p = plan.build_plan(self.root)
             rc, lines = self.verify()
         self.assertEqual((p["docs_unindexed"], p["docs_stale"], p["docs_skipped"]), ([], [], []))
+        self.assertIn("doc inventory failed (OSError)", p["error"])
+        self.assertIn("ERROR: doc inventory failed", plan.render(p))
         self.assertEqual((rc, lines[0]), (1, "verify failed: OSError"))
 
     def test_expected_pages_called_once(self):
@@ -1059,21 +1058,55 @@ class DocsVerifyTests(RepoCase):
             plan.build_plan(self.root)
         self.assertEqual(spy.call_count, 1)
 
-    def test_300_docs_verify_under_three_seconds(self):
-        self.write({f"docs/d{i:03d}.md": f"# D{i}\n\n## S\n" for i in range(300)})
+    def _many_docs_verify(self, n, limit):
+        self.write({f"docs/d{i:03d}.md": f"# D{i}\n\n## S\n" for i in range(n)})
         self.commit_all()
         self.assertEqual(self.docs(), 0)
         self.commit_all()
         start = time.perf_counter()
-        rc, lines = self.verify()
+        result = self.errors()
         elapsed = time.perf_counter() - start
-        # the generated index lists at most 200 docs, so the rest are unreachable
-        # by design; nothing else may be wrong (no stale pages, no bad citations)
-        errs = [ln for ln in lines if ".md:" in ln or "generated page" in ln]
+        self.assertEqual(result, (0, []))
+        self.assertLess(elapsed, limit, f"{elapsed:.2f}s")
+
+    def test_300_docs_verify_under_three_seconds(self):
+        self._many_docs_verify(300, 3)
+
+    def test_500_docs_verify_under_three_seconds(self):
+        self._many_docs_verify(498, 3)  # + README.md + docs/a.md = MAX_DOCS
+
+    def test_crlf_generated_page_verifies_clean(self):
+        p = self.root / "docs/wiki/sources/README.md"
+        p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
+        self.assertEqual(self.errors(), (0, []))
+
+    def test_human_block_secret_still_scanned(self):
+        self.write({
+            "docs/wiki/a.md": "<!-- wikify:human -->\nsee (src: README.md:1) "
+            "password = \"hunter2hunter2\"\n<!-- /wikify:human -->\n"
+        })
+        self.index("- [A](a.md) \u2014 a\n")
+        rc, lines = self.verify()
         self.assertEqual(rc, 1)
-        self.assertEqual(len(errs), 102)
-        self.assertTrue(all("not reachable from the map" in e for e in errs), errs[:3])
-        self.assertLess(elapsed, 3, f"{elapsed:.2f}s")
+        self.assertTrue(any("secret-assignment" in ln for ln in lines))
+        self.assertFalse(any("doc citation" in ln for ln in lines))
+
+    def test_marker_top_level_index_agrees_between_verify_and_status(self):
+        idx = self.root / "docs/wiki/index.md"
+        idx.write_text(di.MARKER + "\n" + idx.read_text())
+        # verify never treats the top-level index as a generated page (no
+        # out-of-date error, marker not blanked); plan must not call it stale
+        self.assertEqual(self.errors(), (1, ["index.md:1: uncited paragraph"]))
+        self.assertEqual(plan.build_plan(self.root)["docs_stale"], [])
+
+    def test_plan_on_layout_error_wiki_keeps_keys(self):
+        import shutil
+
+        shutil.rmtree(self.root / "docs/wiki")
+        os.symlink(self.root / "src", self.root / "docs/wiki")
+        p = plan.build_plan(self.root)
+        self.assertEqual((p["docs_unindexed"], p["docs_stale"], p["docs_skipped"]), ([], [], []))
+        self.assertIsNone(p["error"])
 
     def test_one_mb_doc_verify_under_one_second(self):
         text = "".join(f"## H{i}\n" + "x" * 90 + "\n" for i in range(5000))
@@ -1086,3 +1119,7 @@ class DocsVerifyTests(RepoCase):
         elapsed = time.perf_counter() - start
         self.assertEqual(rc, 0)
         self.assertLess(elapsed, 1, f"{elapsed:.2f}s")
+
+
+if __name__ == "__main__":
+    unittest.main()

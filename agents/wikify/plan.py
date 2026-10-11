@@ -13,8 +13,8 @@ from agents.secret_policies import is_secret_path
 from agents.wikify import agentmap, citations, docs_inventory, gitview, state
 from agents.wikify.pointer import _safe
 
-# ponytail: repos using these roots get the sub-directory as the context.
 MAX_SKIPPED_SHOWN = 50
+# ponytail: repos using these roots get the sub-directory as the context.
 CONTEXT_ROOTS = ("src", "app", "agents", "cmd", "internal", "pkg", "lib")
 
 
@@ -93,15 +93,17 @@ def _map_missing(rels: list[str], texts: dict[str, str]) -> list[str]:
 
 def _docs_status(
     root: Path, head: str | None, layout_errors: list[str], texts: dict[str, str]
-) -> dict:
-    """Same guard as verify: no inventory when the wiki layout is already broken."""
+) -> tuple[dict, str | None]:
+    """(status, error). No inventory when the wiki layout is already broken."""
     empty = {"unindexed": [], "stale": [], "skipped": []}
-    if head is None or not (root / state.WIKI_DIR).is_dir() or any(e.startswith(("docs:", "docs/wiki:")) for e in layout_errors):
-        return empty
+    if head is None or not (root / state.WIKI_DIR).is_dir():
+        return empty, None
+    if any(e.startswith(("docs:", "docs/wiki:")) for e in layout_errors):
+        return empty, None
     try:
-        return docs_inventory.status(root, texts)
-    except Exception:  # plan is advisory; verify is the fail-closed gate
-        return empty
+        return docs_inventory.status(root, texts), None
+    except Exception as exc:  # plan is advisory, but never reports "all fresh" falsely
+        return empty, f"doc inventory failed ({type(exc).__name__}); docs_* keys are incomplete"
 
 
 def _join(prev: str | None, msg: str) -> str:
@@ -112,7 +114,7 @@ def build_plan(root: Path, full: bool = False) -> dict:
     root = Path(root)
     head = gitview.head(root)
     layout_errors, rels, texts = _page_texts(root)
-    docs = _docs_status(root, head, layout_errors, texts)
+    docs, docs_error = _docs_status(root, head, layout_errors, texts)
     plan: dict = {
         "mode": "full",
         "base": None,
@@ -131,6 +133,8 @@ def build_plan(root: Path, full: bool = False) -> dict:
     }
     if citations.ignore_status(root) == "rejected":
         plan["error"] = f"{citations.IGNORE_REL} rejected; ignore rules were NOT applied"
+    if docs_error:
+        plan["error"] = _join(plan["error"], docs_error)
     if head is None:
         return plan
     ignore = citations.load_ignore(root)
@@ -183,7 +187,7 @@ def render(plan: dict) -> str:
             if len(plan[key]) > len(shown):
                 lines.append(f"  ... and {len(plan[key]) - len(shown)} more")
         else:
-            lines.extend(f"  {item}" for item in plan[key])
+            lines.extend(f"  {_safe(item)}" for item in plan[key])
     lines.append(f"stale_deleted ({len(plan['stale_deleted'])}):")
     lines.extend(
         f"  {item['page']}: {', '.join(item['missing'])}" for item in plan["stale_deleted"]

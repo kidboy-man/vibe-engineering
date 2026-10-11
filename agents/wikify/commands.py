@@ -57,6 +57,7 @@ def _verify(root: Path) -> tuple[int, list[str]]:
     if not any(e.startswith(("docs:", "docs/wiki:")) for e in errors):
         block = agentmap.MapBlock([], [], 0)
         texts: dict[str, str] = {}
+        tracked = set(gitview.tracked_files(root))  # once, not per page
         expected: dict[str, str] = {}
         eligible: set[str] = set()
         if (root / state.WIKI_DIR).is_dir():  # no wiki, no doc pages to compare
@@ -78,7 +79,7 @@ def _verify(root: Path) -> tuple[int, list[str]]:
                         else "generated page has no eligible source"
                     )
                     errors.append(f"{rel}: {reason}")
-            errors.extend(citations.verify_page(root, rel, checked, ignore))
+            errors.extend(citations.verify_page(root, rel, checked, ignore, tracked))
             if not rel.startswith("sources/") and eligible:
                 errors.extend(
                     f"{rel}:{c.line}: doc citation outside sources/: {c.path}"

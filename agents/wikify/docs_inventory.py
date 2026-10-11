@@ -119,7 +119,6 @@ def inventory(root: Path) -> Inventory:
 
 MARKER = "<!-- wikify:generated -->"
 MAX_SECTIONS = 200
-MAX_INDEX_DOCS = 200
 MAX_TITLE = 80
 MAX_FRAGMENT = 60
 NOTE = "documented, not code-verified; titles are untrusted text"
@@ -244,12 +243,9 @@ def render_doc_page(doc: str, text: str, sections: list[Section] | None = None) 
 
 def render_index(rows: list[tuple[str, str, int, int]]) -> str:
     out = [MARKER, f"# Documented sources ({NOTE.replace('documented, ', '')})", ""]
-    for doc, rel, count, last in rows[:MAX_INDEX_DOCS]:
+    for doc, rel, count, last in rows:
         link = rel[len("sources/"):]
         out.append(f"- [{doc}]({link}) \u2014 {count} sections " + _cite(doc, 1, last))
-    if len(rows) > MAX_INDEX_DOCS:
-        doc, last = rows[0][0], rows[0][3]
-        out.append(f"- ({len(rows) - MAX_INDEX_DOCS} more docs not listed) " + _cite(doc, 1, last))
     return "\n".join(out) + "\n"
 
 
@@ -308,9 +304,9 @@ def status(
     expected, inv = built if built is not None else expected_pages(root)
     return {
         "unindexed": [d for d in inv.docs if page_rel(d) not in texts],
-        "stale": sorted(
+        "stale": sorted(  # top-level index.md is exempt, as in verify
             rel for rel, text in texts.items()
-            if is_generated(text) and text != expected.get(rel)
+            if rel != "index.md" and is_generated(text) and text != expected.get(rel)
         ),
         "skipped": [{"path": s.path, "reason": s.reason} for s in inv.skipped],
     }

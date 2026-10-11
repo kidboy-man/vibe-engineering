@@ -212,13 +212,20 @@ def _check(root: Path, cite: Citation, tracked: set[str], ignore: list[str]) -> 
     return None
 
 
-def verify_page(root: Path, page_rel: str, text: str, ignore: list[str]) -> list[str]:
+def verify_page(
+    root: Path,
+    page_rel: str,
+    text: str,
+    ignore: list[str],
+    tracked: set[str] | None = None,
+) -> list[str]:
     """Error strings ``"<page_rel>:<line>: <reason>"``; empty when the page verifies."""
     root = Path(root)
     cites, uncited = parse(text)
     if len(cites) > MAX_CITATIONS:
         return [f"{page_rel}:1: too many citations (limit {MAX_CITATIONS})"]
-    tracked = set(gitview.tracked_files(root))
+    if tracked is None:  # callers verifying many pages pass one set
+        tracked = set(gitview.tracked_files(root))
     errors: list[tuple[int, str]] = []
     for cite in cites:
         reason = _check(root, cite, tracked, ignore)
