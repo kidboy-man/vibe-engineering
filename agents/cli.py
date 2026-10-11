@@ -107,6 +107,12 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
     plan_parser.add_argument("--json", action="store_true", help="Print the plan as JSON")
     wik_sub.add_parser("verify", help="Check citations and scan the wiki for secrets")
     wik_sub.add_parser("mark", help="Verify, then record the covered commit")
+    link_parser = wik_sub.add_parser(
+        "link", help="Add the wiki pointer block to AGENTS.md (and CLAUDE.md/GEMINI.md if present)"
+    )
+    link_parser.add_argument(
+        "--dry-run", action="store_true", help="Show the changes without writing files"
+    )
 
     kits = sub.add_parser("kits", help="List and manage kits")
     kits_sub = kits.add_subparsers(dest="kits_command", required=True)

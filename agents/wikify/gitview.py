@@ -115,3 +115,10 @@ def files_in_commit(root: Path, commit: str) -> list[str] | None:
         root, "show", "--name-only", "--no-renames", "--format=", commit
     )
     return _lines(result) if result.returncode == 0 else None
+
+
+def git_dir(root: Path) -> Path | None:
+    """Absolute path of the repo's git dir; None on error."""
+    result = run_git(root, "rev-parse", "--absolute-git-dir")
+    out = result.stdout.strip()
+    return Path(out) if result.returncode == 0 and out else None

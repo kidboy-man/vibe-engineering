@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-from agents.wikify import agentmap, citations, gitview, init_cmd, plan, scan, state
+from agents.wikify import agentmap, citations, gitview, init_cmd, plan, pointer, scan, state
 
 
 def _human_blocks(text: str) -> list[tuple[int, str]]:
@@ -67,6 +67,7 @@ def _verify(root: Path) -> tuple[int, list[str]]:
         errors.extend(scan.scan_wiki(root))
         notices.extend(_allow_notices(root))
         allowed = scan.allowed_hits(root)
+    notices.extend(pointer.pointer_notices(root))
     lines = errors + notices
     if allowed:
         lines += ["ALLOW-LISTED:", *(f"  {a}" for a in allowed)]
@@ -155,5 +156,7 @@ def cmd_wikify(args: argparse.Namespace, cwd: str | Path | None = None) -> int:
         return cmd_verify(cwd)
     if sub == "mark":
         return cmd_mark(cwd)
+    if sub == "link":
+        return pointer.cmd_link(cwd, args.dry_run)
     print(f"unknown wikify command: {sub}")
     return 2

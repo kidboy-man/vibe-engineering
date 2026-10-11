@@ -45,6 +45,9 @@ class CliHelpContractTests(unittest.TestCase):
     def test_wikify_help(self):
         self._assert_matches_fixture("wikify_help.txt", "wikify")
 
+    def test_wikify_link_help(self):
+        self._assert_matches_fixture("wikify_link_help.txt", "wikify", "link")
+
     def test_kits_help(self):
         self._assert_matches_fixture("kits_help.txt", "kits")
 

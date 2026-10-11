@@ -1,0 +1,5 @@
+usage: vibe wikify link [-h] [--dry-run]
+
+options:
+  -h, --help  show this help message and exit
+  --dry-run   Show the changes without writing files
