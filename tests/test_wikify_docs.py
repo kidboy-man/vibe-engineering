@@ -409,6 +409,9 @@ class OutlineTests(unittest.TestCase):
         self.assertEqual(di.page_rel("index.md"), "sources/index.md.outline.md")
         self.assertEqual(di.page_rel("docs/index.md"), "sources/docs/index.md")
         self.assertEqual(di.page_rel("README.md"), "sources/README.md")
+        self.assertEqual(di.page_rel("docs/guide.markdown"), "sources/docs/guide.markdown.md")
+        self.assertEqual(di.page_rel("docs/GUIDE.MD"), "sources/docs/GUIDE.MD")
+        self.assertEqual(di.page_rel("INDEX.md"), "sources/INDEX.md.outline.md")
 
 
 class RenderTests(unittest.TestCase):
@@ -551,6 +554,14 @@ class PagesTests(RepoCase):
         self.assertEqual(sorted(pages), ["sources/README.md", "sources/index.md"])
         self.assertEqual(inv.docs, ["README.md"])
         self.assertEqual({s.path for s in inv.skipped}, {"docs/b.md"})
+
+    def test_case_collision_skipped(self):
+        self.commit_files({"README.md": "# A\n", "readme.md": "# B\n"})
+        pages, inv = di.expected_pages(self.root)
+        self.assertEqual(inv.docs, ["README.md"])
+        self.assertEqual(
+            [(s.path, s.reason) for s in inv.skipped], [("readme.md", "page path collision")]
+        )
 
     def test_page_collision_skipped(self):
         self.commit_files({"index.md": "# A\n", "index.md.outline.md": "# B\n"})
@@ -786,6 +797,106 @@ class DocsCmdTests(RepoCase):
         self.assertEqual(sum(1 for ln in out.splitlines() if ln.startswith("skipped ")), 50)
         self.assertIn("skipped docs/s00.md: empty", out)
         self.assertIn("5 more skipped", out)
+
+    def test_zero_docs_symlinked_sources_refused_without_walking(self):
+        for rel in self.DOCS:
+            git(self.root, "rm", "-q", "-f", rel)
+        git(self.root, "commit", "-q", "-m", "rm")
+        outside = self.root.parent / (self.root.name + "-leak")
+        outside.mkdir()
+        self.addCleanup(lambda: [p.unlink() for p in outside.iterdir()] and None or outside.rmdir())
+        (outside / "leak.md").write_text(di.MARKER + "\n# x\n")
+        os.symlink(outside, self.sources())
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("nothing written", out)
+        self.assertNotIn("leak.md", out)
+
+    def test_sources_regular_file_refused(self):
+        self.sources().write_text("x\n")
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("nothing written", out)
+        self.assertEqual(self.sources().read_text(), "x\n")
+
+    @unittest.skipUnless(HAS_SYMLINK, "symlinks")
+    def test_stale_does_not_follow_symlinked_subdir(self):
+        outside = self.root.parent / (self.root.name + "-sub")
+        outside.mkdir()
+        self.addCleanup(lambda: [p.unlink() for p in outside.iterdir()] and None or outside.rmdir())
+        (outside / "leak.md").write_text(di.MARKER + "\n")
+        self.sources().mkdir()
+        os.symlink(outside, self.sources() / "evil")
+        rc, out = self.run_cmd(dry_run=True)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("leak.md", out)
+
+    def test_markdown_doc_page_is_md_and_goes_stale(self):
+        self.write({"docs/guide.markdown": "# G\n\n## Part\n"})
+        self.commit_all()
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 0)
+        page = self.sources() / "docs/guide.markdown.md"
+        self.assertTrue(page.is_file())
+        errors, pages = citations.walk_wiki(self.root)
+        self.assertEqual(errors, [])
+        rel = "sources/docs/guide.markdown.md"
+        self.assertIn(rel, [r for r, _ in pages])
+        blanked = "\n" + page.read_text().split("\n", 1)[1]
+        self.assertEqual(citations.verify_page(self.root, rel, blanked, ignore=[]), [])
+        git(self.root, "rm", "-q", "docs/guide.markdown")
+        git(self.root, "commit", "-q", "-m", "rm")
+        rc, out = self.run_cmd()
+        self.assertIn("stale docs/wiki/" + rel, out)
+
+    @unittest.skipUnless(HAS_SYMLINK, "symlinks")
+    def test_parent_swapped_to_symlink_before_write(self):
+        outside = self.root.parent / (self.root.name + "-swap")
+        outside.mkdir()
+        self.addCleanup(outside.rmdir)
+        real_mkdir = type(self.sources()).mkdir
+        done = []
+
+        def swap(path, *a, **kw):
+            if not done:
+                done.append(1)
+                os.symlink(outside, self.sources())
+            return real_mkdir(path, *a, **kw)
+
+        with mock.patch("pathlib.Path.mkdir", swap):
+            rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("changed during write", out)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_partial_failure_names_written_pages(self):
+        real = os.replace
+        calls = []
+
+        def flaky(src, dst):
+            calls.append(dst)
+            if len(calls) == 2:
+                raise PermissionError("no")
+            return real(src, dst)
+
+        with mock.patch.object(docs_cmd.os, "replace", flaky):
+            rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("refused: write failed: PermissionError", out)
+        lines = out.splitlines()
+        self.assertIn("written: docs/wiki/sources/README.md", lines)
+        self.assertIn("not written: docs/wiki/sources/docs/a.md", lines)
+        self.assertIn("not written: docs/wiki/sources/index.md", lines)
+        self.assertEqual(sorted(p.name for p in self.sources().rglob(".*.tmp")), [])
+
+    def test_skip_reason_escaped(self):
+        skip = di.Skip("a.md", "bad \x1b[31m reason")
+        with mock.patch.object(di, "expected_pages", return_value=({}, di.Inventory([], [skip]))):
+            rc, out = self.run_cmd(dry_run=True)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("\x1b", out)
+        self.assertIn("\\x1b[31m reason", out)
+
 
     def test_wikifydocs_not_stray_and_ignored_is_error(self):
         self.assertTrue((self.root / "docs/wiki/.wikifydocs").is_file())

@@ -216,8 +216,11 @@ def outline(text: str) -> list[Section]:
 
 
 def page_rel(doc: str) -> str:
+    """Page path under docs/wiki; always ends in ``.md`` so ``walk_wiki`` accepts it."""
     rel = "sources/" + doc
-    return rel + ".outline.md" if rel == INDEX_PAGE else rel
+    if rel.casefold() == INDEX_PAGE:
+        return rel + ".outline.md"
+    return rel if rel.casefold().endswith(".md") else rel + ".md"
 
 
 def _cite(doc: str, start: int, end: int, fragment: str = "") -> str:
@@ -262,6 +265,7 @@ def expected_pages(root: Path) -> tuple[dict[str, str], Inventory]:
     rows: list[tuple[str, str, int, int]] = []
     docs: list[str] = []
     skipped = list(inv.skipped)
+    taken: set[str] = set()
     for doc in sorted(inv.docs):
         rel = page_rel(doc)
         text = gitview.show_head(root, doc)
@@ -269,9 +273,10 @@ def expected_pages(root: Path) -> tuple[dict[str, str], Inventory]:
             skipped.append(Skip(doc, "unreadable at HEAD (not committed?)"))
         elif citations._shape_error(doc):  # defensive: never emit a page that cannot verify
             skipped.append(Skip(doc, "path not citable"))
-        elif rel in pages:
+        elif rel.casefold() in taken:  # also case-insensitive: stable on any filesystem
             skipped.append(Skip(doc, "page path collision"))
         else:
+            taken.add(rel.casefold())
             docs.append(doc)
             sections = outline(text)
             pages[rel] = render_doc_page(doc, text, sections)

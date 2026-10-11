@@ -118,9 +118,22 @@ def _diff(page: Page) -> list[str]:
     ]
 
 
+class _Changed(OSError):
+    """A directory under sources/ stopped being a plain directory mid-run."""
+
+
+def _check_dirs(root: Path, rel: str) -> None:
+    here = root / SOURCES_REL
+    for part in ("",) + Path(rel).relative_to(SOURCES_REL).parent.parts:
+        here = here / part if part else here
+        if not stat.S_ISDIR(os.lstat(here).st_mode):
+            raise _Changed(f"{here.relative_to(root).as_posix()} changed during write")
+
+
 def _write(root: Path, page: Page) -> None:
     dest = root / page.rel
     dest.parent.mkdir(parents=True, exist_ok=True)
+    _check_dirs(root, page.rel)  # last check before the temp file is created
     tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     fd = os.open(tmp, flags | getattr(os, "O_NOFOLLOW", 0), 0o666)
@@ -146,6 +159,16 @@ def cmd_docs(cwd: str | Path | None = None, dry_run: bool = False) -> int:
     except state.UnsafeWikiPath as exc:
         print(f"refused: {exc}\nnothing written")
         return 1
+    try:  # once, before any planning or walking: never follow a swapped-in link
+        top = os.lstat(root / SOURCES_REL).st_mode
+    except FileNotFoundError:
+        top = stat.S_IFDIR
+    except OSError as exc:
+        print(f"refused: cannot inspect {SOURCES_REL}: {type(exc).__name__}\nnothing written")
+        return 1
+    if not stat.S_ISDIR(top):
+        print(f"refused: {SOURCES_REL} is a symlink or not a directory\nnothing written")
+        return 1
     pages, inv = di.expected_pages(root)
     planned: list[Page] = []
     refusals: list[str] = []
@@ -163,18 +186,26 @@ def cmd_docs(cwd: str | Path | None = None, dry_run: bool = False) -> int:
     for rel in _stale(root, {p.rel for p in planned}):
         print(f"stale {_safe(rel)}")
     for skip in inv.skipped[:MAX_SKIPPED_SHOWN]:
-        print(f"skipped {_safe(skip.path)}: {skip.reason}")
+        print(f"skipped {_safe(skip.path)}: {_safe(skip.reason)}")
     if len(inv.skipped) > MAX_SKIPPED_SHOWN:
         print(f"... and {len(inv.skipped) - MAX_SKIPPED_SHOWN} more skipped")
     todo = [p for p in planned if p.action != "unchanged"]
     if dry_run:
         print("dry run: no files written")
         return 0
+    done: list[Page] = []
     try:
         for page in todo:
             _write(root, page)
+            done.append(page)
     except OSError as exc:
-        print(f"refused: write failed: {type(exc).__name__}")
+        if isinstance(exc, _Changed):
+            print(f"refused: {_safe(str(exc))}")
+        else:
+            print(f"refused: write failed: {type(exc).__name__}")
+        for label, group in (("written", done), ("not written", todo[len(done):])):
+            for p in group:
+                print(f"{label}: {p.rel}")
         return 1
     if todo:
         print(
