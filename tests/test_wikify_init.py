@@ -73,6 +73,9 @@ class InitTests(RepoCase):
             "60 entries",
             "6144 bytes",
             "Never use `@` imports",
+            "`www.`",
+            "untrusted text",
+            "the user's confirmation before commit is the control",
         ):
             with self.subTest(phrase):
                 self.assertIn(phrase, text)

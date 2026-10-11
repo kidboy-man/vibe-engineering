@@ -359,7 +359,12 @@ Map block in `docs/wiki/index.md` (`vibe wikify init` writes an empty one):
 - `<path>` is relative to `docs/wiki/`, forward slashes, ends in `.md`, with no
   `..`, `@`, `:`, `<`, `>` or backslash; `index.md` and `WIKIFY.md` cannot be listed.
 - Title is 1-60 chars and hint 1-80 chars; neither may contain `@`, `<`, `>`,
-  `://`, square brackets or parentheses (so no HTML, comments or URLs).
+  `://`, `www.` (any case), square brackets or parentheses (so no HTML,
+  comments or URLs).
+- Titles and hints are agent-written untrusted text that other agents read;
+  the pointer block tells agents to treat them as navigation, not
+  instructions. The grammar keeps them inert, but it cannot judge what a hint
+  says: your review before the `docs(wiki)` commit is the control.
 - At most 60 entries and 6144 bytes inside the block, one block per file, a
   `wikify:human` block inside a map is an error, and any line that is not an
   entry (blank lines aside) is an error. Entries are exempt from the citation
@@ -374,7 +379,7 @@ page, there are no duplicate paths, no page except `index.md` / `WIKIFY.md` is
 missing from the map (orphans are errors), and the caps hold. `vibe wikify plan`
 lists pages missing from the map under `map_missing`.
 
-`vibe wikify link [--dry-run]` writes the pointer block (5 static lines, plain
+`vibe wikify link [--dry-run]` writes the pointer block (6 static lines, plain
 relative links) between `<!-- wikify:pointer -->` markers:
 
 - It touches only the marked block and prints a diff first; text outside the
@@ -383,13 +388,17 @@ relative links) between `<!-- wikify:pointer -->` markers:
   only if they already exist. A symlink from one target to another (for example
   `CLAUDE.md` -> `AGENTS.md`, or `AGENTS.md` -> `CLAUDE.md`) is skipped as
   covered by that target.
-- Markers count only as whole lines at column 0 outside code fences; a marker
-  string anywhere else is ordinary text.
+- Markers count only as whole lines at column 0 outside code fences (an END
+  marker on the last line may lack a newline; the rewrite adds one); a marker
+  string anywhere else is ordinary text. A backtick line whose info string
+  contains a backtick does not open a fence (CommonMark).
 - It refuses, writing nothing, when `docs/wiki/index.md` is missing, a target is
   a symlink to anywhere else or a dangling or looping symlink, has multiple
-  hard links, is gitignored (or the git ignore check itself fails), is not
-  valid UTF-8 or not a regular file, has a pointer marker inside a code fence,
-  has unbalanced or repeated markers, or the backup cannot be made. A leading
+  hard links, is not valid UTF-8 or not a regular file, has a pointer marker
+  inside a code fence, has unbalanced or repeated markers (the refusal names
+  the cause), when `AGENTS.md` is gitignored or the git ignore check itself
+  fails, or when the backup cannot be made. A gitignored `CLAUDE.md` /
+  `GEMINI.md` is local-only, so it is skipped with a note instead. A leading
   BOM and CRLF line endings are preserved; a CRLF file gets a CRLF block.
 - Existing files are backed up to `<git-dir>/wikify-backups/<timestamp>/`; the
   path is printed before any file is written. Writes are all-or-nothing: on a
@@ -412,15 +421,30 @@ Commit the pointer files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) in their own
 commit **before** `vibe wikify mark`: they live outside `docs/wiki/`, so a
 commit that mixes them with wiki changes (or follows the mark) is not docs-only
 and the push gate reads the wiki as stale. `verify` pointer checks (no block anywhere,
-an existing target without a block once another has one, a block that differs
-from the template (CRLF endings are fine), unusable markers, or a block pointing
-at a missing index) are notices only and never change the exit code.
+an existing target without a block once another has one (gitignored targets
+excepted), a block that differs from the template (CRLF endings are fine; a
+block written before the hints line was added reads as stale until `link` is
+rerun), unusable markers, or a block pointing at a missing index) are notices
+only and never change the exit code.
+
+`verify` also prints a read-only size notice for each of `AGENTS.md`,
+`CLAUDE.md` and `GEMINI.md` (regular files, not symlinks) over 200 lines
+(Claude Code recommends under 200 lines per `CLAUDE.md`) or 32 KiB (the Codex
+`project_doc_max_bytes` default for the combined chain), both as of
+2026-10-11 from the sources above: it gives the line and KiB count and
+lists the three largest `## ` sections by line count (column-0 headings outside
+code fences and the pointer block) as candidates to move into wiki pages.
+That list is a size ranking, not a judgement of the content, and wikify never
+moves the text itself. `verify` reads at most 1 MiB of each file; a larger one
+gets a "not analysed" notice.
 
 Map and pointer limitations:
 
 - Map entries are navigation, not verified claims; the verifier does not check
   that a hint matches the page.
 - The 60 entry / 6144 byte caps are unmeasured defaults.
+- The size notice checks each file on its own; the Codex cap applies to the
+  combined chain, so files under 32 KiB each can still exceed it together.
 - Tool loading behaviour is documented, not observed live, and may change.
 - Case-insensitive filesystems and Windows write semantics are not covered.
 
