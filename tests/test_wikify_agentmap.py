@@ -322,5 +322,110 @@ class ValidateTests(unittest.TestCase):
         self.assertEqual(len(validate_map(res, {"index.md", "a.md"})), 1)
 
 
+class PageLinksTests(unittest.TestCase):
+    def test_resolves_relative_to_page_dir(self):
+        links = agentmap.page_links("sources/index.md", "[a](docs/a.md) [b](b.md)")
+        self.assertEqual(links, {"sources/docs/a.md", "sources/b.md"})
+
+    def test_dropped_targets(self):
+        text = (
+            "[x](../x.md) [y](/abs.md) [z](http://x/a.md) [w](a\\b.md) "
+            "[v](sub/../../esc.md) [i](index.md) [s](self.md) [t](notes.txt) [ok](ok.md)"
+        )
+        self.assertEqual(agentmap.page_links("self.md", text), {"ok.md"})
+
+    def test_anchor_stripped_and_case_insensitive(self):
+        self.assertEqual(
+            agentmap.page_links("p.md", "[a](a.md#sec) [b](B.MD)"), {"a.md", "B.MD"}
+        )
+
+    def test_human_block_links_ignored(self):
+        text = "<!-- wikify:human -->\n[a](a.md)\n<!-- /wikify:human -->\n[b](b.md)\n"
+        self.assertEqual(agentmap.page_links("p.md", text), {"b.md"})
+
+    def test_normalises_dot_segments(self):
+        self.assertEqual(agentmap.page_links("d/p.md", "[a](./x/../a.md)"), {"d/a.md"})
+
+    def test_index_target_dropped_only_at_top_level(self):
+        self.assertEqual(agentmap.page_links("d/p.md", "[i](../index.md) [j](index.md)"), {"d/index.md"})
+
+    def test_link_cap(self):
+        text = "".join(f"[p](p{i}.md)" for i in range(agentmap.MAX_LINKS + 10))
+        self.assertEqual(len(agentmap.page_links("p.md", text)), agentmap.MAX_LINKS)
+
+
+class ReachableTests(unittest.TestCase):
+    CHAIN = {
+        "m.md": "[1](h1.md)",
+        "h1.md": "[2](h2.md)",
+        "h2.md": "[3](h3.md)",
+        "h3.md": "",
+    }
+
+    def test_hops(self):
+        got = agentmap.reachable_pages({"m.md"}, self.CHAIN)
+        self.assertEqual(got, {"m.md", "h1.md", "h2.md"})
+
+    def test_depth_parameter(self):
+        self.assertEqual(agentmap.reachable_pages({"m.md"}, self.CHAIN, depth=0), {"m.md"})
+        self.assertIn("h3.md", agentmap.reachable_pages({"m.md"}, self.CHAIN, depth=3))
+
+    def test_cycle_and_self_link_terminate(self):
+        texts = {"a.md": "[b](b.md) [a](a.md)", "b.md": "[a](a.md)"}
+        self.assertEqual(agentmap.reachable_pages({"a.md"}, texts), {"a.md", "b.md"})
+
+    def test_unknown_target_ignored(self):
+        self.assertEqual(agentmap.reachable_pages({"a.md"}, {"a.md": "[g](gone.md)"}), {"a.md"})
+
+    def test_listed_shorter_path_wins_over_depth(self):
+        texts = {"a.md": "[b](b.md)", "b.md": "[c](c.md)", "c.md": "[d](d.md)", "d.md": ""}
+        got = agentmap.reachable_pages({"a.md", "b.md"}, texts)
+        self.assertEqual(got, {"a.md", "b.md", "c.md", "d.md"})
+
+    def test_listed_without_text_kept(self):
+        self.assertEqual(agentmap.reachable_pages({"x.md"}, {}), {"x.md"})
+
+
+class ReachableValidateTests(unittest.TestCase):
+    def test_reachable_none_keeps_listed_only_rule(self):
+        res = parse_map(block(entry("a.md")))
+        self.assertEqual(len(validate_map(res, {"index.md", "a.md", "b.md"}, None)), 1)
+
+    def test_reachable_clears_orphan(self):
+        res = parse_map(block(entry("a.md")))
+        pages = {"index.md", "a.md", "b.md"}
+        self.assertEqual(validate_map(res, pages, {"a.md", "b.md"}), [])
+
+    def test_reachability_is_not_listing_for_duplicates(self):
+        res = parse_map(block(entry("a.md"), entry("b.md"), entry("b.md")))
+        errs = validate_map(res, {"index.md", "a.md", "b.md"}, {"a.md", "b.md"})
+        self.assertEqual(errs, ["index.md:4: duplicate entry: b.md"])
+
+    def test_missing_target_still_errors(self):
+        res = parse_map(block(entry("gone.md")))
+        errs = validate_map(res, {"index.md"}, {"gone.md"})
+        self.assertEqual(errs, ["index.md:2: link target missing: gone.md"])
+
+
+class ReachablePerformanceTests(unittest.TestCase):
+    def test_wide_wiki(self):
+        n = 5000
+        texts = {
+            f"p{i}.md": "".join(f"[x](p{(i * 7 + j) % n}.md)\n" for j in range(50))
+            for i in range(n)
+        }
+        t = time.perf_counter()
+        got = agentmap.reachable_pages({"p0.md"}, texts)
+        self.assertLess(time.perf_counter() - t, 2.0)
+        self.assertIn("p0.md", got)
+
+    def test_single_megabyte_page(self):
+        text = "[x](a.md) " * 100_000
+        t = time.perf_counter()
+        links = agentmap.page_links("p.md", text)
+        self.assertLess(time.perf_counter() - t, 2.0)
+        self.assertEqual(links, {"a.md"})
+
+
 if __name__ == "__main__":
     unittest.main()

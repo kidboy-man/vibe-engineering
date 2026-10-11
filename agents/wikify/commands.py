@@ -56,8 +56,10 @@ def _verify(root: Path) -> tuple[int, list[str]]:
     allowed: list[str] = []
     if not any(e.startswith(("docs:", "docs/wiki:")) for e in errors):
         block = agentmap.MapBlock([], [], 0)
+        texts: dict[str, str] = {}
         for rel, path in pages:
             text = path.read_text(encoding="utf-8")
+            texts[rel] = text
             checked = text
             if rel == "index.md":  # only the top-level index carries the map
                 block = agentmap.parse_map(text)
@@ -65,7 +67,8 @@ def _verify(root: Path) -> tuple[int, list[str]]:
             errors.extend(citations.verify_page(root, rel, checked, ignore))
             notices.extend(_notices(root, rel, text))
         errors.extend(block.errors)
-        errors.extend(agentmap.validate_map(block, {rel for rel, _ in pages}))
+        reachable = agentmap.reachable_pages({e.path for e in block.entries}, texts)
+        errors.extend(agentmap.validate_map(block, set(texts), reachable))
         others = sum(1 for rel, _ in pages if rel != "index.md")
         if block.blocks == 0 and others:
             notices.append(

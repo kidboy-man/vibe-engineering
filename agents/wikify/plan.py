@@ -72,16 +72,17 @@ def _symbols(root: Path, paths: list[str]) -> dict[str, list[str]]:
 
 
 def _map_missing(root: Path) -> list[str]:
-    """Pages (excluding top-level index.md) the index.md agent map does not list."""
+    """Pages (excluding top-level index.md) not reachable from the index.md agent map."""
     walked = citations.walk_wiki(root)[1]
-    listed: set[str] = set()
+    texts: dict[str, str] = {}
     for rel, path in walked:
-        if rel == "index.md":
-            try:
-                listed = {e.path for e in agentmap.parse_map(path.read_text(encoding="utf-8")).entries}
-            except (OSError, UnicodeDecodeError):
-                pass
-    return sorted(rel for rel, _ in walked if rel != "index.md" and rel not in listed)
+        try:
+            texts[rel] = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            pass
+    listed = {e.path for e in agentmap.parse_map(texts.get("index.md", "")).entries}
+    reachable = agentmap.reachable_pages(listed, texts)
+    return sorted(rel for rel, _ in walked if rel != "index.md" and rel not in reachable)
 
 
 def _join(prev: str | None, msg: str) -> str:

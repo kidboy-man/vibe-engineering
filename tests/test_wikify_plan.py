@@ -69,6 +69,19 @@ class PlanTests(RepoCase):
         self.commit("docs/wiki/b.md", "B\n")
         self.assertEqual(plan.build_plan(self.root)["map_missing"], ["b.md"])
 
+    def test_map_missing_honours_links_from_listed_pages(self):
+        self.commit("docs/wiki/index.md", "# Index\n" + self.MAP)
+        self.commit("docs/wiki/a.md", "[b](b.md)\n")
+        self.commit("docs/wiki/b.md", "[c](sub/c.md)\n")
+        self.commit("docs/wiki/sub/c.md", "[d](../d.md)\n")
+        self.commit("docs/wiki/d.md", "D\n")
+        self.assertEqual(plan.build_plan(self.root)["map_missing"], ["d.md"])
+
+    def test_map_missing_no_block_ignores_links(self):
+        self.commit("docs/wiki/index.md", "# Index\n[a](a.md)\n")
+        self.commit("docs/wiki/a.md", "A\n")
+        self.assertEqual(plan.build_plan(self.root)["map_missing"], ["a.md"])
+
     def test_map_missing_no_pages(self):
         self.commit("src/a.py")
         self.assertEqual(plan.build_plan(self.root)["map_missing"], [])

@@ -197,6 +197,44 @@ class AgentMapVerifyTests(VerifyCase):
         self.assertEqual(self.errs(), (0, []))
 
 
+    def sources_wiki(self, n, linked=True):
+        links = "".join(f"- [P{i}](docs/p{i}.md)\n" for i in range(n)) if linked else "\n"
+        self.page(f"# Sources\n{links}", "docs/wiki/sources/index.md")
+        for i in range(n):
+            self.page("Foo (src: src/a.py:1)\n", f"docs/wiki/sources/docs/p{i}.md")
+        self.index(self.mapped("- [Sources](sources/index.md) \u2014 doc outlines"))
+
+    def test_pages_linked_from_listed_page_are_reachable(self):
+        self.sources_wiki(70)
+        self.assertEqual(self.errs(), (0, []))
+
+    def test_same_pages_unlinked_are_orphans(self):
+        self.sources_wiki(3, linked=False)
+        rc, errs = self.errs()
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(errs), 3)
+        self.assertIn("page not reachable from the map: sources/docs/p0.md", errs[0])
+
+    def test_three_hops_is_an_orphan(self):
+        self.page("[b](b.md)\n", "docs/wiki/a.md")
+        self.page("[c](c.md)\n", "docs/wiki/b.md")
+        self.page("[d](d.md)\n", "docs/wiki/c.md")
+        self.page("Foo (src: src/a.py:1)\n", "docs/wiki/d.md")
+        self.index(self.mapped("- [A](a.md) \u2014 start"))
+        rc, errs = self.errs()
+        self.assertEqual(errs, ["index.md:3: page not reachable from the map: d.md"])
+
+    def test_plan_map_missing_agrees_with_verify(self):
+        from agents.wikify import plan
+
+        self.sources_wiki(3)
+        self.page("Foo (src: src/a.py:1)\n", "docs/wiki/lonely.md")
+        self.commit_wiki()
+        _, errs = self.errs()
+        self.assertEqual(errs, ["index.md:3: page not reachable from the map: lonely.md"])
+        self.assertEqual(plan.build_plan(self.root)["map_missing"], ["lonely.md"])
+
+
 class MarkTests(VerifyCase):
     def test_refuses_when_failing(self):
         self.page("Claim (src: src/missing.py:1)\n")
