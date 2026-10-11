@@ -11,10 +11,13 @@ from agents.wikify import agentmap, citations, gitview, init_cmd, plan, pointer,
 
 
 def _human_blocks(text: str) -> list[tuple[int, str]]:
-    return [
-        (text.count("\n", 0, start) + 1, text[start:end])
-        for start, end in citations.human_spans(text)
-    ]
+    blocks: list[tuple[int, str]] = []
+    line, last = 1, 0
+    for start, end in citations.human_spans(text):  # spans are in order
+        line += text.count("\n", last, start)
+        last = start
+        blocks.append((line, text[start:end]))
+    return blocks
 
 
 def _notices(root: Path, rel: str, text: str) -> list[str]:

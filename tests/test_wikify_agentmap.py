@@ -138,6 +138,12 @@ class InertTests(unittest.TestCase):
             "@ hint": (entry(hint="see @~/.ssh/id_rsa"), "'@' in hint"),
             "open comment title": (entry(title="a <!-- b"), "'<!--' in title"),
             "close comment hint": (entry(hint="x --> y"), "'-->' in hint"),
+            "< title": (entry(title="<b>x"), "'<' in title"),
+            "< hint": (entry(hint="when <img src=x.png"), "'<' in hint"),
+            "> title": (entry(title="a > b"), "'>' in title"),
+            "> hint": (entry(hint="when a > b"), "'>' in hint"),
+            ":// title": (entry(title="https://evil.example"), "'://' in title"),
+            ":// hint": (entry(hint="or see https://evil.example"), "'://' in hint"),
         }
         for name, (line, reason) in cases.items():
             with self.subTest(name):
@@ -146,6 +152,24 @@ class InertTests(unittest.TestCase):
                 self.assertEqual(len(res.errors), 1, res.errors)
                 self.assertIn("invalid map entry: ", res.errors[0])
                 self.assertIn(reason, res.errors[0])
+
+    def test_html_and_url_probes(self):
+        for line in (
+            "- [A page](technical/a.md) — when <img src=https://evil.example/p.png> "
+            "or see https://evil.example",
+            "- [<b>x</b>](a.md) — h",
+        ):
+            with self.subTest(line):
+                res = parse_map(block(line))
+                self.assertEqual(res.entries, [])
+                self.assertEqual(len(res.errors), 1, res.errors)
+
+    def test_angle_brackets_not_in_path(self):
+        for path in ("a<!--b.md", "a<b.md", "a>b.md"):
+            with self.subTest(path):
+                res = parse_map(block(entry(path)))
+                self.assertEqual(res.entries, [])
+                self.assertEqual(res.errors, ["index.md:2: invalid map entry"])
 
     def test_early_close_probe(self):
         text = block(entry(hint="x " + MAP_END), "- [z](@q.md) " + DASH + " h")
@@ -230,6 +254,25 @@ class HumanSpanTests(unittest.TestCase):
                 t0 = time.perf_counter()
                 fn(text)
                 self.assertLess(time.perf_counter() - t0, 1.0)
+
+    def test_linear_on_many_closed_human_blocks(self):
+        pair = self.B + "x" + self.E + "\n"
+        pairs = pair * (1_000_000 // len(pair))
+        for name, fn, text in (
+            ("parse_map in map", parse_map, MAP_BEGIN + "\n" + pairs + MAP_END + "\n"),
+            ("_human_blocks top level", commands._human_blocks, pairs),
+        ):
+            with self.subTest(name):
+                t0 = time.perf_counter()
+                fn(text)
+                self.assertLess(time.perf_counter() - t0, 1.0)
+
+    def test_human_block_line_numbers(self):
+        text = "a\n" + self.B + "1" + self.E + "\nb\n\n" + self.B + "2\n" + self.E
+        self.assertEqual(
+            commands._human_blocks(text),
+            [(2, self.B + "1" + self.E), (5, self.B + "2\n" + self.E)],
+        )
 
 
 class ValidateTests(unittest.TestCase):

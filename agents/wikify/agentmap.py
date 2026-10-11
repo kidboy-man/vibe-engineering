@@ -19,7 +19,7 @@ MAX_ENTRIES = 60
 MAX_BYTES = 6144
 MAX_TITLE = 60
 MAX_HINT = 80
-ENTRY = re.compile(r"^- \[([^\[\]()\n]{1,60})\]\(([^\s()\[\]]+)\) — ([^\[\]()\n]{1,80})$")
+ENTRY = re.compile(r"^- \[([^\[\]()\n]{1,60})\]\(([^\s()\[\]<>]+)\) — ([^\[\]()\n]{1,80})$")
 _FORBIDDEN_PATHS = {"index.md", "WIKIFY.md"}  # exact case: matches the control-file exemptions
 
 
@@ -52,9 +52,9 @@ def _mask(text: str) -> str:
 
 
 def _markup_error(title: str, hint: str) -> str | None:
-    """Title and hint stay inert: no '@' import, no comment markers."""
+    """Title and hint stay inert: no '@' import, no HTML or comments, no URLs."""
     for where, value in (("title", title), ("hint", hint)):
-        for token in ("@", "<!--", "-->"):
+        for token in ("@", "<!--", "-->", "<", ">", "://"):
             if token in value:
                 return f"'{token}' in {where}"
     return None
@@ -114,9 +114,12 @@ def parse_map(text: str) -> MapBlock:
     tail = masked.find("\n", end)
     if masked[end + len(MAP_END) : len(masked) if tail < 0 else tail].strip():
         errors.append(f"index.md:{_line(masked, end)}: text after map end marker")
-    for start, _ in human_spans(text):
+    line, last = 1, 0
+    for start, _ in human_spans(text):  # one pass: counting from 0 each time is quadratic
+        line += text.count("\n", last, start)
+        last = start
         if body_start <= start < end:
-            errors.append(f"index.md:{_line(text, start)}: human block inside map")
+            errors.append(f"index.md:{line}: human block inside map")
     if len(body.encode("utf-8")) > MAX_BYTES:
         errors.append(f"index.md:{first_line}: map exceeds {MAX_BYTES} bytes")
     pieces = body.split("\n")
