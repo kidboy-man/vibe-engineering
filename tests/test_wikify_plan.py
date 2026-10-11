@@ -52,6 +52,43 @@ class PlanTests(RepoCase):
         self.assertEqual(p["refresh_pages"], ["a.md"])
         self.assertEqual(p["uncovered"], [])
 
+    MAP = (
+        "<!-- wikify:map -->\n- [A](a.md) \u2014 about a\n<!-- /wikify:map -->\n"
+    )
+
+    def test_map_missing_no_block_lists_every_page_but_index(self):
+        self.commit("docs/wiki/index.md", "# Index\n")
+        self.commit("docs/wiki/a.md", "A\n")
+        self.commit("docs/wiki/sub/b.md", "B\n")
+        p = plan.build_plan(self.root)
+        self.assertEqual(p["map_missing"], ["a.md", "sub/b.md"])
+
+    def test_map_missing_only_unlisted_pages(self):
+        self.commit("docs/wiki/index.md", "# Index\n" + self.MAP)
+        self.commit("docs/wiki/a.md", "A\n")
+        self.commit("docs/wiki/b.md", "B\n")
+        self.assertEqual(plan.build_plan(self.root)["map_missing"], ["b.md"])
+
+    def test_map_missing_no_pages(self):
+        self.commit("src/a.py")
+        self.assertEqual(plan.build_plan(self.root)["map_missing"], [])
+
+    def test_map_missing_undecodable_index_lists_all_pages(self):
+        self.commit("docs/wiki/a.md", "A\n")
+        (self.root / "docs/wiki/index.md").write_bytes(b"\xff\xfe\x00")
+        self.assertEqual(plan.build_plan(self.root)["map_missing"], ["a.md"])
+
+    def test_map_missing_absent_index_lists_all_pages(self):
+        self.commit("docs/wiki/a.md", "A\n")
+        self.assertEqual(plan.build_plan(self.root)["map_missing"], ["a.md"])
+
+    def test_map_missing_rendered_after_uncovered(self):
+        self.commit("docs/wiki/a.md", "A\n")
+        text = plan.render(plan.build_plan(self.root))
+        self.assertIn("map_missing (1):\n  a.md\n", text)
+        self.assertLess(text.index("uncovered ("), text.index("map_missing ("))
+        self.assertLess(text.index("map_missing ("), text.index("contexts ("))
+
     def test_added_file_is_uncovered(self):
         self.commit("src/a.py")
         self.commit(PAGE, cite("src/a.py"))
@@ -113,7 +150,7 @@ class PlanTests(RepoCase):
         p = plan.build_plan(self.root)
         self.assertEqual(p["mode"], "full")
         self.assertIsNone(p["head"])
-        for key in ("changed", "refresh_pages", "uncovered", "stale_deleted", "contexts"):
+        for key in ("changed", "refresh_pages", "uncovered", "stale_deleted", "contexts", "map_missing"):
             self.assertEqual(p[key], [])
         self.assertEqual(p["symbols"], {})
         self.assertIn("full", plan.render(p))

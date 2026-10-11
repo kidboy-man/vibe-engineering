@@ -10,7 +10,7 @@ import ast
 from pathlib import Path
 
 from agents.secret_policies import is_secret_path
-from agents.wikify import citations, gitview, state
+from agents.wikify import agentmap, citations, gitview, state
 
 # ponytail: repos using these roots get the sub-directory as the context.
 CONTEXT_ROOTS = ("src", "app", "agents", "cmd", "internal", "pkg", "lib")
@@ -71,6 +71,19 @@ def _symbols(root: Path, paths: list[str]) -> dict[str, list[str]]:
     return out
 
 
+def _map_missing(root: Path) -> list[str]:
+    """Pages (excluding top-level index.md) the index.md agent map does not list."""
+    walked = citations.walk_wiki(root)[1]
+    listed: set[str] = set()
+    for rel, path in walked:
+        if rel == "index.md":
+            try:
+                listed = {e.path for e in agentmap.parse_map(path.read_text(encoding="utf-8")).entries}
+            except (OSError, UnicodeDecodeError):
+                pass
+    return sorted(rel for rel, _ in walked if rel != "index.md" and rel not in listed)
+
+
 def build_plan(root: Path, full: bool = False) -> dict:
     root = Path(root)
     head = gitview.head(root)
@@ -81,6 +94,7 @@ def build_plan(root: Path, full: bool = False) -> dict:
         "changed": [],
         "refresh_pages": [],
         "uncovered": [],
+        "map_missing": _map_missing(root),
         "stale_deleted": [],
         "contexts": [],
         "symbols": {},
@@ -129,7 +143,7 @@ def render(plan: dict) -> str:
         f"base: {plan['base'] or '-'}",
         f"head: {plan['head'] or '-'}",
     ]
-    for key in ("changed", "refresh_pages", "uncovered", "contexts"):
+    for key in ("changed", "refresh_pages", "uncovered", "map_missing", "contexts"):
         lines.append(f"{key} ({len(plan[key])}):")
         lines.extend(f"  {item}" for item in plan[key])
     lines.append(f"stale_deleted ({len(plan['stale_deleted'])}):")
