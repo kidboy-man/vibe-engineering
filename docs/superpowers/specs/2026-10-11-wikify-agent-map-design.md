@@ -82,7 +82,7 @@ Migrating existing markdown into the wiki. It conflicts with Decision 1 of the s
 
 ## Risks
 - Tool behaviour changes (loading rules, size caps); the facts above are dated 2026-10-11.
-- If a repo has `CLAUDE.md`, Claude Code ignores `AGENTS.md` by default; the pointer block must also be in `CLAUDE.md` for that repo (handled by decision 3).
+- If a repo has `CLAUDE.md`, Claude Code ignores `AGENTS.md` by default; the pointer block must also be in `CLAUDE.md` for that repo (decision 3 covers the root `CLAUDE.md` only; `.claude/CLAUDE.md`, `CLAUDE.local.md` and a `CLAUDE.md` above the repo also take precedence and are not touched).
 - The 60-entry / 6 KiB caps are defaults, not measured; large monorepos may need a per-directory map (future work).
 - `feat/wikify` is unpushed because SSH auth failed; this spec and its implementation stack on that branch.
 

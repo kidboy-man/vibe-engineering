@@ -127,6 +127,16 @@ class LinkTests(LinkCase):
         self.assertTrue((self.root / "CLAUDE.md").is_symlink())
         self.assertEqual(self.read("AGENTS.md"), (BLOCK + "mine\n").encode())
 
+    def test_agents_md_symlink_to_claude_is_covered(self):
+        self.write("CLAUDE.md", "mine\n")
+        os.symlink("CLAUDE.md", self.root / "AGENTS.md")
+        rc, text = link(self.root)
+        self.assertEqual(rc, 0)
+        self.assertIn("AGENTS.md -> CLAUDE.md: covered by its target", text)
+        self.assertTrue((self.root / "AGENTS.md").is_symlink())
+        self.assertEqual(self.read("CLAUDE.md"), (BLOCK + "mine\n").encode())
+        self.assertEqual(pointer.pointer_notices(self.root), [])
+
     def test_symlink_outside_repo_refuses(self):
         os.symlink("/etc/hostname", self.root / "CLAUDE.md")
         rc, text = link(self.root)
