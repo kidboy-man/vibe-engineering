@@ -56,9 +56,9 @@ New command `vibe wikify link [--dry-run]`:
 - idempotent: uses `marked_section_strategy` with the markers above; text outside the block is preserved byte for byte;
 - prints the unified diff for every file it would change before writing; `--dry-run` writes nothing;
 - targets: `AGENTS.md` always (created containing only the block when absent); `CLAUDE.md` and `GEMINI.md` only if they already exist; never any other file;
-- refuses (rc 1, nothing written) when a target is a symlink, is ignored by git (`gitview.ignored`), lies outside the repo root, or when `docs/wiki/index.md` does not exist (run `init` first);
-- backs up an existing file before changing it (reuse `agents/installer_core.py` helpers: `backup`, `write_text`);
-- `init` does not call `link`; it prints a one-line hint to run it.
+- refuses (rc 1, nothing written) when `docs/wiki/index.md` does not exist (run `init` first) or a target is a symlink that does not resolve to another target in the repo, has multiple hard links, is gitignored (`gitview.ignored`), is not a regular UTF-8 file, has a pointer marker inside a code fence, or has unbalanced/repeated markers. A `CLAUDE.md`/`GEMINI.md` symlink to another target is skipped with a note (covered by its target). A leading BOM and CRLF line endings are preserved;
+- backs up an existing file before changing it to `<git-dir>/wikify-backups/<timestamp>/<rel>` (printed; not `installer_core.backup`, which would write into the working tree), then writes all targets or rolls back;
+- `init` does not call `link`; it writes an empty map block into `index.md` and prints a one-line hint to run `link`.
 `verify` reads the target files read-only and prints a notice (rc unchanged) when a pointer block exists but differs from the template or the index it points at is missing, and a different notice when none of the files carries a block.
 
 ### Freshness and hook interaction

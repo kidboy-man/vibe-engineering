@@ -332,12 +332,88 @@ vibe kits wikify diff
 vibe kits wikify uninstall --yes
 
 vibe wikify init | plan | verify | mark     # per-repo commands
+vibe wikify link [--dry-run]                # agent pointer block (see below)
 ```
 
 Push flow: the hook blocks the push, the agent updates `docs/wiki`, runs
 `vibe wikify verify` and `vibe wikify mark`, you confirm, a docs-only commit
 records the mark, and the push goes through. Freshness rule: the commit that last
 touched `.wikify.json` and every commit since it may touch only `docs/wiki/`.
+
+### Agent map and `vibe wikify link`
+
+Agents load `AGENTS.md` / `CLAUDE.md` in full at session start. Wikify keeps
+that file small: `docs/wiki/index.md` holds a **map** (one line per page with a
+"when to load" hint) and `AGENTS.md` carries only a static pointer block to it.
+
+Map block in `docs/wiki/index.md` (`vibe wikify init` writes an empty one):
+
+```
+<!-- wikify:map -->
+- [Overview](architecture/overview.md) — read first for what the module does
+<!-- /wikify:map -->
+```
+
+- Entry shape is exactly `- [<title>](<path>.md) — <hint>`: a space, an em
+  dash (U+2014) and a space separate link and hint; the hint is required.
+- `<path>` is relative to `docs/wiki/`, forward slashes, ends in `.md`, with no
+  `..`, `@`, `:` or backslash; `index.md` and `WIKIFY.md` cannot be listed.
+- Title is 1-60 chars and hint 1-80 chars; neither may contain `@`, `<!--`,
+  `-->`, square brackets or parentheses.
+- At most 60 entries and 6144 bytes inside the block, one block per file, a
+  `wikify:human` block inside a map is an error, and any line that is not an
+  entry (blank lines aside) is an error. Entries are exempt from the citation
+  rule: they are navigation, not factual claims.
+- Plain links are used, never `@path` imports: as of 2026-10-11 Claude Code
+  expands `@path` imports eagerly at launch (max four hops), which would load
+  every page.
+
+`vibe wikify verify` is opt-in for the map until a block exists (then it only
+prints a notice). With a block it checks that every link resolves to a wiki
+page, there are no duplicate paths, no page except `index.md` / `WIKIFY.md` is
+missing from the map (orphans are errors), and the caps hold. `vibe wikify plan`
+lists pages missing from the map under `map_missing`.
+
+`vibe wikify link [--dry-run]` writes the pointer block (5 static lines, plain
+relative links) between `<!-- wikify:pointer -->` markers:
+
+- It touches only the marked block and prints a diff first; text outside the
+  block is preserved byte for byte. `--dry-run` writes nothing.
+- It creates `AGENTS.md` when missing, and updates `CLAUDE.md` / `GEMINI.md`
+  only if they already exist. A `CLAUDE.md` / `GEMINI.md` symlink to another
+  target is skipped as covered by that target.
+- It refuses, writing nothing, when `docs/wiki/index.md` is missing, a target is
+  a symlink to anywhere else, has multiple hard links, is gitignored, is not
+  valid UTF-8 or not a regular file, has a pointer marker inside a code fence,
+  or has unbalanced or repeated markers. A leading BOM and CRLF line endings
+  are preserved.
+- Existing files are backed up to `<git-dir>/wikify-backups/<timestamp>/` (path
+  printed). Writes are all-or-nothing: on a write failure earlier files are
+  restored.
+
+Claude Code reads `AGENTS.md` only when no `CLAUDE.md` exists in the working
+directory or above (by default, as of 2026-10-11), so a repo that has a
+`CLAUDE.md` needs the pointer there too; `link` handles that. Codex builds its
+instruction chain once at startup from the root down, capped by
+`project_doc_max_bytes` (default 32 KiB); Cursor reads root and nested
+`AGENTS.md`. Sources: <https://code.claude.com/docs/en/memory>, the OpenAI
+Codex AGENTS.md guide (<https://learn.chatgpt.com/docs/agent-configuration/agents-md>),
+<https://cursor.com/docs/context/rules>.
+
+Commit the pointer files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) in their own
+commit **before** `vibe wikify mark`: they live outside `docs/wiki/`, so a
+commit that mixes them with wiki changes (or follows the mark) is not docs-only
+and the push gate reads the wiki as stale. `verify` pointer checks (block
+missing, differs from the template, or points at a missing index) are notices
+only and never change the exit code.
+
+Map and pointer limitations:
+
+- Map entries are navigation, not verified claims; the verifier does not check
+  that a hint matches the page.
+- The 60 entry / 6144 byte caps are unmeasured defaults.
+- Tool loading behaviour is documented, not observed live, and may change.
+- Case-insensitive filesystems and Windows write semantics are not covered.
 
 Registered as `PreToolUse` (Bash) in Claude Code `settings.json`, `[[hooks.PreToolUse]]`
 (`^Bash$`) in Codex `config.toml`, and `beforeShellExecution` in Cursor `hooks.json`.
