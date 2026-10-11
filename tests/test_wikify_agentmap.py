@@ -144,6 +144,8 @@ class InertTests(unittest.TestCase):
             "> hint": (entry(hint="when a > b"), "'>' in hint"),
             ":// title": (entry(title="https://evil.example"), "'://' in title"),
             ":// hint": (entry(hint="or see https://evil.example"), "'://' in hint"),
+            "www hint": (entry(hint="see www.evil.example"), "'www.' in hint"),
+            "WWW title": (entry(title="WWW.X"), "'www.' in title"),
         }
         for name, (line, reason) in cases.items():
             with self.subTest(name):
@@ -152,6 +154,10 @@ class InertTests(unittest.TestCase):
                 self.assertEqual(len(res.errors), 1, res.errors)
                 self.assertIn("invalid map entry: ", res.errors[0])
                 self.assertIn(reason, res.errors[0])
+
+    def test_dots_without_www_pass(self):
+        res = parse_map(block(entry(title="setup.py notes", hint="when editing a.py or v1.2 config")))
+        self.assertEqual((len(res.entries), res.errors), (1, []))
 
     def test_html_and_url_probes(self):
         for line in (

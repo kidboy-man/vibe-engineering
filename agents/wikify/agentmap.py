@@ -57,6 +57,8 @@ def _markup_error(title: str, hint: str) -> str | None:
         for token in ("@", "<!--", "-->", "<", ">", "://"):
             if token in value:
                 return f"'{token}' in {where}"
+        if "www." in value.lower():  # GFM autolinks www. without a scheme
+            return f"'www.' in {where}"
     return None
 
 
