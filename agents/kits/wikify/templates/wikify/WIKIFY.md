@@ -58,8 +58,8 @@ which page to load:
   relative to `docs/wiki/`, ends in `.md`, and is not `index.md` or `WIKIFY.md`.
 - The hint says when an agent should load the page, for example "when
   changing the order lifecycle". Title up to 60 characters, hint up to 80.
-- No `@`, `<!--` or `-->` in a title or hint, and the markers sit alone on
-  their lines. Never use `@` imports: they are expanded eagerly.
+- No `@`, `<`, `>` or `://` in a title or hint (no HTML, comments or URLs),
+  and the markers sit alone on their lines. Never use `@` imports: they are expanded eagerly.
 - Entries are navigation, not factual claims: they are exempt from citation
   checks. Keep claims in the pages themselves.
 - Caps: 60 entries and 6144 bytes. One block only, and not inside a human block.

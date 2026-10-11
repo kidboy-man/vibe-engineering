@@ -357,9 +357,9 @@ Map block in `docs/wiki/index.md` (`vibe wikify init` writes an empty one):
 - Entry shape is exactly `- [<title>](<path>.md) — <hint>`: a space, an em
   dash (U+2014) and a space separate link and hint; the hint is required.
 - `<path>` is relative to `docs/wiki/`, forward slashes, ends in `.md`, with no
-  `..`, `@`, `:` or backslash; `index.md` and `WIKIFY.md` cannot be listed.
-- Title is 1-60 chars and hint 1-80 chars; neither may contain `@`, `<!--`,
-  `-->`, square brackets or parentheses.
+  `..`, `@`, `:`, `<`, `>` or backslash; `index.md` and `WIKIFY.md` cannot be listed.
+- Title is 1-60 chars and hint 1-80 chars; neither may contain `@`, `<`, `>`,
+  `://`, square brackets or parentheses (so no HTML, comments or URLs).
 - At most 60 entries and 6144 bytes inside the block, one block per file, a
   `wikify:human` block inside a map is an error, and any line that is not an
   entry (blank lines aside) is an error. Entries are exempt from the citation
@@ -368,8 +368,8 @@ Map block in `docs/wiki/index.md` (`vibe wikify init` writes an empty one):
   expands `@path` imports eagerly at launch (max four hops), which would load
   every page.
 
-`vibe wikify verify` is opt-in for the map until a block exists (then it only
-prints a notice). With a block it checks that every link resolves to a wiki
+Until `index.md` has a map block the map rule is off and `vibe wikify verify`
+only prints a notice. With a block it checks that every link resolves to a wiki
 page, there are no duplicate paths, no page except `index.md` / `WIKIFY.md` is
 missing from the map (orphans are errors), and the caps hold. `vibe wikify plan`
 lists pages missing from the map under `map_missing`.
@@ -380,20 +380,28 @@ relative links) between `<!-- wikify:pointer -->` markers:
 - It touches only the marked block and prints a diff first; text outside the
   block is preserved byte for byte. `--dry-run` writes nothing.
 - It creates `AGENTS.md` when missing, and updates `CLAUDE.md` / `GEMINI.md`
-  only if they already exist. A `CLAUDE.md` / `GEMINI.md` symlink to another
-  target is skipped as covered by that target.
+  only if they already exist. A symlink from one target to another (for example
+  `CLAUDE.md` -> `AGENTS.md`, or `AGENTS.md` -> `CLAUDE.md`) is skipped as
+  covered by that target.
+- Markers count only as whole lines at column 0 outside code fences; a marker
+  string anywhere else is ordinary text.
 - It refuses, writing nothing, when `docs/wiki/index.md` is missing, a target is
-  a symlink to anywhere else, has multiple hard links, is gitignored, is not
+  a symlink to anywhere else or a dangling or looping symlink, has multiple
+  hard links, is gitignored (or the git ignore check itself fails), is not
   valid UTF-8 or not a regular file, has a pointer marker inside a code fence,
-  or has unbalanced or repeated markers. A leading BOM and CRLF line endings
-  are preserved.
-- Existing files are backed up to `<git-dir>/wikify-backups/<timestamp>/` (path
-  printed). Writes are all-or-nothing: on a write failure earlier files are
-  restored.
+  has unbalanced or repeated markers, or the backup cannot be made. A leading
+  BOM and CRLF line endings are preserved; a CRLF file gets a CRLF block.
+- Existing files are backed up to `<git-dir>/wikify-backups/<timestamp>/`; the
+  path is printed before any file is written. Writes are all-or-nothing: on a
+  write failure earlier files are restored, and if that rollback fails the
+  backup path is printed again.
 
-Claude Code reads `AGENTS.md` only when no `CLAUDE.md` exists in the working
-directory or above (by default, as of 2026-10-11), so a repo that has a
-`CLAUDE.md` needs the pointer there too; `link` handles that. Codex builds its
+Claude Code reads `AGENTS.md` only when no `CLAUDE.md`, `.claude/CLAUDE.md` or
+`CLAUDE.local.md` exists in the working directory or above (by default, and
+reading `AGENTS.md` at all needs Claude Code v2.1.277 or later; as of
+2026-10-11). `link` updates only the root `CLAUDE.md`; it does not touch
+`.claude/CLAUDE.md`, `CLAUDE.local.md` or a `CLAUDE.md` above the repo, so a
+repo relying on one of those needs the pointer copied there by hand. Codex builds its
 instruction chain once at startup from the root down, capped by
 `project_doc_max_bytes` (default 32 KiB); Cursor reads root and nested
 `AGENTS.md`. Sources: <https://code.claude.com/docs/en/memory>, the OpenAI
@@ -403,9 +411,10 @@ Codex AGENTS.md guide (<https://learn.chatgpt.com/docs/agent-configuration/agent
 Commit the pointer files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) in their own
 commit **before** `vibe wikify mark`: they live outside `docs/wiki/`, so a
 commit that mixes them with wiki changes (or follows the mark) is not docs-only
-and the push gate reads the wiki as stale. `verify` pointer checks (block
-missing, differs from the template, or points at a missing index) are notices
-only and never change the exit code.
+and the push gate reads the wiki as stale. `verify` pointer checks (no block anywhere,
+an existing target without a block once another has one, a block that differs
+from the template (CRLF endings are fine), unusable markers, or a block pointing
+at a missing index) are notices only and never change the exit code.
 
 Map and pointer limitations:
 

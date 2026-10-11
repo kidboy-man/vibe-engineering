@@ -28,7 +28,7 @@ Delimited by `<!-- wikify:map -->` and `<!-- /wikify:map -->`. One entry per lin
 - `<title>` 1-60 chars; `<when-hint>` 1-80 chars and required (it tells an agent when to load the page). Neither may contain `[`, `]`, `(`, `)`, or a newline.
 - The separator is a space, an em dash (U+2014) and a space.
 - Lines inside the block that do not match the grammar are errors; blank lines are allowed.
-- Title and hint may also not contain `@`, `<!--` or `-->`; nothing but whitespace may share a line with the begin or end marker; a `wikify:human` block inside a map block is an error.
+- Title and hint may also not contain `@`, `<`, `>` or `://` (so no comments, HTML or URLs), and `<path>` may not contain `<` or `>`; nothing but whitespace may share a line with the begin or end marker; a `wikify:human` block inside a map block is an error.
 
 The existing uncited-paragraph rule would flag these lines (the hint is prose, so the pure-link-list exemption does not apply). `verify` therefore gets a **map rule**: lines inside the block are validated by the grammar and are exempt from the citation rule, because they are navigation, not factual claims. All checks are deterministic:
 1. every link resolves to a page listed by `citations.walk_wiki` (regular file, not a symlink, `.md`);
@@ -37,7 +37,7 @@ The existing uncited-paragraph rule would flag these lines (the hint is prose, s
 4. **size cap**: at most 60 entries and 6 KiB inside the block (the measurable "not bloating" criterion; the numbers are v1 defaults);
 5. at most one map block per `index.md`; a map block inside a human block is ignored (human blocks stay opaque);
 6. the secret/PII scan still covers the whole file.
-The map rule applies to the top-level `index.md` only. A repo with no map block verifies as before (the rule is opt-in), but `plan` and `verify` print a notice that pages are not reachable from any map.
+The map rule applies to the top-level `index.md` only. A repo with no map block verifies as before (the rule is off until a block exists), but `verify` prints a notice that pages are not reachable from any map; `plan` reports the same pages in its `map_missing` list, and that list is its notice (no separate line).
 
 `plan` gains a `map_missing` list (pages not in the map). The agent adds entries; entries are agent-written and verified like any other page text.
 
@@ -53,13 +53,13 @@ Load only the pages whose "when" hint matches your task; do not read the whole w
 ```
 
 New command `vibe wikify link [--dry-run]`:
-- idempotent: uses `marked_section_strategy` with the markers above; text outside the block is preserved byte for byte;
+- idempotent marked-section merge (the `marked_section_strategy` contract: replace between markers, else prepend); text outside the block is preserved byte for byte. Markers count only as whole lines at column 0 outside code fences (a fence opens on 3+ backticks or tildes, indented at most 3 spaces, and closes only on a run of the same char at least as long with nothing after it); a marker string anywhere else is ordinary text. `link` does its own line-based split instead of calling `marked_section_strategy`, which matches markers anywhere in the text;
 - prints the unified diff for every file it would change before writing; `--dry-run` writes nothing;
 - targets: `AGENTS.md` always (created containing only the block when absent); `CLAUDE.md` and `GEMINI.md` only if they already exist; never any other file;
-- refuses (rc 1, nothing written) when `docs/wiki/index.md` does not exist (run `init` first) or a target is a symlink that does not resolve to another target in the repo, has multiple hard links, is gitignored (`gitview.ignored`), is not a regular UTF-8 file, has a pointer marker inside a code fence, or has unbalanced/repeated markers. A `CLAUDE.md`/`GEMINI.md` symlink to another target is skipped with a note (covered by its target). A leading BOM and CRLF line endings are preserved;
-- backs up an existing file before changing it to `<git-dir>/wikify-backups/<timestamp>/<rel>` (printed; not `installer_core.backup`, which would write into the working tree), then writes all targets or rolls back;
+- refuses (rc 1, nothing written) when `docs/wiki/index.md` does not exist (run `init` first) or a target is a symlink that does not resolve to another target in the repo (including dangling or looping links), has multiple hard links, is gitignored (`gitview.ignored_or_none`; a failing ignore check also refuses), is not a regular UTF-8 file, has a BEGIN or END marker inside a code fence, or has unbalanced/repeated markers, or when the backup cannot be made. A target that is a symlink to another target (including an `AGENTS.md` that links to `CLAUDE.md`/`GEMINI.md`) is skipped with a note (covered by its target). A leading BOM and CRLF line endings are preserved; a file without markers that contains CRLF gets the block with CRLF endings;
+- backs up an existing file before changing it to `<git-dir>/wikify-backups/<timestamp>/<rel>` (the path is printed before any target is truncated; not `installer_core.backup`, which would write into the working tree), then writes all targets or rolls back; a failed rollback names the backup again;
 - `init` does not call `link`; it writes an empty map block into `index.md` and prints a one-line hint to run `link`.
-`verify` reads the target files read-only and prints a notice (rc unchanged) when a pointer block exists but differs from the template or the index it points at is missing, and a different notice when none of the files carries a block.
+`verify` reads the target files read-only and prints a notice (rc unchanged) when a pointer block exists but differs from the template (compared after normalising CRLF to LF, so a CRLF block is not stale), has unusable markers, or the index it points at is missing; a different notice when none of the files carries a block; and, once at least one target has a block, a notice for each other existing regular target without one (Claude Code reads only `CLAUDE.md` when it exists). Symlinked targets stay silent.
 
 ### Freshness and hook interaction
 Pointer blocks are outside `docs/wiki/`, so a commit touching them is not docs-only (spec R4). `link` therefore tells the user to commit `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` changes in their own commit **before** running `vibe wikify mark`. No change to `state.is_fresh`, the hook script, or the parity test.
@@ -73,7 +73,8 @@ Pointer blocks are outside `docs/wiki/`, so a commit touching them is not docs-o
 ### Testing (TDD)
 - `tests/test_wikify_agentmap.py` table-driven: valid map; bad link; missing page; duplicate; orphan page; oversize (entries and bytes); stray prose in block; missing hint; hint too long; `@`/scheme/`..` in path; map inside a human block ignored; two map blocks; no map block (opt-in) with notice.
 - `link` on temp repos: no `AGENTS.md` (created, block only); existing `AGENTS.md` (user text preserved byte for byte, block prepended); existing `CLAUDE.md` gets the block, absent `GEMINI.md` is not created; re-run unchanged; stale block updated in place; `--dry-run` writes nothing; symlink, gitignored, outside-root and missing-index refusals; backup created.
-- `verify` pointer notices; parity test untouched and still passing; end-to-end scratch repo: init, pages, map, link, commit, verify, mark.
+- `verify` pointer notices; parity test untouched and still passing; end-to-end scratch repo: init, pages, map, link, then (a) commit the pointer alone, mark, commit `docs/wiki` -> fresh and the hook allows the push, and (b) one commit of everything -> stale.
+- `plan` reports pages missing from the map in `map_missing` (that list is its notice).
 - Full suite with `FORCE_COLOR= NO_COLOR=1 PYTHON_COLORS=0`.
 
 ## Out of scope (sub-project B, own spec)
