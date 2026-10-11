@@ -220,7 +220,7 @@ def verify_page(root: Path, page_rel: str, text: str, ignore: list[str]) -> list
     return [f"{page_rel}:{n}: {reason}" for n, reason in sorted(errors, key=lambda e: e[0])]
 
 
-CONTROL_FILES = {".wikify.json", ".wikifyignore", ".wikify-allow", "WIKIFY.md"}
+CONTROL_FILES = {".wikify.json", ".wikifyignore", ".wikify-allow", ".wikifydocs", "WIKIFY.md"}
 
 
 def walk_wiki(root: Path) -> tuple[list[str], list[tuple[str, Path]]]:

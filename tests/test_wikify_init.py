@@ -5,7 +5,7 @@ from pathlib import Path
 from agents.wikify import commands, init_cmd, scan
 from tests.test_wikify_state import RepoCase
 
-FILES = ["index.md", ".wikify.json", "WIKIFY.md", ".wikifyignore", ".wikify-allow"]
+FILES = ["index.md", ".wikify.json", "WIKIFY.md", ".wikifyignore", ".wikify-allow", ".wikifydocs"]
 TEMPLATE = (
     Path(__file__).resolve().parents[1]
     / "agents/kits/wikify/templates/wikify/WIKIFY.md"
@@ -16,12 +16,21 @@ class InitTests(RepoCase):
     def wiki(self, name):
         return self.root / "docs/wiki" / name
 
-    def test_creates_five_files_and_verifies_clean(self):
+    def test_creates_six_files_and_verifies_clean(self):
         self.assertEqual(init_cmd.cmd_init(cwd=self.root), 0)
         for name in FILES:
             self.assertTrue(self.wiki(name).is_file(), name)
         self.assertEqual(scan.scan_wiki(self.root), [])
         self.assertEqual(commands.run_verify(self.root)[0], 0)
+
+    def test_wikifydocs_is_comment_only_and_scaffolded(self):
+        init_cmd.cmd_init(cwd=self.root)
+        lines = self.wiki(".wikifydocs").read_text().splitlines()
+        self.assertTrue(lines and all(ln.startswith("#") for ln in lines))
+        self.assertIn("# docs-extra/", lines)
+        from agents.wikify import docs_inventory
+
+        self.assertEqual(docs_inventory.load_includes(self.root), [])
 
     def test_state_file_content(self):
         init_cmd.cmd_init(cwd=self.root)
@@ -110,7 +119,7 @@ class InitTests(RepoCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             init_cmd.cmd_init(cwd=self.root)
-        self.assertEqual(buf.getvalue().count("already initialized"), 5)
+        self.assertEqual(buf.getvalue().count("already initialized"), 6)
 
     def test_missing_template_rc1(self):
         from unittest import mock

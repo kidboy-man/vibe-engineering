@@ -1,9 +1,12 @@
+import contextlib
+import hashlib
+import io
 import os
 import time
 import unittest
 from unittest import mock
 
-from agents.wikify import citations, commands, gitview, plan, scan
+from agents.wikify import citations, commands, docs_cmd, gitview, init_cmd, plan, scan, state
 
 from agents.wikify import docs_inventory as di
 from tests.test_wikify_state import RepoCase, git
@@ -609,6 +612,188 @@ class PagesTests(RepoCase):
         elapsed = time.perf_counter() - start
         self.assertGreater(len(secs), 4000)
         self.assertLess(elapsed, 1)
+
+
+class DocsCmdTests(RepoCase):
+    DOCS = {
+        "README.md": "# Proj\n\n## Usage\n",
+        "docs/a.md": "# A\n\n## One\n",
+    }
+
+    def setUp(self):
+        super().setUp()
+        self.write(self.DOCS)
+        self.commit_all()
+        self.assertEqual(self.run_cmd("init")[0], 0)
+
+    def write(self, files):
+        for rel, content in files.items():
+            p = self.root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, newline="")
+
+    def commit_all(self):
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "c")
+
+    def run_cmd(self, which="docs", **kw):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            if which == "init":
+                rc = init_cmd.cmd_init(cwd=self.root)
+            else:
+                rc = docs_cmd.cmd_docs(cwd=self.root, **kw)
+        return rc, buf.getvalue()
+
+    def sources(self):
+        return self.root / "docs/wiki/sources"
+
+    def snapshot(self):
+        return {
+            p.relative_to(self.root).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns)
+            for p in sorted((self.root / "docs/wiki").rglob("*")) if p.is_file()
+        }
+
+    def test_creates_pages_and_leaves_originals(self):
+        before = {r: hashlib.sha256((self.root / r).read_bytes()).hexdigest() for r in self.DOCS}
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 0, out)
+        for rel in ("README.md", "docs/a.md", "index.md"):
+            page = self.sources() / rel
+            self.assertTrue(page.read_text().startswith(di.MARKER + "\n"), rel)
+            self.assertIn(f"create docs/wiki/sources/{rel}\n", out)
+        self.assertIn("+<!-- wikify:generated -->", out)
+        self.assertTrue(out.rstrip().splitlines()[-1].startswith("Next: review git status --short -- docs/wiki;"))
+        after = {r: hashlib.sha256((self.root / r).read_bytes()).hexdigest() for r in self.DOCS}
+        self.assertEqual(before, after)
+        self.assertEqual(sorted(p.name for p in self.sources().rglob("*.tmp")), [])
+
+    def test_rerun_is_unchanged_and_writes_nothing(self):
+        self.run_cmd()
+        snap = self.snapshot()
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 0)
+        self.assertNotIn("create ", out)
+        self.assertNotIn("update ", out)
+        self.assertIn("unchanged docs/wiki/sources/README.md", out)
+        self.assertEqual(self.snapshot(), snap)
+
+    def test_edited_doc_updates(self):
+        self.run_cmd()
+        self.write({"docs/a.md": "# A\n\n## One\n\n## Two\n"})
+        self.commit_all()
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 0)
+        self.assertIn("update docs/wiki/sources/docs/a.md", out)
+        self.assertIn("unchanged docs/wiki/sources/README.md", out)
+        self.assertIn("Two", (self.sources() / "docs/a.md").read_text())
+
+    def test_ineligible_doc_is_stale_and_kept(self):
+        self.run_cmd()
+        self.write({"docs/wiki/.wikifyignore": "docs/a.md\n"})
+        self.commit_all()
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 0)
+        self.assertIn("stale docs/wiki/sources/docs/a.md", out)
+        self.assertTrue((self.sources() / "docs/a.md").is_file())
+
+    def test_hand_written_page_refuses_everything(self):
+        self.write({"docs/wiki/sources/docs/a.md": "# mine\n"})
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("nothing written", out)
+        self.assertFalse((self.sources() / "README.md").exists())
+        self.assertEqual((self.sources() / "docs/a.md").read_text(), "# mine\n")
+
+    @unittest.skipUnless(HAS_SYMLINK, "symlinks")
+    def test_symlinked_sources_refused(self):
+        outside = self.root.parent / (self.root.name + "-out")
+        outside.mkdir()
+        self.addCleanup(outside.rmdir)
+        os.symlink(outside, self.sources())
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("nothing written", out)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    @unittest.skipUnless(HAS_SYMLINK, "symlinks")
+    def test_symlinked_destination_refused(self):
+        self.sources().mkdir()
+        target = self.root / "victim.txt"
+        target.write_text("keep\n")
+        os.symlink(target, self.sources() / "README.md")
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("nothing written", out)
+        self.assertEqual(target.read_text(), "keep\n")
+        self.assertFalse((self.sources() / "index.md").exists())
+
+    @unittest.skipUnless(hasattr(os, "link"), "hard links")
+    def test_hard_linked_destination_refused(self):
+        self.run_cmd()
+        dest = self.sources() / "README.md"
+        link = self.root / "alias.txt"
+        os.link(dest, link)
+        self.write({"README.md": "# Proj\n\n## Changed\n"})
+        self.commit_all()
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("nothing written", out)
+        self.assertNotIn("Changed", link.read_text())
+
+    @unittest.skipUnless(HAS_FIFO, "fifo")
+    def test_non_regular_destination_refused(self):
+        self.sources().mkdir()
+        os.mkfifo(self.sources() / "README.md")
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("nothing written", out)
+
+    def test_dry_run_writes_nothing(self):
+        rc, out = self.run_cmd(dry_run=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("create docs/wiki/sources/README.md", out)
+        self.assertEqual(out.rstrip().splitlines()[-1], "dry run: no files written")
+        self.assertFalse(self.sources().exists())
+
+    def test_not_a_repo_and_missing_index(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(docs_cmd.cmd_docs(cwd=tmp), 1)
+            self.assertIn("not a git repository", buf.getvalue())
+        (self.root / "docs/wiki/index.md").unlink()
+        rc, out = self.run_cmd()
+        self.assertEqual(rc, 1)
+        self.assertIn("run vibe wikify init first", out)
+
+    def test_control_characters_never_printed_raw(self):
+        self.write({"docs/b.md": "## evil \x1b[31mred \x9b \x07 \u0085\n"})
+        self.commit_all()
+        rc, out = self.run_cmd(dry_run=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("docs/wiki/sources/docs/b.md", out)
+        for ch in "\x1b\x9b\x07\r":
+            self.assertNotIn(ch, out)
+
+    def test_skipped_listed_and_capped(self):
+        self.write({f"docs/s{i:02d}.md": "" for i in range(55)})
+        self.commit_all()
+        rc, out = self.run_cmd(dry_run=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(sum(1 for ln in out.splitlines() if ln.startswith("skipped ")), 50)
+        self.assertIn("skipped docs/s00.md: empty", out)
+        self.assertIn("5 more skipped", out)
+
+    def test_wikifydocs_not_stray_and_ignored_is_error(self):
+        self.assertTrue((self.root / "docs/wiki/.wikifydocs").is_file())
+        errors, pages = citations.walk_wiki(self.root)
+        self.assertEqual(errors, [])
+        self.assertIn(".wikifydocs", [r.rsplit("/", 1)[-1] for r in state.CONTROL_RELS])
+        self.write({".gitignore": ".wikifydocs\n"})
+        self.assertTrue(any(".wikifydocs" in e for e in state.ignored_control_files(self.root)))
 
 
 if __name__ == "__main__":

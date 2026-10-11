@@ -20,6 +20,12 @@ IGNORE = (
     "# Repo paths the wiki must not cite, one glob per line.\n"
     "# Example: a vendored directory such as third_party/\n"
 )
+DOCS = (
+    "# Extra docs to outline in docs/wiki/sources, one glob per line.\n"
+    "# Default docs (README, docs/, ...) are always included; .wikifyignore still wins.\n"
+    "# Example (uncomment to enable):\n"
+    "# docs-extra/\n"
+)
 ALLOW = (
     "# Reviewed false positives of the secret scan, one per line.\n"
     "# Format: <page path under docs/wiki>|<exact matched text>\n"
@@ -43,6 +49,7 @@ def cmd_init(cwd: str | Path | None = None) -> int:
         "WIKIFY.md": protocol,
         ".wikifyignore": IGNORE.encode(),
         ".wikify-allow": ALLOW.encode(),
+        ".wikifydocs": DOCS.encode(),
     }
     wiki = root / WIKI_DIR
     ignored = state.ignored_control_files(root)

@@ -113,6 +113,12 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
     link_parser.add_argument(
         "--dry-run", action="store_true", help="Show the changes without writing files"
     )
+    docs_parser = wik_sub.add_parser(
+        "docs", help="Write outline pages for existing markdown docs"
+    )
+    docs_parser.add_argument(
+        "--dry-run", action="store_true", help="Show the pages without writing files"
+    )
 
     kits = sub.add_parser("kits", help="List and manage kits")
     kits_sub = kits.add_subparsers(dest="kits_command", required=True)

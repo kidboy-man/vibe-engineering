@@ -22,7 +22,7 @@ STATE_REL = "docs/wiki/.wikify.json"
 
 CONTROL_RELS = tuple(
     WIKI_DIR + name
-    for name in (".wikify.json", "WIKIFY.md", ".wikifyignore", ".wikify-allow", "index.md")
+    for name in (".wikify.json", "WIKIFY.md", ".wikifyignore", ".wikify-allow", ".wikifydocs", "index.md")
 )
 
 
