@@ -1,7 +1,9 @@
 import contextlib
 import io
 import os
+import tempfile
 from pathlib import Path
+from unittest import mock
 
 from agents.wikify import commands, gitview, pointer
 from tests.test_wikify_state import RepoCase, git
@@ -232,6 +234,134 @@ class LinkTests(LinkCase):
             rc, text = link(tmp)
         self.assertEqual(rc, 1)
         self.assertIn("not a git repository", text)
+
+
+class HardeningTests(LinkCase):
+    def swap_to_symlink(self, rel, dest):
+        """Patch git_dir so the target is swapped for a symlink after planning."""
+        real = gitview.git_dir
+
+        def swap(root):
+            p = self.root / rel
+            p.unlink()
+            os.symlink(dest, p)
+            return real(root)
+
+        return mock.patch.object(gitview, "git_dir", side_effect=swap)
+
+    def outside(self, data="secret\n"):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p = Path(tmp.name) / "outside.md"
+        p.write_text(data)
+        return p
+
+    def test_hard_link_refuses(self):
+        out = self.outside()
+        os.link(out, self.root / "AGENTS.md")
+        rc, text = link(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("AGENTS.md", text)
+        self.assertNotIn(str(out.parent), text)
+        self.assertEqual(out.read_bytes(), b"secret\n")
+        self.assertEqual(self.backups(), [])
+
+    def test_bom_kept_first_when_prepending(self):
+        user = "\ufeff# Mine\nrest\n".encode()
+        self.write("AGENTS.md", user)
+        self.assertEqual(link(self.root)[0], 0)
+        self.assertEqual(self.read("AGENTS.md"), b"\xef\xbb\xbf" + BLOCK.encode() + user[3:])
+
+    def test_bom_kept_when_updating_in_place(self):
+        stale = pointer.BEGIN + "old\n" + pointer.END
+        self.write("AGENTS.md", "\ufeffabove\n" + stale + "below\n")
+        self.assertEqual(link(self.root)[0], 0)
+        self.assertEqual(
+            self.read("AGENTS.md"), ("\ufeffabove\n" + BLOCK + "below\n").encode()
+        )
+
+    def test_bom_notice_and_unchanged(self):
+        self.write("AGENTS.md", "\ufeff" + BLOCK + "x\n")
+        self.assertEqual(pointer.pointer_notices(self.root), [])
+        self.assertIn("unchanged AGENTS.md", link(self.root)[1])
+
+    def test_two_runs_keep_two_backups(self):
+        self.write("AGENTS.md", "one\n")
+        rc, text = link(self.root)
+        self.assertRegex(text, r"backup: .*wikify-backups")
+        self.write("AGENTS.md", pointer.BEGIN + "old\n" + pointer.END)
+        self.assertEqual(link(self.root)[0], 0)
+        self.assertEqual(len(self.backups()), 2)
+
+    def test_backup_collision_refuses(self):
+        self.write("AGENTS.md", "one\n")
+        with mock.patch.object(pointer, "_stamp", return_value="fixed"):
+            self.assertEqual(link(self.root)[0], 0)
+            self.write("AGENTS.md", pointer.BEGIN + "old\n" + pointer.END)
+            before = self.read("AGENTS.md")
+            rc, _ = link(self.root)
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.read("AGENTS.md"), before)
+
+    def test_swap_fails_and_rolls_back(self):
+        out = self.outside()
+        self.write("CLAUDE.md", "mine\n")
+        with self.swap_to_symlink("CLAUDE.md", out):
+            rc, text = link(self.root)
+        self.assertEqual(rc, 1)
+        self.assertEqual(out.read_bytes(), b"secret\n")
+        self.assertFalse((self.root / "AGENTS.md").exists())
+
+    def test_rollback_failure_reported(self):
+        out = self.outside()
+        self.write("CLAUDE.md", "mine\n")
+        with self.swap_to_symlink("CLAUDE.md", out), mock.patch.object(
+            pointer, "_restore", side_effect=PermissionError
+        ):
+            rc, text = link(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("rollback failed for AGENTS.md; backup at ", text)
+
+    def test_open_uses_nofollow(self):
+        if not hasattr(os, "O_NOFOLLOW"):
+            self.skipTest("no O_NOFOLLOW")
+        self.write("CLAUDE.md", "mine\n")
+        flags = []
+        real = os.open
+
+        def spy(path, fl, *a):
+            flags.append(fl)
+            return real(path, fl, *a)
+
+        with mock.patch.object(pointer.os, "open", side_effect=spy):
+            self.assertEqual(link(self.root)[0], 0)
+        self.assertEqual(len(flags), 2)
+        self.assertTrue(all(f & os.O_NOFOLLOW for f in flags))
+        self.assertTrue(flags[0] & os.O_EXCL)  # create
+        self.assertTrue(flags[1] & os.O_TRUNC)  # existing inode
+
+    def test_diff_escapes_control_characters(self):
+        self.write("AGENTS.md", "\x1b[31mred\x1b]0;title\x07\nkeep\ttab\x7f\n")
+        rc, text = link(self.root)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("\x1b", text)
+        self.assertNotIn("\x07", text)
+        self.assertNotIn("\x7f", text)
+        self.assertIn("\\x1b[31mred", text)
+        self.assertIn("keep\ttab", text)
+
+    def test_fenced_marker_refuses(self):
+        for fence in ("```", "~~~"):
+            text = f"how to:\n{fence}\n{pointer.BEGIN}x\n{pointer.END}{fence}\n"
+            self.write("AGENTS.md", text)
+            rc, out = link(self.root)
+            self.assertEqual(rc, 1)
+            self.assertIn("code fence", out)
+            self.assertEqual(self.read("AGENTS.md"), text.encode())
+
+    def test_marker_after_closed_fence_ok(self):
+        self.write("AGENTS.md", "```\ncode\n```\n" + BLOCK)
+        self.assertEqual(link(self.root)[0], 0)
 
 
 class NoticeTests(LinkCase):

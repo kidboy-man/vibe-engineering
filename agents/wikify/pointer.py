@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -37,8 +38,39 @@ class Change:
     new: str
 
 
+_BOM = "\ufeff"
+_CONTROL = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _safe(line: str) -> str:
+    """Escape control characters so a diff can never drive the terminal."""
+    return _CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
+
+
+def _fenced_begin(text: str) -> bool:
+    """True when a BEGIN marker line sits inside a ``` / ~~~ code fence."""
+    fence = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("```", "~~~")):
+            if fence is None:
+                fence = stripped[:3]
+            elif stripped[:3] == fence:
+                fence = None
+        elif fence and stripped == BEGIN.strip():
+            return True
+    return False
+
+
 def _merge(existing: str) -> tuple[str, str] | None:
-    """Merge the block into ``existing``; None when the markers are ambiguous."""
+    """Merge keeping a leading BOM first; None when the markers are ambiguous."""
+    if existing.startswith(_BOM):
+        merged = _merge_body(existing[1:])
+        return None if merged is None else (_BOM + merged[0], merged[1])
+    return _merge_body(existing)
+
+
+def _merge_body(existing: str) -> tuple[str, str] | None:
     eol = "\r\n" if BEGIN[:-1] + "\r\n" in existing else "\n"
     begin, end, template = (s.replace("\n", eol) for s in (BEGIN, END, TEMPLATE))
     nb, ne = existing.count(begin), existing.count(end)
@@ -84,9 +116,16 @@ def plan_link(root: Path) -> tuple[list[Change], list[str]]:
             changes.append(Change(rel, "create", None, BEGIN + TEMPLATE + END))
             continue
         try:
+            hard = path.stat().st_nlink > 1
             old = path.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError):
             notes.append(f"{REFUSED}{rel} is unreadable or not valid UTF-8")
+            continue
+        if hard:
+            notes.append(f"{REFUSED}{rel} has multiple hard links; writing could change a file outside the repo")
+            continue
+        if _fenced_begin(old):
+            notes.append(f"{REFUSED}{rel} has a wikify:pointer marker inside a code fence; move or remove the example")
             continue
         merged = _merge(old)
         if merged is None:
@@ -98,42 +137,79 @@ def plan_link(root: Path) -> tuple[list[Change], list[str]]:
 
 def _diff(change: Change) -> list[str]:
     old = (change.old or "").splitlines()
-    return list(
-        difflib.unified_diff(
+    return [
+        _safe(line)
+        for line in difflib.unified_diff(
             old, change.new.splitlines(),
             fromfile=f"a/{change.rel}", tofile=f"b/{change.rel}", lineterm="",
         )
-    )
+    ]
 
 
-def _write(root: Path, changes: list[Change]) -> str | None:
-    """Back up then write; on any failure roll back. Returns an error or None."""
+def _stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+
+
+def _open(path: Path, create: bool) -> int:
+    """Open for writing without following a symlink where the OS supports it."""
+    flags = os.O_WRONLY | (os.O_CREAT | os.O_EXCL if create else os.O_TRUNC)
+    return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), 0o666)
+
+
+def _put(path: Path, text: str, create: bool) -> None:
+    with os.fdopen(_open(path, create), "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+
+
+def _restore(root: Path, change: Change) -> None:
+    if change.old is None:
+        (root / change.rel).unlink(missing_ok=True)
+    else:
+        _put(root / change.rel, change.old, create=False)
+
+
+def _write(root: Path, changes: list[Change]) -> tuple[str | None, Path | None]:
+    """Back up then write; on any failure roll back. Returns (error, backup dir)."""
     merges = [c for c in changes if c.action == "merge"]
+    backup: Path | None = None
     if merges:
         gd = gitview.git_dir(root)
         if gd is None:
-            return "git dir unavailable, cannot back up existing files"
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            return "git dir unavailable, cannot back up existing files", None
         try:
+            (gd / "wikify-backups").mkdir(parents=True, exist_ok=True)
+            backup = gd / "wikify-backups" / _stamp()
+            backup.mkdir(exist_ok=False)
             for c in merges:
-                dest = gd / "wikify-backups" / stamp / c.rel
+                dest = backup / c.rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(root / c.rel, dest)
+        except FileExistsError:
+            return "backup directory already exists; rerun", None
         except OSError as exc:
-            return f"backup failed: {type(exc).__name__}"
-    done: list[Change] = []
+            return f"backup failed: {type(exc).__name__}", None
+    touched: list[Change] = []
     try:
         for c in changes:
-            (root / c.rel).write_text(c.new, encoding="utf-8", newline="")
-            done.append(c)
+            fd = _open(root / c.rel, create=c.old is None)  # raises before touching
+            touched.append(c)
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+                fh.write(c.new)
     except OSError as exc:
-        for c in done:  # restore: nothing is left half-applied
-            if c.old is None:
-                (root / c.rel).unlink(missing_ok=True)
-            else:
-                (root / c.rel).write_text(c.old, encoding="utf-8", newline="")
-        return f"write failed: {type(exc).__name__}; rolled back"
-    return None
+        failed = []
+        for c in touched:  # restore: nothing is left half-applied
+            try:
+                _restore(root, c)
+            except OSError:
+                failed.append(c.rel)
+        if failed:
+            where = f"; backup at {backup}" if backup else ""
+            return (
+                "\n".join(f"rollback failed for {rel}{where}" for rel in failed),
+                backup,
+            )
+        return f"write failed: {type(exc).__name__}; rolled back", backup
+    return None, backup
 
 
 def cmd_link(cwd: str | Path | None = None, dry_run: bool = False) -> int:
@@ -160,10 +236,12 @@ def cmd_link(cwd: str | Path | None = None, dry_run: bool = False) -> int:
         return 0
     if not todo:
         return 0
-    error = _write(root, todo)
+    error, backup = _write(root, todo)
     if error:
-        print(f"refused: {error}")
+        print(error if error.startswith("rollback") else f"refused: {error}")
         return 1
+    if backup is not None:
+        print(f"backup: {backup}")
     print(
         f"Next: commit {' '.join(c.rel for c in todo)} in their own commit "
         "(not together with docs/wiki), then run vibe wikify mark."
