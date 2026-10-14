@@ -1872,6 +1872,51 @@ class SecondBrainDoctorDepTests(unittest.TestCase):
 class SecondBrainQmdAutoInstallTests(unittest.TestCase):
     """qmd auto-install behavior during install."""
 
+    def _cli_install_calls_npm(self, extra_args):
+        import shutil as real_shutil
+
+        from agents import cli
+
+        npm_calls = []
+        real_run = subprocess.run
+        real_which = real_shutil.which
+
+        def fake_which(name, *a, **kw):
+            if name == "qmd":
+                return None
+            if name in ("npm", "node"):
+                return f"/fake/{name}"
+            return real_which(name, *a, **kw)
+
+        def fake_run(cmd, *a, **kw):
+            if cmd and cmd[0] == "/fake/npm":
+                npm_calls.append([*cmd, kw.get("timeout")])
+                return subprocess.CompletedProcess(cmd, 1, "", "")
+            if cmd and cmd[0] == "node":
+                return subprocess.CompletedProcess(cmd, 0, "v22.0.0", "")
+            return real_run(cmd, *a, **kw)
+
+        with tempfile.TemporaryDirectory() as home_str:
+            with patch("agents.kits.second_brain.qmd.shutil.which", fake_which), \
+                 patch("agents.kits.second_brain.installer.shutil.which", fake_which), \
+                 patch("agents.kits.second_brain.qmd.subprocess.run", fake_run), \
+                 patch("agents.kits.second_brain.installer.subprocess.run", fake_run), \
+                 redirect_stdout(io.StringIO()):
+                cli.main(["kits", "second-brain", "install", "--yes", "--home", home_str, *extra_args])
+        return npm_calls
+
+    def test_cli_install_yes_never_runs_npm_without_setup_deps(self):
+        self.assertEqual(self._cli_install_calls_npm([]), [])
+
+    def test_cli_no_setup_deps_is_accepted_and_runs_nothing(self):
+        self.assertEqual(self._cli_install_calls_npm(["--no-setup-deps"]), [])
+
+    def test_cli_setup_deps_runs_npm_with_timeout(self):
+        calls = self._cli_install_calls_npm(["--setup-deps"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][:4], ["/fake/npm", "install", "-g", "@tobilu/qmd"])
+        self.assertIsNotNone(calls[0][4])  # timeout set
+
     @patch("agents.kits.second_brain.installer._setup_qmd")
     def test_install_skips_qmd_when_setup_deps_false(self, mock_setup):
         with tempfile.TemporaryDirectory() as home_str:

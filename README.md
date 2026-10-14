@@ -547,10 +547,11 @@ vibe wikify docs             # write pages under docs/wiki/sources/ only
 Local-first Obsidian + qmd vault with safe AI-agent config snippets. The
 kit creates a vault scaffold, seeds three wiki pages, and merges a
 non-secret `qmd` MCP entry into Claude Code, OpenCode, Codex CLI, and Cursor
-configs. Every normal install verifies the wiki collection and runs `qmd update`.
-When qmd is not found, `install` prompts then runs `npm install -g @tobilu/qmd`
-before registering the collection. Pass
-`--no-setup-deps` to skip; all other network commands (`qmd`, `pip`,
+configs. Dependency setup is opt-in: pass `--setup-deps` and `install` verifies
+the wiki collection and runs `qmd update`; when qmd is not found it prompts then
+runs `npm install -g @tobilu/qmd` (with a timeout) before registering the
+collection. `--yes` alone never installs anything. `--no-setup-deps` is still
+accepted as a deprecated no-op; all other network commands (`qmd`, `pip`,
 `git clone`, etc.) are never run.
 
 The install also adds the portable `second-brain` umbrella skill plus named
@@ -632,11 +633,11 @@ Existing config files are backed up before a merge rewrites them.
 
 ### qmd policy
 
-`qmd` is the core search/index dependency. Every normal install checks the
-wiki collection and runs `qmd update`; when qmd is missing, `install` prompts
-to run `npm install -g @tobilu/qmd` first. Pass `--yes` to skip the prompt; pass
-`--no-setup-deps` to skip auto-install entirely (you'll see the manual
-commands below). `doctor` returns `1` if `qmd` is missing or its
+`qmd` is the core search/index dependency. Dependency setup is opt-in: with
+`--setup-deps`, `install` checks the wiki collection and runs `qmd update`, and
+when qmd is missing prompts to run `npm install -g @tobilu/qmd` first. `--yes`
+alone never installs dependencies; without `--setup-deps` you'll see the manual
+commands below (`--no-setup-deps` is a deprecated no-op). `doctor` returns `1` if `qmd` is missing or its
 `collection list` does not point at `<vault>/wiki`.
 
 To install manually (Node.js 22+):
@@ -674,7 +675,7 @@ For the OpenCode kit, the top-level config keys `model`, `provider`, `plugin`, `
 
 The `second-brain` kit additionally guarantees:
 
-- **Controlled package-manager execution**: `second-brain install` prompts then runs `npm install -g @tobilu/qmd` when qmd is not found, then verifies the wiki collection and updates its index. Pass `--no-setup-deps` or decline the prompt to skip. All other kits never run any package-manager command.
+- **Controlled package-manager execution**: `second-brain install` prompts then runs `npm install -g @tobilu/qmd` when qmd is not found, then verifies the wiki collection and updates its index. `second-brain install` only does this when you pass `--setup-deps` (never implied by `--yes`); decline the prompt to skip. All other kits never run any package-manager command.
 - **No other network or install commands**: never runs `git pull`, `git clone`, `qmd embed`, `qmd init`, or starts the qmd MCP daemon
 - **No symlinks**: never creates cross-directory symlinks
 - **No plugin or Obsidian installs**: `obsidian` is checked by `doctor` but never installed

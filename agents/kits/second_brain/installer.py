@@ -220,6 +220,10 @@ def _confirm(prompt: str) -> bool:
         return False
 
 
+NPM_INSTALL_TIMEOUT = 600  # seconds
+QMD_CMD_TIMEOUT = 300
+
+
 def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
     """Ensure qmd, the vault collection, and its BM25 index are ready."""
     if not shutil.which("qmd"):
@@ -238,7 +242,11 @@ def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
         if not yes and not _confirm("  Proceed? [y/N] "):
             print("  Skipped. Run manually: npm install -g @tobilu/qmd")
             return 1
-        r = subprocess.run([npm, "install", "-g", "@tobilu/qmd"], check=False)
+        try:
+            r = subprocess.run([npm, "install", "-g", "@tobilu/qmd"], check=False, timeout=NPM_INSTALL_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            print("[second-brain] npm install timed out. Run manually: npm install -g @tobilu/qmd")
+            return 1
         if r.returncode != 0:
             print("[second-brain] npm install failed. Run manually: npm install -g @tobilu/qmd")
             return 1
@@ -250,22 +258,27 @@ def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
         return 1
 
     wiki_path = (vault_path / "wiki").resolve()
-    if not collection_match:
-        added = subprocess.run(
-            ["qmd", "collection", "add", str(wiki_path), "--name", QMD_COLLECTION_NAME],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if added.returncode != 0:
-            print("[second-brain] qmd collection add failed.")
-            if added.stderr:
-                print(f"  {added.stderr.strip()}")
-            return 1
+    try:
+        if not collection_match:
+            added = subprocess.run(
+                ["qmd", "collection", "add", str(wiki_path), "--name", QMD_COLLECTION_NAME],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=QMD_CMD_TIMEOUT,
+            )
+            if added.returncode != 0:
+                print("[second-brain] qmd collection add failed.")
+                if added.stderr:
+                    print(f"  {added.stderr.strip()}")
+                return 1
 
-    updated = subprocess.run(
-        ["qmd", "update"], check=False, capture_output=True, text=True
-    )
+        updated = subprocess.run(
+            ["qmd", "update"], check=False, capture_output=True, text=True, timeout=QMD_CMD_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        print(f"[second-brain] qmd timed out after {QMD_CMD_TIMEOUT}s; rerun install.")
+        return 1
     if updated.returncode != 0:
         print("[second-brain] qmd update failed.")
         if updated.stderr:
@@ -445,7 +458,9 @@ def install(
     _git_init(paths.vault)
     print("git repo ready")
 
-    if setup_deps and _setup_qmd(paths.vault, yes=yes) != 0:
+    if not setup_deps:
+        print("qmd setup skipped; pass --setup-deps to install qmd (npm) and register the wiki collection")
+    elif _setup_qmd(paths.vault, yes=yes) != 0:
         state = _manifest_state(managed, status="incomplete", phase="qmd")
         core.write_text(paths.manifest, json.dumps(state, indent=2) + "\n")
         print("qmd setup incomplete; re-run install after resolving the error")

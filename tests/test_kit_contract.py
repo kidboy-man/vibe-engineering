@@ -68,18 +68,23 @@ class OptionWiringTests(unittest.TestCase):
         self.assertTrue(kwargs["yes"])
         self.assertFalse(kwargs["dry_run"])
         self.assertIs(kwargs["merge_settings"], True)
-        self.assertIs(kwargs["setup_deps"], True)
+        self.assertIs(kwargs["setup_deps"], False)  # dependency install is opt-in
         self.assertIs(kwargs["enable_hooks"], True)
         self.assertIs(kwargs["with_verify"], False)
 
     def test_flags_flip_kwargs(self):
         spec, install = self._spec(INSTALL_OPTIONS)
-        self._run(spec, ["install", "--no-settings", "--no-setup-deps", "--no-hooks", "--with-verify"])
+        self._run(spec, ["install", "--no-settings", "--setup-deps", "--no-hooks", "--with-verify"])
         kwargs = install.call_args.kwargs
         self.assertIs(kwargs["merge_settings"], False)
-        self.assertIs(kwargs["setup_deps"], False)
+        self.assertIs(kwargs["setup_deps"], True)
         self.assertIs(kwargs["enable_hooks"], False)
         self.assertIs(kwargs["with_verify"], True)
+
+    def test_deprecated_no_setup_deps_is_accepted_noop(self):
+        spec, install = self._spec(INSTALL_OPTIONS)
+        self.assertEqual(self._run(spec, ["install", "--no-setup-deps"]), 0)
+        self.assertIs(install.call_args.kwargs["setup_deps"], False)
 
     def test_undeclared_options_are_not_passed(self):
         spec, install = self._spec(set())

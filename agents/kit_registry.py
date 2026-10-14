@@ -88,6 +88,7 @@ class InstallOption:
     kwarg: str
     help: str
     negated: bool = True  # --no-x flags pass kwarg = not flag
+    deprecated_noops: tuple[str, ...] = ()  # hidden flags still accepted, ignored
 
     @property
     def dest(self) -> str:
@@ -102,7 +103,13 @@ class InstallOption:
 # flags appear in --help, so keep it stable.
 INSTALL_OPTIONS: Mapping[str, InstallOption] = {
     "settings": InstallOption("--no-settings", "merge_settings", "Do not merge the safe settings fragment"),
-    "setup_deps": InstallOption("--no-setup-deps", "setup_deps", "Do not auto-install qmd or other dependencies"),
+    "setup_deps": InstallOption(
+        "--setup-deps",
+        "setup_deps",
+        "Install qmd with npm (network + global install); never implied by --yes",
+        negated=False,
+        deprecated_noops=("--no-setup-deps",),
+    ),
     "hooks": InstallOption("--no-hooks", "enable_hooks", "Skip the proactive SessionStart hook / CLAUDE.md prompt"),
     "with_verify": InstallOption(
         "--with-verify", "with_verify", "Also register the opt-in gofmt check after Claude Code edits", negated=False

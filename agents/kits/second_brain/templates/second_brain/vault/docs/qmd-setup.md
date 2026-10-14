@@ -9,9 +9,9 @@
 
 ## Install
 
-`vibe kits second-brain install` prompts to run `npm install -g @tobilu/qmd`
-automatically when qmd is not found. To skip the prompt, pass `--yes`; to
-skip auto-install entirely, pass `--no-setup-deps`.
+`vibe kits second-brain install --setup-deps` prompts to run
+`npm install -g @tobilu/qmd` when qmd is not found. Dependency install is
+opt-in and never implied by `--yes`; without `--setup-deps`, install manually.
 
 To install manually:
 

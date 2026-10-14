@@ -134,6 +134,11 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
         _add_apply_flags(install_parser)
         for option in kit.options():
             install_parser.add_argument(option.flag, action="store_true", help=option.help)
+            for old in option.deprecated_noops:
+                install_parser.add_argument(
+                    old, action="store_true", dest=f"deprecated_{old.lstrip('-').replace('-', '_')}",
+                    help=argparse.SUPPRESS,
+                )
 
         diff_parser = kit_sub.add_parser("diff", help="Show file-level differences for managed files")
         _add_home(diff_parser)
