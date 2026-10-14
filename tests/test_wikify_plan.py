@@ -239,6 +239,13 @@ class PlanTests(RepoCase):
         self.assertEqual(p["mode"], "full")
         self.assertIn("src/a.py", p["changed"])
 
+    def test_non_utf8_page_does_not_crash_plan(self):
+        self.commit("src/a.py", "def a():\n    pass\n")
+        (self.root / "docs/wiki").mkdir(parents=True, exist_ok=True)
+        (self.root / "docs/wiki/bad.md").write_bytes(b"\xff\xfe\n")
+        p = plan.build_plan(self.root)
+        self.assertIn("src/a.py", p["changed"])
+
     def test_negation_in_ignore_is_rejected(self):
         self.commit("src/a.py", "def a():\n    pass\n")
         self.mark()

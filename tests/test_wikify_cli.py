@@ -98,6 +98,16 @@ class VerifyTests(VerifyCase):
         self.assertFalse(any("ALLOW-LIST CHANGED" in ln for ln in self.verify()[1]))
 
 
+class NonUtf8PageTests(VerifyCase):
+    def test_names_the_page(self):
+        self.page("fine (src: src/a.py:1)\n")
+        (self.root / "docs/wiki/bad.md").write_bytes(b"\xff\xfe broken\n")
+        rc, lines = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertIn("bad.md: not valid UTF-8", lines)
+        self.assertFalse(any(ln.startswith("verify failed") for ln in lines))
+
+
 class IgnoreNegationTests(VerifyCase):
     def test_negation_is_a_verify_error(self):
         self.page("x (src: src/a.py:1)\n")
