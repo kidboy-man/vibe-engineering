@@ -224,9 +224,13 @@ NPM_INSTALL_TIMEOUT = 600  # seconds
 QMD_CMD_TIMEOUT = 300
 
 
-def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
+def _setup_qmd(vault_path: Path, yes: bool = False, allow_install: bool = True) -> int:
     """Ensure qmd, the vault collection, and its BM25 index are ready."""
     if not shutil.which("qmd"):
+        if not allow_install:
+            print("[second-brain] qmd not found; pass --setup-deps to install it with npm "
+                  "(network + global install), or run: npm install -g @tobilu/qmd")
+            return 0
         ok_node, msg_node = _check_min_version("node", ["--version"], QMD_MIN_NODE_MAJOR)
         if not ok_node:
             print(f"[second-brain] {msg_node}")
@@ -390,7 +394,7 @@ def install(
     dry_run: bool = False,
     yes: bool = False,
     merge_settings: bool = True,
-    setup_deps: bool = False,
+    setup_deps: bool | None = False,
     enable_hooks: bool = True,
     **kwargs,
 ) -> int:
@@ -458,9 +462,9 @@ def install(
     _git_init(paths.vault)
     print("git repo ready")
 
-    if not setup_deps:
-        print("qmd setup skipped; pass --setup-deps to install qmd (npm) and register the wiki collection")
-    elif _setup_qmd(paths.vault, yes=yes) != 0:
+    # False: skip qmd entirely; None: local collection/index setup only;
+    # True: additionally allow the npm install of a missing qmd.
+    if setup_deps is not False and _setup_qmd(paths.vault, yes=yes, allow_install=bool(setup_deps)) != 0:
         state = _manifest_state(managed, status="incomplete", phase="qmd")
         core.write_text(paths.manifest, json.dumps(state, indent=2) + "\n")
         print("qmd setup incomplete; re-run install after resolving the error")

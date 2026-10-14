@@ -88,10 +88,10 @@ mkdir -p $VAULT/wiki/concepts/{backend,ai-engineering,pkm,personal}
 
 [qmd](https://github.com/tobi/qmd) combines BM25 full-text search, vector semantic search, and LLM reranking — all running locally with GGUF models. No cloud, no API keys, no indexing service.
 
-Dependency setup is opt-in. `vibe kits second-brain install --setup-deps`
-verifies the qmd wiki collection and runs `qmd update`; when qmd is missing,
-accept the prompt to run `npm install -g @tobilu/qmd` before the collection is
-registered. `--yes` alone never installs dependencies; without `--setup-deps`
+When qmd is on PATH, `vibe kits second-brain install` verifies the qmd wiki
+collection and runs `qmd update`. Installing qmd is opt-in: with
+`vibe kits second-brain install --setup-deps`, a missing qmd prompts to run
+`npm install -g @tobilu/qmd` before the collection is registered. `--yes` alone never installs dependencies; without `--setup-deps`
 follow the manual steps below (`--no-setup-deps` is a deprecated no-op).
 
 To install manually:

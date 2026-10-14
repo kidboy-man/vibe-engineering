@@ -1901,7 +1901,7 @@ class SecondBrainDoctorDepTests(unittest.TestCase):
 class SecondBrainQmdAutoInstallTests(unittest.TestCase):
     """qmd auto-install behavior during install."""
 
-    def _cli_install_calls_npm(self, extra_args):
+    def _cli_install_calls_npm(self, extra_args, qmd_present=False, all_calls=None):
         import shutil as real_shutil
 
         from agents import cli
@@ -1912,7 +1912,7 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
 
         def fake_which(name, *a, **kw):
             if name == "qmd":
-                return None
+                return "/fake/qmd" if qmd_present else None
             if name in ("npm", "node"):
                 return f"/fake/{name}"
             return real_which(name, *a, **kw)
@@ -1921,6 +1921,10 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
             if cmd and cmd[0] == "/fake/npm":
                 npm_calls.append([*cmd, kw.get("timeout")])
                 return subprocess.CompletedProcess(cmd, 1, "", "")
+            if cmd and cmd[0] == "qmd":
+                if all_calls is not None:
+                    all_calls.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0, "", "")
             if cmd and cmd[0] == "node":
                 return subprocess.CompletedProcess(cmd, 0, "v22.0.0", "")
             return real_run(cmd, *a, **kw)
@@ -1936,6 +1940,13 @@ class SecondBrainQmdAutoInstallTests(unittest.TestCase):
 
     def test_cli_install_yes_never_runs_npm_without_setup_deps(self):
         self.assertEqual(self._cli_install_calls_npm([]), [])
+
+    def test_cli_default_install_registers_collection_when_qmd_present_without_npm(self):
+        qmd_calls = []
+        npm_calls = self._cli_install_calls_npm([], qmd_present=True, all_calls=qmd_calls)
+        self.assertEqual(npm_calls, [])
+        self.assertTrue(any(c[:3] == ["qmd", "collection", "add"] for c in qmd_calls), qmd_calls)
+        self.assertIn(["qmd", "update"], qmd_calls)
 
     def test_cli_no_setup_deps_is_accepted_and_runs_nothing(self):
         self.assertEqual(self._cli_install_calls_npm(["--no-setup-deps"]), [])

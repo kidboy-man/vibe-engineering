@@ -9,6 +9,6 @@ options:
   --dry-run      Show changes without writing files
   --yes, -y      Apply without interactive confirmation
   --no-settings  Do not merge the safe settings fragment
-  --setup-deps   Install qmd with npm (network + global install); never
-                 implied by --yes
+  --setup-deps   Also install qmd with npm when missing (network + global
+                 install); never implied by --yes
   --no-hooks     Skip the proactive SessionStart hook / CLAUDE.md prompt

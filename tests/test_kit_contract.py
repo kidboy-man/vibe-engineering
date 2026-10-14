@@ -68,7 +68,7 @@ class OptionWiringTests(unittest.TestCase):
         self.assertTrue(kwargs["yes"])
         self.assertFalse(kwargs["dry_run"])
         self.assertIs(kwargs["merge_settings"], True)
-        self.assertIs(kwargs["setup_deps"], False)  # dependency install is opt-in
+        self.assertIsNone(kwargs["setup_deps"])  # npm install is opt-in; local qmd setup still runs
         self.assertIs(kwargs["enable_hooks"], True)
         self.assertIs(kwargs["with_verify"], False)
 
@@ -84,7 +84,7 @@ class OptionWiringTests(unittest.TestCase):
     def test_deprecated_no_setup_deps_is_accepted_noop(self):
         spec, install = self._spec(INSTALL_OPTIONS)
         self.assertEqual(self._run(spec, ["install", "--no-setup-deps"]), 0)
-        self.assertIs(install.call_args.kwargs["setup_deps"], False)
+        self.assertIsNone(install.call_args.kwargs["setup_deps"])
 
     def test_undeclared_options_are_not_passed(self):
         spec, install = self._spec(set())

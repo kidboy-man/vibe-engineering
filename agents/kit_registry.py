@@ -89,6 +89,7 @@ class InstallOption:
     help: str
     negated: bool = True  # --no-x flags pass kwarg = not flag
     deprecated_noops: tuple[str, ...] = ()  # hidden flags still accepted, ignored
+    absent_value: bool | None = False  # kwarg value for a non-negated flag that was not passed
 
     @property
     def dest(self) -> str:
@@ -96,7 +97,9 @@ class InstallOption:
 
     def value_from(self, args) -> bool:
         value = getattr(args, self.dest)
-        return not value if self.negated else value
+        if self.negated:
+            return not value
+        return True if value else self.absent_value
 
 
 # Keyed by the names used in KitSpec.install_options. Order is the order the
@@ -106,8 +109,9 @@ INSTALL_OPTIONS: Mapping[str, InstallOption] = {
     "setup_deps": InstallOption(
         "--setup-deps",
         "setup_deps",
-        "Install qmd with npm (network + global install); never implied by --yes",
+        "Also install qmd with npm when missing (network + global install); never implied by --yes",
         negated=False,
+        absent_value=None,  # None = local qmd setup only, no npm install
         deprecated_noops=("--no-setup-deps",),
     ),
     "hooks": InstallOption("--no-hooks", "enable_hooks", "Skip the proactive SessionStart hook / CLAUDE.md prompt"),
