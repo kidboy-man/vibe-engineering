@@ -216,6 +216,17 @@ class PlanTests(RepoCase):
         self.assertEqual(p["mode"], "full")
         self.assertEqual(p["changed"], ["src/a.py"])
 
+    def test_rejected_ignore_emits_no_path_data(self):
+        self.commit("src/a.py", "def a():\n    pass\n")
+        self.mark()
+        self.commit("src/b.py", "def b():\n    pass\n")
+        (self.root / "docs/wiki/.wikifyignore").symlink_to("../../src/a.py")
+        p = plan.build_plan(self.root)
+        self.assertIn("rejected", p["error"])
+        for key in ("changed", "refresh_pages", "uncovered", "contexts", "stale_deleted"):
+            self.assertEqual(p[key], [], key)
+        self.assertEqual(p["symbols"], {})
+
     def test_error_none_when_healthy_or_empty_tree(self):
         self.commit("src/a.py")
         self.assertIsNone(plan.build_plan(self.root)["error"])

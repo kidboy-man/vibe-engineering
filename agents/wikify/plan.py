@@ -139,6 +139,7 @@ def build_plan(root: Path, full: bool = False) -> dict:
     }
     if citations.ignore_status(root) == "rejected":
         plan["error"] = f"{citations.IGNORE_REL} rejected; ignore rules were NOT applied"
+        return plan  # fail closed: without the ignore rules no path list is safe to emit
     if docs_error:
         plan["error"] = _join(plan["error"], docs_error)
     if head is None:
