@@ -66,7 +66,7 @@ class VerifyTests(VerifyCase):
         self.assertEqual(self.verify()[0], 1)
 
     def test_scan_exception_fails(self):
-        with mock.patch.object(scan, "scan_wiki", side_effect=PermissionError("x")):
+        with mock.patch.object(scan, "report", side_effect=PermissionError("x")):
             rc, text = out(commands.cmd_verify, self.root)
         self.assertEqual(rc, 1)
         self.assertIn("verify failed: PermissionError", text)
@@ -85,14 +85,29 @@ class VerifyTests(VerifyCase):
         self.page("Contact (src: src/a.py:1) x@example.org\n")
         self.assertEqual(self.verify()[0], 1)
         allow = self.root / "docs/wiki/.wikify-allow"
-        allow.write_text("a.md|x@example.org\n")
+        key = scan.allow_key("x@example.org")
+        self.assertIn(f"ALLOW-LIST KEY: a.md:1: email -> a.md|{key}", self.verify()[1])
+        allow.write_text(f"a.md|{key}\n")
         rc, lines = self.verify()
         self.assertEqual(rc, 0)
-        self.assertIn("ALLOW-LIST CHANGED: a.md|x@example.org", lines)
+        self.assertIn(f"ALLOW-LIST CHANGED: a.md|{key}", lines)
+        self.assertNotIn("x@example.org", "\n".join(lines))
         self.assertIn("ALLOW-LISTED:", lines)
         self.assertTrue(any("email (allow-listed)" in ln for ln in lines))
         self.commit_wiki()
         self.assertFalse(any("ALLOW-LIST CHANGED" in ln for ln in self.verify()[1]))
+
+
+class LegacyAllowTests(VerifyCase):
+    def test_plaintext_entry_honoured_with_migration_notice(self):
+        self.page("Contact (src: src/a.py:1) x@example.org\n")
+        (self.root / "docs/wiki/.wikify-allow").write_text("a.md|x@example.org\n")
+        rc, lines = self.verify()
+        key = scan.allow_key("x@example.org")
+        self.assertEqual(rc, 0)
+        self.assertIn(f"ALLOW-LIST CHANGED: a.md|{key}", lines)
+        self.assertTrue(any(ln.startswith("ALLOW-LIST LEGACY: a.md") and key in ln for ln in lines))
+        self.assertNotIn("x@example.org", "\n".join(ln for ln in lines if "LIST" in ln and "|" in ln))
 
 
 class AgentMapVerifyTests(VerifyCase):
@@ -357,6 +372,9 @@ class ParseAllowTests(unittest.TestCase):
         self.assertEqual(
             scan.parse_allow("# c\n\na.md|x@y.zz\nbad\n"), {("a.md", "x@y.zz")}
         )
+        key = scan.allow_key("x@y.zz")
+        self.assertEqual(scan.parse_allow(f"a.md|{key}\n"), {("a.md", key)})
+        self.assertRegex(key, r"^sha256:[0-9a-f]{16}$")
 
 
 

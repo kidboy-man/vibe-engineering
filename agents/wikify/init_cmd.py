@@ -28,7 +28,8 @@ DOCS = (
 )
 ALLOW = (
     "# Reviewed false positives of the secret scan, one per line.\n"
-    "# Format: <page path under docs/wiki>|<exact matched text>\n"
+    "# Format: <page path under docs/wiki>|sha256:<first 16 hex of sha256(matched text)>\n"
+    "# verify prints the exact line to add (ALLOW-LIST KEY). Never store the secret itself.\n"
     "# Only add entries after a human has reviewed the match.\n"
 )
 

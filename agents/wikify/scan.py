@@ -8,6 +8,7 @@ well-known token shapes, home paths, emails and quoted credential assignments.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -74,15 +75,40 @@ def scan_text(text: str) -> list[tuple[int, str]]:
     return [(line, rule) for line, rule, _ in _scan(text)]
 
 
+_KEY_FORM = re.compile(r"sha256:[0-9a-f]{16}\Z")
+
+
+def allow_key(text: str) -> str:
+    """Allow-list key of a matched text: first 16 hex of its sha256."""
+    return "sha256:" + hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+
+
 def parse_allow(text: str) -> set[tuple[str, str]]:
-    """Parse ``<page-rel>|<exact matched text>`` lines; ``#`` and blanks ignored."""
+    """Parse ``<page-rel>|sha256:<16 hex>`` lines (legacy: ``|<exact matched text>``).
+
+    ``#`` and blank lines are ignored. Entries are returned as written.
+    """
     entries = set()
     for line in text.splitlines():
         if not line.strip() or line.lstrip().startswith("#") or "|" not in line:
             continue
         page, hit = line.split("|", 1)
-        entries.add((page.strip(), hit))
+        entries.add((page.strip(), hit.strip() if _KEY_FORM.match(hit.strip()) else hit))
     return entries
+
+
+def canonical_allow(entries: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    """Entries with legacy plaintext mapped to its hash key (never shows the text)."""
+    return {(p, t if _KEY_FORM.match(t) else allow_key(t)) for p, t in entries}
+
+
+def legacy_allow_notices(entries: set[tuple[str, str]]) -> list[str]:
+    """One migration notice per plaintext entry; shows the hash form, never the text."""
+    return [
+        f"ALLOW-LIST LEGACY: {p} has a plaintext entry; replace it with {p}|{allow_key(t)}"
+        for p, t in sorted(entries)
+        if not _KEY_FORM.match(t)
+    ]
 
 
 def load_allow(root: Path) -> set[tuple[str, str]]:
@@ -133,24 +159,32 @@ def _all_hits(root: Path) -> list[tuple[str, int, str, str]]:
     return [hit for _, hits in sorted(items, key=lambda i: i[0]) for hit in hits]
 
 
+def report(root: Path) -> tuple[list[str], list[str], list[str]]:
+    """(errors, allow-list keys for the errors, allow-listed hits); one scan."""
+    entries = load_allow(root)
+    allow = canonical_allow(entries)
+    plain = {e for e in entries}
+    errors: list[str] = []
+    keys: list[str] = []
+    allowed: list[str] = []
+    for rel, line, rule, text in _all_hits(root):
+        key = allow_key(text)
+        if (rel, key) in allow or (rel, text) in plain:
+            allowed.append(f"{rel}:{line}: {rule} (allow-listed)")
+        else:
+            errors.append(f"{rel}:{line}: {rule}")
+            keys.append(f"ALLOW-LIST KEY: {rel}:{line}: {rule} -> {rel}|{key}")
+    return errors, keys, allowed
+
+
 def scan_wiki(root: Path) -> list[str]:
     """Non-allow-listed hits as ``<rel>:<line>: <rule>`` (rel is under docs/wiki/)."""
-    allow = load_allow(root)
-    return [
-        f"{rel}:{line}: {rule}"
-        for rel, line, rule, text in _all_hits(root)
-        if (rel, text) not in allow
-    ]
+    return report(root)[0]
 
 
 def allowed_hits(root: Path) -> list[str]:
     """Hits suppressed by the allow-list, for display at the confirmation gate."""
-    allow = load_allow(root)
-    return [
-        f"{rel}:{line}: {rule} (allow-listed)"
-        for rel, line, rule, text in _all_hits(root)
-        if (rel, text) in allow
-    ]
+    return report(root)[2]
 
 
 def external_scanner() -> str | None:

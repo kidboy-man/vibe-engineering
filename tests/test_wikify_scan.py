@@ -158,6 +158,17 @@ class WikiCase(unittest.TestCase):
             ("a.md", "noreply@example.com"), ("c.md", "noreply@example.com"),
         })
 
+    def test_allow_list_by_hash_page_scoped(self):
+        self.write("a.md", "contact noreply@example.com\n")
+        self.write("b.md", "contact noreply@example.com\n")
+        key = scan.allow_key("noreply@example.com")
+        self.write(".wikify-allow", f"a.md|{key}\n")
+        self.assertEqual(scan.scan_wiki(self.root), ["b.md:1: email"])
+        self.assertEqual(scan.allowed_hits(self.root), ["a.md:1: email (allow-listed)"])
+        errors, keys, _ = scan.report(self.root)
+        self.assertEqual(keys, [f"ALLOW-LIST KEY: b.md:1: email -> b.md|{key}"])
+        self.assertNotIn("noreply@example.com", "\n".join(errors + keys))
+
     def test_unreadable_file_is_a_hit(self):
         self.write("a.md", "fine\n")
         self.write("b.md", GHP + "\n")

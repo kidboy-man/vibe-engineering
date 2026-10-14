@@ -466,6 +466,7 @@ Limitations:
 - After a squash merge the wiki reads as stale (the squashed commit mixes code
   with `.wikify.json`): run `vibe wikify mark` and make one docs-only commit.
 - The built-in secret scan is a floor, not a complete scanner.
+  Reviewed false positives go in `docs/wiki/.wikify-allow` as `<page>|sha256:<16 hex>`; `verify` prints the exact line (`ALLOW-LIST KEY`). Legacy plaintext entries still work but are reported as `ALLOW-LIST LEGACY`.
 - Codex needs a one-time `/hooks` trust review.
 - Cursor's push-time payload shape is unverified; the hook fails open if it differs.
 
