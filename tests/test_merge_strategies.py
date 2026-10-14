@@ -127,6 +127,20 @@ class MarkedSectionStrategyTests(unittest.TestCase):
     BEGIN = "<!-- begin -->\n"
     END = "<!-- end -->\n"
 
+    def test_malformed_markers_are_left_untouched(self):
+        b, e = self.BEGIN, self.END
+        cases = {
+            "end_before_begin": f"user\n{e}mid\n{b}tail\n",
+            "repeated_begin": f"{b}one\n{e}user\n{b}two\n{e}",
+            "repeated_end": f"{b}one\n{e}user {e}",
+            "lone_begin": f"user\n{b}rest\n",
+        }
+        for name, existing in cases.items():
+            with self.subTest(name):
+                merged, action = ms.marked_section_strategy("body", existing, b, e)
+                self.assertEqual((merged, action), (existing, "unchanged"))
+                self.assertEqual(ms.strip_marked_section(existing, b, e), (existing, False))
+
     def test_create_when_no_existing(self):
         merged, action = ms.marked_section_strategy("body", None, self.BEGIN, self.END)
         self.assertEqual(action, "create")

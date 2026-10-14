@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from collections.abc import Callable, Collection
 from typing import Any
 
@@ -377,6 +378,17 @@ def jsonc_defaults_strategy(
     return merged, changed
 
 
+def _markers_malformed(existing: str, begin_marker: str, end_marker: str) -> bool:
+    """True when markers are lone, repeated or out of order (refuse to edit)."""
+    nb, ne = existing.count(begin_marker), existing.count(end_marker)
+    if (nb, ne) == (0, 0):
+        return False
+    if (nb, ne) == (1, 1) and existing.index(begin_marker) + len(begin_marker) <= existing.index(end_marker):
+        return False
+    print("warning: marker section is malformed (lone, repeated or out of order); left untouched", file=sys.stderr)
+    return True
+
+
 def marked_section_strategy(
     template: str,
     existing: str | None,
@@ -400,6 +412,8 @@ def marked_section_strategy(
     wrapped = begin_marker + template + end_marker
     if existing is None:
         return wrapped, "create"
+    if _markers_malformed(existing, begin_marker, end_marker):
+        return existing, "unchanged"
     if begin_marker in existing and end_marker in existing:
         before, _, rest = existing.partition(begin_marker)
         _, _, after = rest.partition(end_marker)
@@ -425,6 +439,8 @@ def strip_marked_section(
       remains.
     """
     if begin_marker not in existing or end_marker not in existing:
+        return existing, False
+    if _markers_malformed(existing, begin_marker, end_marker):
         return existing, False
     before, _, rest = existing.partition(begin_marker)
     _, _, after = rest.partition(end_marker)
