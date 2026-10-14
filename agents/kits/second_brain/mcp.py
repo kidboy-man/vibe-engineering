@@ -106,15 +106,22 @@ CODEX_TOML_SECTION = "[mcp_servers.qmd]"
 
 CODEX_TOML_BODY = 'type = "stdio"\ncommand = "qmd"\nargs = ["mcp"]\n'
 
+def _is_kit_owned_qmd_mcp(entry: object) -> bool:
+    """True ONLY for an exact match of the entry this kit writes (Claude/Cursor)."""
+    return isinstance(entry, dict) and entry == QMD_MCP_SNIPPET_JSON["mcpServers"]["qmd"]
+
+
 def _strip_qmd_mcp(text: str, parse) -> str | None:
-    """Remove qmd mcpServer entry. Returns new text or None if not present.
+    """Remove the kit-owned qmd mcpServer entry. Returns new text or None.
+
+    A user's own ``qmd`` entry (any other shape) is left untouched.
 
     parse: callable that takes raw text and returns a dict (json.loads or ms.parse_jsonc).
     If qmd was the only mcpServer, drops the mcpServers key entirely.
     """
     config = parse(text)
     mcps = config.get("mcpServers")
-    if not isinstance(mcps, dict) or "qmd" not in mcps:
+    if not isinstance(mcps, dict) or not _is_kit_owned_qmd_mcp(mcps.get("qmd")):
         return None
 
     del mcps["qmd"]

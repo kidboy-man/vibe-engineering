@@ -9,7 +9,7 @@ from pathlib import Path
 from agents import installer_core as core
 from agents import merge_strategies as ms
 from agents.kits.second_brain.paths import CLAUDE_MD_BEGIN_MARKER, CLAUDE_MD_END_MARKER, CODEX_INSTRUCTIONS_BEGIN_MARKER, CODEX_INSTRUCTIONS_END_MARKER, CURSOR_RULE_REL, CURSOR_SESSIONSTART_EVENT, HOOK_SCRIPT_REL, OPENCODE_AGENTS_BEGIN_MARKER, OPENCODE_AGENTS_END_MARKER, SESSIONSTART_EVENT, _paths
-from agents.kits.second_brain.mcp import CODEX_TOML_SECTION, _is_expected_opencode_qmd_mcp, _is_legacy_kit_owned_qmd_mcp, _strip_opencode_qmd_mcp, _strip_qmd_mcp
+from agents.kits.second_brain.mcp import CODEX_TOML_SECTION, _is_expected_opencode_qmd_mcp, _is_kit_owned_qmd_mcp, _is_legacy_kit_owned_qmd_mcp, _strip_opencode_qmd_mcp, _strip_qmd_mcp
 from agents.kits.second_brain.hooks import _codex_hook_already_installed, _codex_hook_block, _cursor_hook_already_installed, _cursor_hook_command, _hook_already_installed, _hook_command
 from agents.kits.second_brain.personas import _marked_section_present
 from agents.kits.second_brain.skills import _skill_dir_status, _skill_root_targets, _skill_source_dirs
@@ -45,7 +45,7 @@ def uninstall(
             mcps = json.loads(settings_path.read_text(encoding="utf-8")).get("mcpServers")
         except json.JSONDecodeError:
             mcps = None
-        if isinstance(mcps, dict) and "qmd" in mcps:
+        if isinstance(mcps, dict) and _is_kit_owned_qmd_mcp(mcps.get("qmd")):
 
             def _mutate_claude(text: str) -> tuple[str | None, bool]:
                 new = _strip_qmd_mcp(text, json.loads)
@@ -158,7 +158,7 @@ def uninstall(
             mcps = json.loads(cursor_mcp_path.read_text(encoding="utf-8")).get("mcpServers")
         except json.JSONDecodeError:
             mcps = None
-        if isinstance(mcps, dict) and "qmd" in mcps:
+        if isinstance(mcps, dict) and _is_kit_owned_qmd_mcp(mcps.get("qmd")):
 
             def _mutate_cursor_mcp(text: str) -> tuple[str | None, bool]:
                 new = _strip_qmd_mcp(text, json.loads)
@@ -214,6 +214,7 @@ def uninstall(
         print("aborted")
         return 1
 
+    config_dirs = [paths.claude_dir, paths.codex_dir, paths.cursor_dir, paths.opencode_config_dir]
     for path, label, mutate in specs:
         if mutate is None:
             path.unlink()
@@ -226,7 +227,10 @@ def uninstall(
                 path.unlink()
                 print(f"removed {path.name} (was entirely {label})")
             else:
-                path.write_text(new_text or "", encoding="utf-8")
+                base = next((d for d in config_dirs if d in path.parents), None)
+                if base is not None:
+                    core.backup(path, base)
+                core.write_text_atomic(path, new_text or "")
                 print(f"stripped {label}")
 
     if remove_cursor_rule:

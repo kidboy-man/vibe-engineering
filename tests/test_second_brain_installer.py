@@ -1550,9 +1550,7 @@ class SecondBrainCursorMcpTests(unittest.TestCase):
             self.assertNotIn("qmd", result.get("mcpServers", {}))
             self.assertEqual(result["mcpServers"]["other"], {"command": "keep-me"})
 
-    def test_uninstall_removes_qmd_entry_matching_claude_behavior(self):
-        """uninstall's shared _strip_qmd_mcp removes any qmd entry regardless of
-        shape, matching Claude's existing (shape-agnostic) uninstall behavior."""
+    def test_uninstall_preserves_foreign_qmd_entry_in_cursor_mcp(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             install(home=str(home), dry_run=False, yes=True, setup_deps=False)
@@ -1564,7 +1562,38 @@ class SecondBrainCursorMcpTests(unittest.TestCase):
             uninstall(home=str(home), dry_run=False, yes=True)
 
             result = json.loads(mcp_path.read_text(encoding="utf-8"))
-            self.assertNotIn("qmd", result.get("mcpServers", {}))
+            self.assertEqual(result["mcpServers"]["qmd"], {"command": "my-own", "args": ["mcp"]})
+
+    def test_uninstall_preserves_foreign_qmd_entry_in_claude_settings(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            settings = home / ".claude" / "settings.json"
+            settings.parent.mkdir()
+            foreign = {"command": "my-own", "args": ["mcp"]}
+            settings.write_text(json.dumps({"mcpServers": {"qmd": foreign}}), encoding="utf-8")
+            (home / "second-brain").mkdir()  # make an install appear present
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            self.assertEqual(json.loads(settings.read_text(encoding="utf-8"))["mcpServers"]["qmd"], foreign)
+
+    def test_uninstall_backs_up_and_leaves_no_temp_files_when_rewriting_config(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            mcp_path = home / ".cursor" / "mcp.json"
+            config = json.loads(mcp_path.read_text(encoding="utf-8"))
+            config["mcpServers"]["other"] = {"command": "keep-me"}
+            before = json.dumps(config)
+            mcp_path.write_text(before, encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            backups = list((home / ".cursor" / "backups").rglob("mcp.json"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), before)
+            leftovers = [p.name for p in (home / ".cursor").iterdir() if p.name.endswith(".tmp") or p.name.startswith(".mcp")]
+            self.assertEqual(leftovers, [])
 
     @patch("agents.kits.second_brain.installer.shutil.which")
     @patch("agents.kits.second_brain.installer.subprocess.run")
