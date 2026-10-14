@@ -152,6 +152,8 @@ def build_plan(root: Path, full: bool = False) -> dict:
     tracked = [p for p in listing if _keep(p, ignore)]
     plan["contexts"] = _contexts(tracked)
     base = None if full else state.base(root)
+    if base and state.mixed_base(root, base):
+        base = None  # base commit also carries code; base..HEAD would omit it
     changed = gitview.changed_since(root, base) if base else None
     pages = citations.index(root)
     if base and changed is None:

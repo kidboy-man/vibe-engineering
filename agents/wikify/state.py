@@ -91,6 +91,11 @@ def _docs_only(paths: list[str] | None) -> bool:
     return paths is not None and all(p.startswith(WIKI_DIR) for p in paths)
 
 
+def mixed_base(root: Path, commit: str) -> bool:
+    """True when ``commit`` touched anything outside docs/wiki/ (or is unreadable)."""
+    return not _docs_only(gitview.files_in_commit(root, commit))
+
+
 def is_fresh(root: Path) -> bool:
     """True when nothing outside docs/wiki/ changed since the state commit.
 

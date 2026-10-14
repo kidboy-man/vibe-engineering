@@ -216,6 +216,29 @@ class PlanTests(RepoCase):
         self.assertEqual(p["mode"], "full")
         self.assertEqual(p["changed"], ["src/a.py"])
 
+    def test_mixed_base_commit_is_not_incremental_with_code_missing(self):
+        self.commit("src/a.py")
+        (self.root / "src/b.py").write_text("y = 1\n")
+        state.save(self.root, gitview.head(self.root))
+        git(self.root, "add", "src/b.py", STATE)
+        git(self.root, "commit", "-q", "-m", "squash: code + state")
+        self.commit("docs/wiki/x.md")
+        self.assertFalse(state.is_fresh(self.root))
+        p = plan.build_plan(self.root)
+        self.assertEqual(p["mode"], "full")
+        self.assertIn("src/b.py", p["changed"])
+        self.assertIn("src/b.py", p["uncovered"])
+
+    def test_mixed_root_commit_base_is_full(self):
+        (self.root / "src").mkdir()
+        (self.root / "src/a.py").write_text("x = 1\n")
+        state.save(self.root, None)
+        git(self.root, "add", "src/a.py", STATE)
+        git(self.root, "commit", "-q", "-m", "root")
+        p = plan.build_plan(self.root)
+        self.assertEqual(p["mode"], "full")
+        self.assertIn("src/a.py", p["changed"])
+
     def test_rejected_ignore_emits_no_path_data(self):
         self.commit("src/a.py", "def a():\n    pass\n")
         self.mark()
