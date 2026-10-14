@@ -1168,6 +1168,32 @@ class DocsVerifyTests(RepoCase):
         for key in ("docs_unindexed", "docs_stale"):
             self.assertEqual(p[key], [])
 
+    def test_docs_command_refuses_when_inventory_failed(self):
+        self.write({"docs/a.md": "# A\n"})
+        self.commit_all()
+        sources = self.root / "docs/wiki/sources"
+
+        def snapshot():
+            return sorted(
+                (str(p.relative_to(sources)), p.read_bytes())
+                for p in sources.rglob("*") if p.is_file()
+            ) if sources.exists() else []
+
+        before = snapshot()
+        for name, patch in (
+            ("rejected ignore", None),
+            ("unknown modes", mock.patch.object(gitview, "regular_tracked", return_value=None)),
+        ):
+            with self.subTest(name):
+                ignore = self.root / citations.IGNORE_REL
+                ignore.write_text("!a\n" if patch is None else "", encoding="utf-8")
+                with contextlib.ExitStack() as stack:
+                    if patch is not None:
+                        stack.enter_context(patch)
+                    self.assertEqual(self.docs(), 1)
+                self.assertEqual(snapshot(), before)
+        ignore.write_text("", encoding="utf-8")
+
     def test_200_docs_x_100_sections_cache_and_budget(self):
         body = "".join(f"## S{i}\n\ntext\n\n" for i in range(100))
         self.write({f"docs/m{i:03d}.md": f"# M{i}\n\n" + body for i in range(200)})

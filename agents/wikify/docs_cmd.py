@@ -170,6 +170,10 @@ def cmd_docs(cwd: str | Path | None = None, dry_run: bool = False) -> int:
         print(f"refused: {SOURCES_REL} is a symlink or not a directory\nnothing written")
         return 1
     pages, inv = di.expected_pages(root)
+    reason = di.failure(inv)
+    if reason:  # fail closed: an empty inventory here means "unknown", not "nothing eligible"
+        print(f"refused: doc inventory failed: {_safe(reason)}\nnothing written")
+        return 1
     planned: list[Page] = []
     refusals: list[str] = []
     for rel in sorted(pages):
