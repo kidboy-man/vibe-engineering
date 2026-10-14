@@ -148,29 +148,31 @@ def _register(paths: KitPaths, agent: Agent) -> None:
         print(f"registered hooks in {agent.label} {agent.config_name}")
 
 
-def _unregister(paths: KitPaths, agent: Agent) -> None:
+def _unregister(paths: KitPaths, agent: Agent) -> bool:
+    """Return False when our hook may still be registered (config not safely editable)."""
     config_path = agent.dir(paths) / agent.config_name
     if not config_path.exists():
-        return
+        return True
     if agent.kind == "codex":
         text = config_path.read_text(encoding="utf-8")
         remaining, _ = ms.strip_codex_hook_block(text, _codex_block(paths, agent))
         if remaining == text:
             if _codex_identity(paths, agent) in text:
                 print(f"kept edited hook block in {agent.label} {agent.config_name}")
-            return
+                return False
+            return True
         core.backup(config_path, agent.dir(paths))
         if remaining is None:
             config_path.unlink()
         else:
             core.write_text(config_path, remaining)
         print(f"removed hook from {agent.label} {agent.config_name}")
-        return
+        return True
 
     current = _load_json_config(config_path)
     if current is None:
         print(f"skipping invalid {agent.config_name} for {agent.label} (hook not removed)")
-        return
+        return False
     merged, changed = current, False
     for event, _matcher, command in _json_registrations(paths, agent):
         merged, did_change = _strip_fn(agent)(merged, event, command)
@@ -179,6 +181,7 @@ def _unregister(paths: KitPaths, agent: Agent) -> None:
         core.backup(config_path, agent.dir(paths))
         core.write_text(config_path, json.dumps(merged, indent=2) + "\n")
         print(f"removed hooks from {agent.label} {agent.config_name}")
+    return True
 
 
 def _is_registered(paths: KitPaths, agent: Agent) -> bool:
@@ -309,6 +312,14 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
         print("aborted")
         return 1
 
+    # Unregister first: deleting scripts while a hook still points at them makes
+    # every tool call fail (missing script exits non-zero = deny).
+    failed = [a for a in AGENTS if a.present(paths) and not _unregister(paths, a)]
+    if failed:
+        names = ", ".join(a.label for a in failed)
+        print(f"error: could not remove hooks from {names}; kept scripts and manifest, fix the config and rerun uninstall")
+        return 1
+
     removed = 0
     for rel in files:
         template_rel = rel.partition("/")[2]
@@ -321,7 +332,6 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
                 print(f"kept modified file {rel}")
     for agent in AGENTS:
         if agent.present(paths):
-            _unregister(paths, agent)
             core.prune_empty_dirs(agent.dir(paths) / "hooks" / "vibe-wikify", agent.dir(paths) / "hooks")
     paths.manifest_path.unlink(missing_ok=True)
     try:

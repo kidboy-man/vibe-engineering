@@ -153,6 +153,28 @@ class InstallTests(unittest.TestCase):
 
 
 class UninstallTests(unittest.TestCase):
+    def test_uninstall_keeps_scripts_and_manifest_when_unregister_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude", ".codex")
+            do_install(home)
+            (home / ".claude" / "settings.json").write_text("{broken", encoding="utf-8")
+            (home / ".codex" / "config.toml").write_text("# hand edited\n", encoding="utf-8")
+            rc, out = run(uninstall, home=str(home), yes=True)
+            self.assertNotEqual(rc, 0)
+            self.assertTrue((home / ".claude" / REL).exists())
+            self.assertTrue((home / ".vibe-wikify" / ".vibe-engineering-manifest.json").exists())
+            self.assertIn("hook not removed", out)
+
+    def test_uninstall_keeps_scripts_when_codex_block_was_edited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".codex")
+            do_install(home)
+            cfg = home / ".codex" / "config.toml"
+            cfg.write_text(cfg.read_text(encoding="utf-8").replace("PreToolUse", "PreToolUse # edited", 1), encoding="utf-8")
+            rc, _ = run(uninstall, home=str(home), yes=True)
+            self.assertNotEqual(rc, 0)
+            self.assertTrue((home / ".codex" / REL).exists())
+
     def test_uninstall_removes_scripts_and_only_our_hooks(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = make_home(tmp, ".claude", ".codex", ".cursor")
