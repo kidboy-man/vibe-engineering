@@ -266,6 +266,34 @@ class DecideTests(RepoCase):
             with self.subTest(cmd):
                 self.assertTrue(self.push(cmd))
 
+    def test_more_spellings_blocked(self):
+        self._stale_repo()
+        for cmd in (
+            "(git push)", "( git push )", "{ git push; }", "! git push", "! (git push)",
+            "a && ! git push", "timeout 30 git push", "timeout -s KILL 30 git push",
+            "timeout --foreground 5s git push", "nice git push", "nice -n 5 git push",
+            "nice -5 git push", "ionice -c 2 -n 7 git push", "ionice git push",
+            "stdbuf -oL git push", "stdbuf -o L git push", "setsid git push",
+            "setsid -w git push", "time git push", "time -p git push",
+            "sudo nice -n 5 timeout 30 git push", "FOO=1 timeout 3 git push",
+            "cd $X && git push", 'git -C "$R" push', "cd $HOME/zz && git push origin main",
+            "cd /nonexistent/zz; git push",
+        ):
+            with self.subTest(cmd):
+                self.assertTrue(self.push(cmd))
+
+    def test_more_spellings_stay_allowed(self):
+        self._stale_repo()
+        for cmd in (
+            "echo git push", "(echo git push)", "{ echo git push; }", "! git status",
+            "timeout 30 git push --dry-run", "nice -n 5 git status", "(git push -n)",
+            "timeout 30 echo git push", "git push --delete origin x",
+            "cat <<EOF\ngit push\nEOF", "cat <<'EOF'\n(git push)\nEOF\nls",
+            "time ls", "nice", "timeout",
+        ):
+            with self.subTest(cmd):
+                self.assertIsNone(self.push(cmd))
+
     def test_git_dash_c_dir_and_cd_relative(self):
         self._stale_repo()
         other = Path(tempfile.mkdtemp()).resolve()
@@ -275,8 +303,12 @@ class DecideTests(RepoCase):
         self.assertTrue(guard.decide(bash(f"git -C {self.root} push", payload_cwd)))
         self.assertTrue(guard.decide(bash(f"cd {self.root} && git push", payload_cwd)))
         self.assertIsNone(guard.decide(bash("git push", payload_cwd)))
-        self.assertIsNone(guard.decide(bash("cd /nonexistent/zz && git push", self.root)))
-        self.assertIsNone(guard.decide(bash("git -C /nonexistent/zz push", self.root)))
+        # unresolvable cd/-C keeps the current cwd and keeps scanning (still fail-open
+        # when that cwd is not a stale wikified repo)
+        self.assertTrue(guard.decide(bash("cd /nonexistent/zz && git push", self.root)))
+        self.assertTrue(guard.decide(bash("git -C /nonexistent/zz push", self.root)))
+        self.assertIsNone(guard.decide(bash("cd /nonexistent/zz && git push", payload_cwd)))
+        self.assertIsNone(guard.decide(bash("git -C /nonexistent/zz push", payload_cwd)))
 
     def test_non_shell_tools_and_bad_payloads_allowed(self):
         self._stale_repo()

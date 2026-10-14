@@ -41,7 +41,19 @@ import time
 
 SHELL_TOOLS = {"", "bash", "shell", "local_shell"}
 SEPARATORS = {";", "&&", "||", "|", "&", "|&"}
-COMMAND_PREFIXES = {"sudo", "command", "env", "nohup", "time", "exec"}
+COMMAND_PREFIXES = {
+    "sudo", "command", "env", "nohup", "time", "exec",
+    "timeout", "nice", "ionice", "stdbuf", "setsid",
+}
+# prefix -> options that take a separate value argument (`nice -n 5`, `timeout -s KILL`)
+PREFIX_VALUE_FLAGS = {
+    "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid"},
+    "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
+    "time": {"-f", "-o", "--format", "--output"},
+}
+GROUP_TOKENS = {"{", "!"}  # leading shell grouping/negation; `(` runs are matched separately
 NO_CHECK_FLAGS = {"--delete", "-d", "--dry-run", "-n"}
 WIKI_DIR = "docs/wiki/"
 STATE_REL = "docs/wiki/.wikify.json"
@@ -149,8 +161,20 @@ def _segments(command: str) -> list[list[str]]:
 
 def _strip_prefixes(tokens: list[str]) -> list[str]:
     i = 0
-    while i < len(tokens) and (tokens[i] in COMMAND_PREFIXES or re.fullmatch(r"\w+=.*", tokens[i])):
-        i += 1
+    while i < len(tokens):
+        token = tokens[i]
+        name = token.rsplit("/", 1)[-1]
+        if token in GROUP_TOKENS or set(token) == {"("} or re.fullmatch(r"\w+=.*", token):
+            i += 1
+        elif name in COMMAND_PREFIXES:
+            i += 1
+            value_flags = PREFIX_VALUE_FLAGS.get(name, ())
+            while i < len(tokens) and tokens[i].startswith("-"):
+                i += 2 if tokens[i] in value_flags else 1
+            if name == "timeout" and i < len(tokens):
+                i += 1  # the DURATION operand
+        else:
+            break
     return tokens[i:]
 
 
@@ -202,14 +226,15 @@ def _is_stale(cwd: str) -> bool:
     return not (_docs_only(in_base) and _docs_only(since))
 
 
-def _git_push_cwd(args: list[str], cwd: str) -> tuple[bool, str | None]:
-    """For `git <args>`: (is a gated push, effective cwd or None if unresolvable)."""
+def _git_push_cwd(args: list[str], cwd: str) -> tuple[bool, str]:
+    """For `git <args>`: (is a gated push, effective cwd).
+
+    An unresolvable `-C` target (e.g. `"$R"`) keeps the current cwd.
+    """
     i = 0
     while i < len(args):
         if args[i] == "-C" and i + 1 < len(args):
-            cwd = _resolve(cwd, args[i + 1])
-            if cwd is None:
-                return False, None
+            cwd = _resolve(cwd, args[i + 1]) or cwd
             i += 2
         elif args[i] == "-c":
             i += 2
@@ -229,13 +254,10 @@ def _shell_stale(command: str, cwd: str) -> bool:
         name, args = tokens[0].rsplit("/", 1)[-1], tokens[1:]
         if name == "cd":
             if args:
-                resolved = _resolve(cwd, args[0])
-                if resolved is None:
-                    return False  # unresolvable: allow
-                cwd = resolved
+                cwd = _resolve(cwd, args[0]) or cwd  # unresolvable: keep cwd, keep scanning
         elif name == "git":
             is_push, where = _git_push_cwd(args, cwd)
-            if is_push and where is not None and _is_stale(where):
+            if is_push and _is_stale(where):
                 return True
     return False
 
