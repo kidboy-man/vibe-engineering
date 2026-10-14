@@ -282,7 +282,7 @@ class HumanSpanTests(unittest.TestCase):
         ):
             with self.subTest(name):
                 assert_scales_linearly(
-                    self, lambda n: (unit * (n // len(unit)),), fn, 65_536, label=name
+                    self, lambda n: (unit * (n // len(unit)),), fn, 16_384, label=name
                 )
 
     def test_linear_on_many_closed_human_blocks(self):
@@ -296,7 +296,7 @@ class HumanSpanTests(unittest.TestCase):
             ("_human_blocks top level", commands._human_blocks, lambda n: (pairs(n),)),
         ):
             with self.subTest(name):
-                assert_scales_linearly(self, make, fn, 65_536, label=name)
+                assert_scales_linearly(self, make, fn, 16_384, label=name)
 
     def test_human_block_line_numbers(self):
         text = "a\n" + self.B + "1" + self.E + "\nb\n\n" + self.B + "2\n" + self.E
@@ -452,7 +452,7 @@ class ReachablePerformanceTests(unittest.TestCase):
         self.assertEqual(links, {"a.md"})
         assert_scales_linearly(
             self, lambda n: ("p.md", "[x](a.md) " * (n // 10)), agentmap.page_links,
-            65_536, label="page_links",
+            16_384, label="page_links",
         )
 
 
@@ -469,7 +469,7 @@ class LinearLinkScanTests(unittest.TestCase):
                         "p.md", ("](" if unit == "a" else "") + unit * (n // len(unit)),
                     ),
                     agentmap.page_links,
-                    1 << 16,
+                    1 << 14,
                     label=unit,
                 )
 

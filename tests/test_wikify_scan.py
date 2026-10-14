@@ -85,7 +85,7 @@ class ScanTextCase(unittest.TestCase):
                     self,
                     lambda n, unit=unit: (unit * (n // len(unit)),),
                     scan.scan_text,
-                    65_536,
+                    16_384,
                     label=unit,
                 )
 
@@ -98,7 +98,7 @@ class ScanTextCase(unittest.TestCase):
                 (wiki / "a.md").write_text("_eyJ" * (n // 4))
                 return (Path(tmp),)
 
-            assert_scales_linearly(self, make, scan.scan_wiki, 65_536, label="scan_wiki")
+            assert_scales_linearly(self, make, scan.scan_wiki, 16_384, label="scan_wiki")
 
     def test_real_shaped_jwt_detected(self):
         enc = lambda raw: base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")

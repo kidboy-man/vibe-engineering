@@ -9,7 +9,7 @@ import time
 
 GROWTH = 4  # large input = GROWTH x small input
 MAX_RATIO = 8.0  # linear is about 4x, quadratic about 16x
-NOISE_FLOOR = 0.25  # seconds; below this a ratio says nothing
+NOISE_FLOOR = 0.2  # seconds; below this a ratio says nothing
 
 
 def assert_scales_linearly(case, make, fn, small, repeats=2, label=""):

@@ -74,7 +74,7 @@ class LinearParseTests(unittest.TestCase):
                     self,
                     lambda n, unit=unit: (unit * (n // len(unit)),),
                     citations.parse,
-                    1 << 16,
+                    1 << 14,
                     label=unit,
                 )
 

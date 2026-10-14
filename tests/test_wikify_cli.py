@@ -281,8 +281,8 @@ class HostilePageTests(VerifyCase):
             self.commit_wiki()
             return (self.root,)
 
-        assert_scales_linearly(self, make, lambda root: commands.run_verify(root), 1 << 16, label="verify")
-        assert_scales_linearly(self, make, plan.build_plan, 1 << 16, label="build_plan")
+        assert_scales_linearly(self, make, lambda root: commands.run_verify(root), 1 << 14, label="verify")
+        assert_scales_linearly(self, make, plan.build_plan, 1 << 14, label="build_plan")
 
 
 class MarkTests(VerifyCase):

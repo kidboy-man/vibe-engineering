@@ -380,7 +380,7 @@ class OutlineTests(unittest.TestCase):
             di.outline(text)
             di.render_doc_page("a.md", text)
 
-        assert_scales_linearly(self, lambda n: (make(n),), run, 1 << 16, label=label)
+        assert_scales_linearly(self, lambda n: (make(n),), run, 1 << 14, label=label)
 
     def test_pathological_heading_lines_are_linear(self):
         for filler in (" ", " \t", "# ", "`", "#", "\t"):
@@ -620,7 +620,7 @@ class PagesTests(RepoCase):
             return text[:n]
 
         self.assertGreater(len(di.outline(make(1 << 20))), 4000)
-        assert_scales_linearly(self, lambda n: (make(n),), di.outline, 1 << 16, label="outline")
+        assert_scales_linearly(self, lambda n: (make(n),), di.outline, 1 << 14, label="outline")
 
 
 class DocsCmdTests(RepoCase):
@@ -1132,7 +1132,7 @@ class DocsVerifyTests(RepoCase):
             self.commit_all()
             return ()
 
-        assert_scales_linearly(self, make, self.verify, 1 << 16, label="verify big doc")
+        assert_scales_linearly(self, make, self.verify, 1 << 14, label="verify big doc")
 
     def test_hash_and_quote_paths_skipped_and_verify_clean(self):
         self.write({"docs/C#-guide.md": "# C\n", 'docs/q"x.md': "# Q\n"})

@@ -11,9 +11,10 @@ from agents.wikify import agentmap, citations, docs_inventory, gitview, pointer,
 
 MIB = 1 << 20
 # One end-to-end budget per hostile-input class, >= 10x the slowest measured
-# case (text 0.73 s, matcher matrix 1.8 s). A quadratic regression on 1 MiB takes
-# minutes, so these stay generous for slow CI yet still catch it; the tight
-# per-module checks use load-independent doubling ratios instead.
+# case on a dev box (scan 0.19 s, other text 0.73 s, matcher matrix 1.8 s). These
+# also catch a large constant-factor regression (old JWT scan: ~7 s here), which
+# the load-independent doubling-ratio checks in the other modules cannot see.
+SCAN_LIMIT = 3.0
 TEXT_LIMIT = 10.0
 MATCHER_LIMIT = 20.0
 HOOK = (
@@ -46,6 +47,8 @@ class Timed(unittest.TestCase):
 
 
 class ScanPerfTests(Timed):
+    LIMIT = SCAN_LIMIT
+
     CASES = {
         "email": "a@b.",
         "email-lines": "a@b.c\n",
