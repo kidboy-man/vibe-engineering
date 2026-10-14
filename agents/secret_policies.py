@@ -46,6 +46,17 @@ SECRET_BASENAMES: tuple[str, ...] = (
     "id_rsa*",
     "id_ed25519*",
     "id_ecdsa*",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    ".npmrc",
+    ".netrc",
+    ".pgpass",
+    ".git-credentials",
+    "*.tfstate",
+    "credentials.json",
+    "kubeconfig",
+    "prod.env",
 )
 SECRET_SAFE_SUFFIXES: tuple[str, ...] = (".example", ".sample", ".template", ".dist", ".pub")
 

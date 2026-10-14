@@ -28,6 +28,19 @@ CASES = [
     ("src/app.py", False),
     ("", False),
 ]
+for _name in (
+    "server.key", "cert.p12", "cert.pfx", ".npmrc", ".netrc", ".pgpass",
+    ".git-credentials", "terraform.tfstate", "credentials.json", "kubeconfig", "prod.env",
+):
+    CASES += [(_name, True), (f"deep/nested/dir/{_name}", True)]
+CASES += [
+    ("monkey.py", False),
+    ("keyboard.md", False),
+    ("src/monkey", False),
+    ("npmrc.md", False),
+    ("kubeconfig.go", False),
+    ("credentials.json.example", False),
+]
 
 
 def _load_guard():

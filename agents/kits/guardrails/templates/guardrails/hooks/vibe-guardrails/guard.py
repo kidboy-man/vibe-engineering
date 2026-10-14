@@ -35,7 +35,11 @@ FILE_READERS_WRITERS = {
     "nano", "vi", "vim", "code", "diff", "sort", "openssl",
 }
 DANGEROUS_RM_TARGETS = {"/", "/*", "~", "~/", "~/*", "*", ".", "..", "./*"}
-SECRET_BASENAMES = (".env", ".env.*", "*.pem", "id_rsa*", "id_ed25519*", "id_ecdsa*")
+SECRET_BASENAMES = (
+    ".env", ".env.*", "*.pem", "id_rsa*", "id_ed25519*", "id_ecdsa*",
+    "*.key", "*.p12", "*.pfx", ".npmrc", ".netrc", ".pgpass", ".git-credentials",
+    "*.tfstate", "credentials.json", "kubeconfig", "prod.env",
+)
 SECRET_SAFE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".pub")
 SQL_DESTRUCTIVE = re.compile(r"\b(drop|truncate)\b", re.IGNORECASE)
 PATCH_FILE_LINE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
