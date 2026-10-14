@@ -159,6 +159,9 @@ def _all_hits(root: Path) -> list[tuple[str, int, str, str]]:
     return [hit for _, hits in sorted(items, key=lambda i: i[0]) for hit in hits]
 
 
+_SENTINELS = {"unreadable", "too-large"}  # fail-closed markers: never allow-listable
+
+
 def report(root: Path) -> tuple[list[str], list[str], list[str]]:
     """(errors, allow-list keys for the errors, allow-listed hits); one scan."""
     entries = load_allow(root)
@@ -169,7 +172,7 @@ def report(root: Path) -> tuple[list[str], list[str], list[str]]:
     allowed: list[str] = []
     for rel, line, rule, text in _all_hits(root):
         key = allow_key(text)
-        if (rel, key) in allow or (rel, text) in plain:
+        if rule not in _SENTINELS and ((rel, key) in allow or (rel, text) in plain):
             allowed.append(f"{rel}:{line}: {rule} (allow-listed)")
         else:
             errors.append(f"{rel}:{line}: {rule}")

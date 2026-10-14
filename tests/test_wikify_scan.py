@@ -183,9 +183,12 @@ class WikiCase(unittest.TestCase):
             self.assertEqual(
                 scan.scan_wiki(self.root), ["a.md:0: unreadable", "b.md:1: github-token"]
             )
-        self.write(".wikify-allow", "a.md|unreadable\n")
-        with mock.patch.object(Path, "read_bytes", fake):
-            self.assertEqual(scan.scan_wiki(self.root), ["b.md:1: github-token"])
+        for entry in ("a.md|unreadable", f"a.md|{scan.allow_key('unreadable')}"):
+            self.write(".wikify-allow", entry + "\n")
+            with mock.patch.object(Path, "read_bytes", fake):
+                self.assertEqual(  # sentinels are never allow-listable
+                    scan.scan_wiki(self.root), ["a.md:0: unreadable", "b.md:1: github-token"]
+                )
 
     def test_too_large_file_is_a_hit_and_not_read(self):
         (self.wiki / "big.md").write_bytes(b"a" * ((1 << 20) + 1))
@@ -200,6 +203,11 @@ class WikiCase(unittest.TestCase):
             self.assertEqual(
                 scan.scan_wiki(self.root), ["b.md:1: github-token", "big.md:0: too-large"]
             )
+
+    def test_too_large_not_allow_listable(self):
+        (self.wiki / "big.md").write_bytes(b"a" * ((1 << 20) + 1))
+        self.write(".wikify-allow", f"big.md|too-large\nbig.md|{scan.allow_key('too-large')}\n")
+        self.assertEqual(scan.scan_wiki(self.root), ["big.md:0: too-large"])
 
     def test_allow_file_itself_not_scanned(self):
         self.write(".wikify-allow", "a.md|noreply@example.com\n")
