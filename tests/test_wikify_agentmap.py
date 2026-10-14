@@ -1,9 +1,9 @@
 import random
 import re
-import time
 import unittest
 
 from agents.wikify import agentmap, citations, commands
+from tests.wikify_perf_helpers import assert_scales_linearly
 from agents.wikify.agentmap import MAP_BEGIN, MAP_END, parse_map, strip_map, validate_map
 
 DASH = "—"
@@ -274,28 +274,29 @@ class HumanSpanTests(unittest.TestCase):
             self.assertEqual(citations.human_spans(text), self.regex_spans(text), text)
 
     def test_linear_on_repeated_unterminated(self):
-        text = (self.B + "x") * (1_000_000 // (len(self.B) + 1))
+        unit = self.B + "x"
         for name, fn in (
             ("parse_map", parse_map),
             ("_strip_human", citations._strip_human),
             ("_human_blocks", commands._human_blocks),
         ):
             with self.subTest(name):
-                t0 = time.perf_counter()
-                fn(text)
-                self.assertLess(time.perf_counter() - t0, 1.0)
+                assert_scales_linearly(
+                    self, lambda n: (unit * (n // len(unit)),), fn, 65_536, label=name
+                )
 
     def test_linear_on_many_closed_human_blocks(self):
         pair = self.B + "x" + self.E + "\n"
-        pairs = pair * (1_000_000 // len(pair))
-        for name, fn, text in (
-            ("parse_map in map", parse_map, MAP_BEGIN + "\n" + pairs + MAP_END + "\n"),
-            ("_human_blocks top level", commands._human_blocks, pairs),
+
+        def pairs(n):
+            return pair * (n // len(pair))
+
+        for name, fn, make in (
+            ("parse_map in map", parse_map, lambda n: (MAP_BEGIN + "\n" + pairs(n) + MAP_END + "\n",)),
+            ("_human_blocks top level", commands._human_blocks, lambda n: (pairs(n),)),
         ):
             with self.subTest(name):
-                t0 = time.perf_counter()
-                fn(text)
-                self.assertLess(time.perf_counter() - t0, 1.0)
+                assert_scales_linearly(self, make, fn, 65_536, label=name)
 
     def test_human_block_line_numbers(self):
         text = "a\n" + self.B + "1" + self.E + "\nb\n\n" + self.B + "2\n" + self.E
@@ -433,47 +434,47 @@ class ReachableValidateTests(unittest.TestCase):
 
 class ReachablePerformanceTests(unittest.TestCase):
     def test_wide_wiki(self):
-        n = 5000
-        texts = {
-            f"p{i}.md": "".join(f"[x](p{(i * 7 + j) % n}.md)\n" for j in range(50))
-            for i in range(n)
-        }
-        t = time.perf_counter()
-        got = agentmap.reachable_pages({"p0.md"}, texts)
-        self.assertLess(time.perf_counter() - t, 2.0)
+        def make(n):
+            return {
+                f"p{i}.md": "".join(f"[x](p{(i * 7 + j) % n}.md)\n" for j in range(50))
+                for i in range(n)
+            }
+
+        got = agentmap.reachable_pages({"p0.md"}, make(5000))
         self.assertIn("p0.md", got)
+        assert_scales_linearly(
+            self, lambda n: ({"p0.md"}, make(n)), agentmap.reachable_pages, 1000,
+            label="reachable_pages",
+        )
 
     def test_single_megabyte_page(self):
-        text = "[x](a.md) " * 100_000
-        t = time.perf_counter()
-        links = agentmap.page_links("p.md", text)
-        self.assertLess(time.perf_counter() - t, 2.0)
+        links = agentmap.page_links("p.md", "[x](a.md) " * 100_000)
         self.assertEqual(links, {"a.md"})
+        assert_scales_linearly(
+            self, lambda n: ("p.md", "[x](a.md) " * (n // 10)), agentmap.page_links,
+            65_536, label="page_links",
+        )
 
 
 class LinearLinkScanTests(unittest.TestCase):
     MIB = 1 << 20
     OLD = re.compile(r"\]\(([^)\s#]+\.md)(?:#[^)\s]*)?\)", re.I)
 
-    def timed(self, fn, *args, limit=2.0):
-        t = time.perf_counter()
-        out = fn(*args)
-        self.assertLess(time.perf_counter() - t, limit)
-        return out
-
     def test_hostile_page_links(self):
-        cases = [
-            "](" * (self.MIB // 2),
-            "](a" * (self.MIB // 3),
-            "](a.md" * (self.MIB // 6),
-            "](" + "a" * self.MIB,
-        ]
-        for text in cases:
-            with self.subTest(head=text[:8]):
-                self.timed(agentmap.page_links, "p.md", text)
+        for unit in ("](", "](a", "](a.md", "a"):
+            with self.subTest(unit=unit):
+                assert_scales_linearly(
+                    self,
+                    lambda n, unit=unit: (
+                        "p.md", ("](" if unit == "a" else "") + unit * (n // len(unit)),
+                    ),
+                    agentmap.page_links,
+                    1 << 16,
+                    label=unit,
+                )
 
     def test_many_links_still_found(self):
-        got = self.timed(agentmap.page_links, "p.md", "[x](a.md) " * 100_000)
+        got = agentmap.page_links("p.md", "[x](a.md) " * 100_000)
         self.assertEqual(got, {"a.md"})
 
     def test_ordinary_links_match_like_the_old_regex(self):

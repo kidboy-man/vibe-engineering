@@ -10,7 +10,12 @@ from pathlib import Path
 from agents.wikify import agentmap, citations, docs_inventory, gitview, pointer, scan, state
 
 MIB = 1 << 20
-LIMIT = 6.0  # >= 3x the slowest measured case; guards complexity, not speed
+# One end-to-end budget per hostile-input class, >= 10x the slowest measured
+# case (text 0.73 s, matcher matrix 1.8 s). A quadratic regression on 1 MiB takes
+# minutes, so these stay generous for slow CI yet still catch it; the tight
+# per-module checks use load-independent doubling ratios instead.
+TEXT_LIMIT = 10.0
+MATCHER_LIMIT = 20.0
 HOOK = (
     Path(__file__).resolve().parent.parent
     / "agents/kits/wikify/templates/wikify/hooks/vibe-wikify/wikify_guard.py"
@@ -29,7 +34,10 @@ def fill(unit: str, size: int = MIB) -> str:
 
 
 class Timed(unittest.TestCase):
-    def timed(self, fn, *args, limit=LIMIT):
+    LIMIT = TEXT_LIMIT
+
+    def timed(self, fn, *args, limit=None):
+        limit = self.LIMIT if limit is None else limit
         start = time.perf_counter()
         out = fn(*args)
         elapsed = time.perf_counter() - start
@@ -115,6 +123,8 @@ class CitationPerfTests(Timed):
 
 
 class IgnoreMatcherPerfTests(Timed):
+    LIMIT = MATCHER_LIMIT
+
     def test_many_patterns_times_many_paths(self):
         globs = [f"*/*/a*b?c/**/f{i}.py" for i in range(citations.MAX_IGNORE_PATTERNS)]
         paths = [f"d{i % 40}/x/{'s/' * (i % 12)}file{i}.py" for i in range(3000)]

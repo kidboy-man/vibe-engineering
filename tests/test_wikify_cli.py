@@ -8,6 +8,7 @@ from unittest import mock
 from agents import cli
 from agents.wikify import commands, gitview, init_cmd, scan, state
 from tests.test_wikify_state import RepoCase, git
+from tests.wikify_perf_helpers import assert_scales_linearly
 
 PAGE = "docs/wiki/a.md"
 HUMAN = "<!-- wikify:human -->\nwhy\n<!-- /wikify:human -->\n"
@@ -273,18 +274,15 @@ class AgentMapVerifyTests(VerifyCase):
 
 class HostilePageTests(VerifyCase):
     def test_megabyte_of_link_openers_is_bounded(self):
-        import time
-
         from agents.wikify import plan
 
-        self.page("](" * (1 << 19))
-        self.commit_wiki()
-        t = time.perf_counter()
-        self.verify()
-        self.assertLess(time.perf_counter() - t, 3.0)
-        t = time.perf_counter()
-        plan.build_plan(self.root)
-        self.assertLess(time.perf_counter() - t, 3.0)
+        def make(n):
+            self.page("](" * (n // 2))
+            self.commit_wiki()
+            return (self.root,)
+
+        assert_scales_linearly(self, make, lambda root: commands.run_verify(root), 1 << 16, label="verify")
+        assert_scales_linearly(self, make, plan.build_plan, 1 << 16, label="build_plan")
 
 
 class MarkTests(VerifyCase):

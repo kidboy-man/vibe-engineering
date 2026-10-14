@@ -1,10 +1,10 @@
 import subprocess
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
 from agents.wikify import citations
+from tests.wikify_perf_helpers import assert_scales_linearly
 
 SRC = "def alpha():\n    return 1\n\n\ndef beta():\n    return 2\n"
 
@@ -68,17 +68,15 @@ class LinearParseTests(unittest.TestCase):
     MIB = 1 << 20
 
     def test_hostile_markup_is_linear(self):
-        cases = [
-            "[" * self.MIB,
-            "[[" * (self.MIB // 2),
-            "[a](" * (self.MIB // 4),
-            "[a](b" * (self.MIB // 5),
-        ]
-        for text in cases:
-            with self.subTest(head=text[:6]):
-                t = time.perf_counter()
-                citations.parse(text)
-                self.assertLess(time.perf_counter() - t, 2.0)
+        for unit in ("[", "[[", "[a](", "[a](b"):
+            with self.subTest(unit=unit):
+                assert_scales_linearly(
+                    self,
+                    lambda n, unit=unit: (unit * (n // len(unit)),),
+                    citations.parse,
+                    1 << 16,
+                    label=unit,
+                )
 
     def test_pure_link_paragraph_still_exempt(self):
         _, uncited = citations.parse("[a](a.md) [[b]]\n\n[c](d/c.md#x)\n")

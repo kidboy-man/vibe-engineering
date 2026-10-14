@@ -158,7 +158,7 @@ class DecideTests(RepoCase):
         shim = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(shim, ignore_errors=True))
         fake = shim / "git"
-        fake.write_text("#!/bin/sh\nexec sleep 5\n")
+        fake.write_text("#!/bin/sh\nexec sleep 60\n")
         fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
         with mock.patch.object(guard, "TIMEOUT_SECONDS", 1), mock.patch.dict(
             os.environ, {"PATH": f"{shim}{os.pathsep}{os.environ['PATH']}"}
@@ -166,7 +166,9 @@ class DecideTests(RepoCase):
             import time
             start = time.monotonic()
             self.assertIsNone(self.push())
-            self.assertLess(time.monotonic() - start, 4)
+            # TIMEOUT_SECONDS is 1; the shim sleeps 60, so any value far below
+            # 60 proves the guard gave up on its own timeout, not git's exit.
+            self.assertLess(time.monotonic() - start, 30)
 
     def test_every_git_call_has_timeout(self):
         self.commit(CODE_FILE)

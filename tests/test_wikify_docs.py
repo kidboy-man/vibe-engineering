@@ -2,7 +2,6 @@ import contextlib
 import hashlib
 import io
 import os
-import time
 import unittest
 from unittest import mock
 
@@ -10,6 +9,11 @@ from agents.wikify import citations, commands, docs_cmd, gitview, init_cmd, plan
 
 from agents.wikify import docs_inventory as di
 from tests.test_wikify_state import RepoCase, git
+from tests.wikify_perf_helpers import assert_scales_linearly
+
+# git subprocess budget for verify: measured ~2 per doc + ~8 fixed
+CALLS_PER_DOC = 3
+CALLS_FIXED = 30
 
 
 HAS_FIFO = hasattr(os, "mkfifo")
@@ -256,13 +260,10 @@ class InventoryTests(RepoCase):
         self.commit_all()
         real = gitview.show_head
         with mock.patch.object(gitview, "show_head", side_effect=real) as spy:
-            start = time.monotonic()
             inv = di.inventory(self.root)
-            elapsed = time.monotonic() - start
         self.assertEqual(spy.call_count, 500)
         self.assertEqual(len(inv.docs), 500)
         self.assertEqual(len(inv.skipped), 2500)
-        self.assertLess(elapsed, 5)
 
     def test_cap_after_filters(self):
         for i in range(501):
@@ -374,22 +375,27 @@ class OutlineTests(unittest.TestCase):
             citations.parse(page.replace(di.MARKER, ""))[1], []
         )
 
-    def assertFast(self, text):
-        start = time.perf_counter()
-        secs = di.outline(text)
-        di.render_doc_page("a.md", text)
-        elapsed = time.perf_counter() - start
-        self.assertLess(elapsed, 3)
-        return secs
+    def assertLinear(self, make, label):
+        def run(text):
+            di.outline(text)
+            di.render_doc_page("a.md", text)
+
+        assert_scales_linearly(self, lambda n: (make(n),), run, 1 << 16, label=label)
 
     def test_pathological_heading_lines_are_linear(self):
-        n = 1 << 20
         for filler in (" ", " \t", "# ", "`", "#", "\t"):
-            body = (filler * (n // len(filler)))[:n]
-            self.assertFast("# a" + body + "x\n")
-            self.assertFast("# a" + body + "\n")
-        mixed = "".join(f"# a{f * 5000}x\n" for f in (" ", " \t", "# ", "`", "#") * 20)
-        self.assertFast(mixed[: 1 << 20])
+            for tail in ("x\n", "\n"):
+                self.assertLinear(
+                    lambda n, f=filler, t=tail: "# a" + (f * (n // len(f)))[:n] + t,
+                    f"{filler!r}+{tail!r}",
+                )
+        fillers = (" ", " \t", "# ", "`", "#")
+
+        def mixed(n):
+            lines = (f"# a{fillers[i % 5] * 5000}x\n" for i in range(n // 5000 + 1))
+            return "".join(lines)[:n]
+
+        self.assertLinear(mixed, "mixed")
 
     def test_closing_sequence(self):
         for raw, title in [
@@ -608,14 +614,13 @@ class PagesTests(RepoCase):
         self.assertEqual(spy.call_count, 1)
 
     def test_one_mb_doc_outline_fast(self):
-        text = "".join(f"## H{i}\n" + "x" * 90 + "\n" for i in range(5000))
-        text += "```\n" * 2 + "y\n" * 100000
-        text = text[: (1 << 20)]
-        start = time.perf_counter()
-        secs = di.outline(text)
-        elapsed = time.perf_counter() - start
-        self.assertGreater(len(secs), 4000)
-        self.assertLess(elapsed, 3)
+        def make(n):
+            text = "".join(f"## H{i}\n" + "x" * 90 + "\n" for i in range(5000))
+            text += "```\n" * 2 + "y\n" * 100000
+            return text[:n]
+
+        self.assertGreater(len(di.outline(make(1 << 20))), 4000)
+        assert_scales_linearly(self, lambda n: (make(n),), di.outline, 1 << 16, label="outline")
 
 
 class DocsCmdTests(RepoCase):
@@ -1051,22 +1056,32 @@ class DocsVerifyTests(RepoCase):
             plan.build_plan(self.root)
         self.assertEqual(spy.call_count, 1)
 
-    def _many_docs_verify(self, n, limit):
+    def _many_docs_verify(self, n):
         self.write({f"docs/d{i:03d}.md": f"# D{i}\n\n## S\n" for i in range(n)})
         self.commit_all()
         self.assertEqual(self.docs(), 0)
         self.commit_all()
-        start = time.perf_counter()
-        result = self.errors()
-        elapsed = time.perf_counter() - start
+        calls = []
+        real = gitview.run_git
+
+        def spy(root, *args):
+            calls.append(args[:2])
+            return real(root, *args)
+
+        with mock.patch.object(gitview, "run_git", spy):
+            result = self.errors()
         self.assertEqual(result, (0, []))
-        self.assertLess(elapsed, limit, f"{elapsed:.2f}s")
+        return calls
 
-    def test_300_docs_verify_under_three_seconds(self):
-        self._many_docs_verify(300, 3)
+    def test_300_docs_verify_git_calls_are_linear(self):
+        calls = self._many_docs_verify(300)
+        # a per-doc rescan of every doc would be ~n*n calls
+        self.assertLessEqual(len(calls), CALLS_PER_DOC * 302 + CALLS_FIXED, len(calls))
 
-    def test_500_docs_verify_under_six_seconds(self):
-        self._many_docs_verify(498, 6)  # + README.md + docs/a.md = MAX_DOCS; ~2.7 s measured
+    def test_500_docs_verify_git_calls_are_linear(self):
+        # + README.md + docs/a.md = MAX_DOCS
+        calls = self._many_docs_verify(498)
+        self.assertLessEqual(len(calls), CALLS_PER_DOC * 500 + CALLS_FIXED, len(calls))
 
     def test_crlf_generated_page_verifies_clean(self):
         p = self.root / "docs/wiki/sources/README.md"
@@ -1107,11 +1122,17 @@ class DocsVerifyTests(RepoCase):
         self.commit_all()
         self.assertEqual(self.docs(), 0)
         self.commit_all()
-        start = time.perf_counter()
         rc, _ = self.verify()
-        elapsed = time.perf_counter() - start
         self.assertEqual(rc, 0)
-        self.assertLess(elapsed, 3, f"{elapsed:.2f}s")
+
+        def make(n):
+            self.write({"docs/big.md": text[:n]})
+            self.commit_all()
+            self.assertEqual(self.docs(), 0)
+            self.commit_all()
+            return ()
+
+        assert_scales_linearly(self, make, self.verify, 1 << 16, label="verify big doc")
 
     def test_hash_and_quote_paths_skipped_and_verify_clean(self):
         self.write({"docs/C#-guide.md": "# C\n", 'docs/q"x.md': "# Q\n"})
@@ -1161,11 +1182,8 @@ class DocsVerifyTests(RepoCase):
             return real(root, rel)
 
         with mock.patch.object(gitview, "show_head", spy):
-            start = time.perf_counter()
             result = self.errors()
-            elapsed = time.perf_counter() - start
         self.assertEqual(result, (0, []))
-        self.assertLess(elapsed, 6, f"{elapsed:.2f}s")
         self.assertGreaterEqual(len(counts), 200)
         self.assertEqual(max(counts.values()), 1, {k: v for k, v in counts.items() if v > 1})
 
