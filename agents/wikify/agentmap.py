@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from agents.wikify.citations import human_spans
@@ -60,9 +61,16 @@ def _mask(text: str) -> str:
     return "".join(out)
 
 
+def _invisible(value: str) -> bool:
+    """Control, format, tag or private-use chars (category C*) and U+2028/2029."""
+    return any(unicodedata.category(c)[0] == "C" or c in "\u2028\u2029" for c in value)
+
+
 def _markup_error(title: str, hint: str) -> str | None:
     """Title and hint stay inert: no '@' import, no HTML or comments, no URLs."""
     for where, value in (("title", title), ("hint", hint)):
+        if _invisible(value):
+            return f"control or invisible character in {where}"
         for token in ("@", "<!--", "-->", "<", ">", "://"):
             if token in value:
                 return f"'{token}' in {where}"
@@ -72,6 +80,8 @@ def _markup_error(title: str, hint: str) -> str | None:
 
 
 def _path_error(path: str) -> str | None:
+    if _invisible(path):
+        return "control or invisible character in path"
     if path.startswith("/"):
         return "absolute path"
     if "@" in path:

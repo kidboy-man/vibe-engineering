@@ -133,6 +133,29 @@ class ParseTests(unittest.TestCase):
 
 
 class InertTests(unittest.TestCase):
+    def test_invisible_chars_rejected_everywhere(self):
+        bad = {
+            "esc": "\x1b", "bidi": "\u202e", "tag": "\U000e0041",
+            "zwsp": "\u200b", "ls": "\u2028", "ps": "\u2029", "nel": "\x85",
+        }
+        for name, ch in bad.items():
+            for where, line in (
+                ("title", entry(title=f"A{ch}B")),
+                ("hint", entry(hint=f"x{ch}y")),
+                ("path", entry(path=f"a{ch}b.md")),
+            ):
+                with self.subTest(name=name, where=where):
+                    res = parse_map(block(line))
+                    self.assertEqual(res.entries, [])
+                    self.assertEqual(len(res.errors), 1, res.errors)
+                    if not (where == "path" and ch.isspace()):  # the grammar's \\s stops these
+                        self.assertIn(where, res.errors[0])
+                    self.assertNotIn(ch, res.errors[0])
+
+    def test_plain_unicode_still_ok(self):
+        res = parse_map(block(entry(title="Caf\u00e9 \u4e2d", hint="na\u00efve \u2014 ok")))
+        self.assertEqual(res.errors, [])
+
     def test_markup_in_title_or_hint(self):
         cases = {
             "@ title": (entry(title="@secret.md"), "'@' in title"),
