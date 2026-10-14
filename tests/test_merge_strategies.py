@@ -208,6 +208,30 @@ class TomlBlockMergeStrategyTests(unittest.TestCase):
     BODY = 'type = "stdio"\ncommand = "qmd"\nargs = ["mcp"]\n'
     FULL_BLOCK = SECTION + "\n" + BODY
 
+    def test_header_shapes_never_duplicate_table(self):
+        shapes = {
+            "crlf": 'a = 1\r\n[mcp_servers.qmd]\r\ncommand = "old"\r\n',
+            "trailing_comment": 'a = 1\n[mcp_servers.qmd] # mine\ncommand = "old"\n',
+            "last_line": "a = 1\n[mcp_servers.qmd]",
+            "indented": 'a = 1\n  [mcp_servers.qmd]\ncommand = "old"\n',
+        }
+        for name, current in shapes.items():
+            with self.subTest(name):
+                merged, action = ms.toml_block_merge_strategy(self.SECTION, self.BODY, current)
+                self.assertEqual(action, "merge")
+                self.assertEqual(merged.count(self.SECTION), 1)
+                self.assertNotIn("old", merged)
+                self.assertTrue(merged.startswith("a = 1"))
+                stripped, _ = ms.strip_toml_block(current, self.SECTION)
+                self.assertNotIn(self.SECTION, stripped or "")
+
+    def test_commented_header_is_not_a_section(self):
+        current = '# [mcp_servers.qmd]\nmodel = "gpt"\n'
+        merged, _ = ms.toml_block_merge_strategy(self.SECTION, self.BODY, current)
+        self.assertTrue(merged.startswith(current.rstrip("\n")))
+        self.assertEqual(merged.count("\n" + self.SECTION), 1)
+        self.assertEqual(ms.strip_toml_block(current, self.SECTION), (current, False))
+
     def test_create_when_none_current(self):
         merged, action = ms.toml_block_merge_strategy(self.SECTION, self.BODY, None)
         self.assertEqual(action, "create")

@@ -449,12 +449,17 @@ def _find_toml_section(
     *after*   — content from the next top-level ``[section]`` line onward
                 (empty string if this is the last section).
     """
-    target = section_header + "\n"
-    idx = content.find(target)
-    if idx == -1:
+    # Line-anchored: tolerates CRLF, a trailing ``# comment`` and a header on
+    # the last line; a commented-out ``# [header]`` does not match.
+    header_re = re.compile(
+        r"^[ \t]*" + re.escape(section_header) + r"[ \t]*(?:#[^\n]*?)?\r?(?:\n|\Z)",
+        re.MULTILINE,
+    )
+    match = header_re.search(content)
+    if match is None:
         return None
-    before = content[:idx]
-    body_start = idx + len(target)
+    before = content[: match.start()]
+    body_start = match.end()
     rest = content[body_start:]
     next_section = re.search(r"^\[", rest, re.MULTILINE)
     if next_section:
