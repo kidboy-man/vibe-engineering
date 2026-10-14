@@ -130,7 +130,7 @@ def _shape_error(path: str) -> str | None:
 
 MAX_CONTROL_BYTES = 64 * 1024
 MAX_CITE_PATH = 4096
-MAX_CITATIONS = 20_000  # per page: bounds verify cost by count
+MAX_CITATIONS = 2_000  # per page: bounds verify cost by count
 
 
 def read_control_lines(path: Path) -> tuple[list[str], str]:
@@ -187,7 +187,21 @@ def is_ignored(path: str, globs: list[str]) -> bool:
     return any(_ignored(path, g) for g in globs)
 
 
-def _check(root: Path, cite: Citation, tracked: set[str], ignore: list[str]) -> str | None:
+def split_lines(content: str) -> list[str]:
+    """Lines as citations count them: split on ``\\n``, ``\\r`` stripped, no empty tail."""
+    lines = [ln.rstrip("\r") for ln in content.split("\n")]
+    if lines[-1] == "":
+        lines.pop()
+    return lines
+
+
+def _check(
+    root: Path,
+    cite: Citation,
+    tracked: set[str],
+    ignore: list[str],
+    cache: dict[str, list[str] | None] | None = None,
+) -> str | None:
     if len(cite.path) > MAX_CITE_PATH:  # before any glob matching
         return "path too long"
     bad = _shape_error(cite.path)
@@ -199,12 +213,17 @@ def _check(root: Path, cite: Citation, tracked: set[str], ignore: list[str]) -> 
         return f"secret path {cite.path}"
     if is_ignored(cite.path, ignore):
         return f"ignored path {cite.path}"
-    content = gitview.show_head(root, cite.path) if cite.path in tracked else None
-    if content is None:
+    lines: list[str] | None = None
+    if cite.path in tracked:
+        if cache is not None and cite.path in cache:
+            lines = cache[cite.path]
+        else:
+            content = gitview.show_head(root, cite.path)
+            lines = split_lines(content) if content is not None else None
+            if cache is not None:
+                cache[cite.path] = lines
+    if lines is None:
         return f"{cite.path} not tracked at HEAD"
-    lines = [ln.rstrip("\r") for ln in content.split("\n")]
-    if lines[-1] == "":
-        lines.pop()
     if not 1 <= cite.start <= cite.end <= len(lines):
         return f"range {cite.start}-{cite.end} out of range for {cite.path} ({len(lines)} lines)"
     if cite.symbol and cite.symbol not in "\n".join(lines[cite.start - 1 : cite.end]):
@@ -218,6 +237,7 @@ def verify_page(
     text: str,
     ignore: list[str],
     tracked: set[str] | None = None,
+    cache: dict[str, list[str] | None] | None = None,
 ) -> list[str]:
     """Error strings ``"<page_rel>:<line>: <reason>"``; empty when the page verifies."""
     root = Path(root)
@@ -228,7 +248,7 @@ def verify_page(
         tracked = set(gitview.tracked_files(root))
     errors: list[tuple[int, str]] = []
     for cite in cites:
-        reason = _check(root, cite, tracked, ignore)
+        reason = _check(root, cite, tracked, ignore, cache)
         if reason:
             errors.append((cite.line, reason))
     errors.extend((n, "uncited paragraph") for n in uncited)

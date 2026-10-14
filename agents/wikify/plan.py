@@ -101,7 +101,13 @@ def _docs_status(
     if any(e.startswith(("docs:", "docs/wiki:")) for e in layout_errors):
         return empty, None
     try:
-        return docs_inventory.status(root, texts), None
+        status = docs_inventory.status(root, texts)
+        error = status.pop("error")
+        if error and not error.startswith("ignore file rejected"):  # reported already
+            error = f"doc inventory failed: {error}; docs_* keys are incomplete"
+        else:
+            error = None
+        return status, error
     except Exception as exc:  # plan is advisory, but never reports "all fresh" falsely
         return empty, f"doc inventory failed ({type(exc).__name__}); docs_* keys are incomplete"
 

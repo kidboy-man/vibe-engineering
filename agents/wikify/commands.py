@@ -60,9 +60,21 @@ def _verify(root: Path) -> tuple[int, list[str]]:
         tracked = set(gitview.tracked_files(root))  # once, not per page
         expected: dict[str, str] = {}
         eligible: set[str] = set()
+        failed = False
+        cache: dict[str, list[str] | None] = {}  # path -> cited lines, one run
         if (root / state.WIKI_DIR).is_dir():  # no wiki, no doc pages to compare
-            expected, inv = docs_inventory.expected_pages(root)  # once per run
+            blobs: dict[str, str | None] = {}
+            expected, inv = docs_inventory.expected_pages(root, blobs)  # once per run
             eligible = set(inv.docs)
+            cache = {
+                path: None if text is None else citations.split_lines(text)
+                for path, text in blobs.items()
+            }
+            reason = docs_inventory.failure(inv)
+            if reason:  # the comparison below would blame every page for it
+                failed = True
+                if not reason.startswith("ignore file rejected"):  # reported already
+                    errors.append(f"docs: doc inventory failed: {reason}")
         for rel, path in pages:
             text = path.read_text(encoding="utf-8")
             texts[rel] = text
@@ -72,14 +84,14 @@ def _verify(root: Path) -> tuple[int, list[str]]:
                 checked = agentmap.strip_map(text)  # map lines are navigation
             elif docs_inventory.is_generated(text):
                 checked = docs_inventory.blank_marker(text)  # keep line numbers
-                if text != expected.get(rel):
+                if not failed and text != expected.get(rel):
                     reason = (
                         "generated page out of date; run vibe wikify docs"
                         if rel in expected
                         else "generated page has no eligible source"
                     )
                     errors.append(f"{rel}: {reason}")
-            errors.extend(citations.verify_page(root, rel, checked, ignore, tracked))
+            errors.extend(citations.verify_page(root, rel, checked, ignore, tracked, cache))
             if not rel.startswith("sources/") and eligible:
                 errors.extend(
                     f"{rel}:{c.line}: doc citation outside sources/: {c.path}"

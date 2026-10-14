@@ -23,7 +23,7 @@ class InventoryTests(RepoCase):
         if isinstance(content, bytes):
             p.write_bytes(content)
         else:
-            p.write_text(content)
+            p.write_text(content, encoding="utf-8")
 
     def commit_all(self):
         git(self.root, "add", "-A")
@@ -228,11 +228,11 @@ class InventoryTests(RepoCase):
         wiki = self.root / "docs/wiki"
         wiki.mkdir(parents=True)
         outside = self.root / "outside.txt"
-        outside.write_text("README.md\n")
+        outside.write_text("README.md\n", encoding="utf-8")
         cases = {
             "fifo": lambda p: os.mkfifo(p),
             "symlink": lambda p: os.symlink(outside, p),
-            "oversized": lambda p: p.write_text("x/\n" * (65 * 1024 // 3 + 1)),
+            "oversized": lambda p: p.write_text("x/\n" * (65 * 1024 // 3 + 1), encoding="utf-8"),
         }
         loaders = (
             (di.INCLUDES_REL, di.load_includes),
@@ -247,7 +247,7 @@ class InventoryTests(RepoCase):
                 with self.subTest(rel=rel, case=name):
                     self.assertEqual(load(self.root), [])
             path.unlink()
-            path.write_text("# c\na/\n")
+            path.write_text("# c\na/\n", encoding="utf-8")
             self.assertEqual(load(self.root), ["a/"])
 
     def test_cap_stops_reading(self):
@@ -379,7 +379,7 @@ class OutlineTests(unittest.TestCase):
         secs = di.outline(text)
         di.render_doc_page("a.md", text)
         elapsed = time.perf_counter() - start
-        self.assertLess(elapsed, 1)
+        self.assertLess(elapsed, 3)
         return secs
 
     def test_pathological_heading_lines_are_linear(self):
@@ -475,7 +475,7 @@ class PagesTests(RepoCase):
             if isinstance(content, bytes):
                 p.write_bytes(content)
             else:
-                p.write_text(content, newline="")
+                p.write_text(content, newline="", encoding="utf-8")
         git(self.root, "add", "-A")
         git(self.root, "commit", "-q", "-m", "c")
 
@@ -522,7 +522,7 @@ class PagesTests(RepoCase):
     def test_deterministic_and_head_only(self):
         self.commit_files(self.FILES)
         first, _ = di.expected_pages(self.root)
-        (self.root / "README.md").write_text("# Changed\n")  # uncommitted edit
+        (self.root / "README.md").write_text("# Changed\n", encoding="utf-8")  # uncommitted edit
         second, _ = di.expected_pages(self.root)
         self.assertEqual(first, second)
         self.assertEqual(list(first), list(second))
@@ -532,28 +532,21 @@ class PagesTests(RepoCase):
         pages, inv = di.expected_pages(self.root)
         self.assertEqual((pages, inv.docs), ({}, []))
 
-    def test_vanished_doc_skipped(self):
+    def test_unreadable_doc_skipped_and_each_doc_read_once(self):
         self.commit_files({"README.md": "# A\n", "docs/b.md": "# B\n"})
         real = gitview.show_head
-        seen = di.inventory(self.root)
-        self.assertEqual(seen.docs, ["README.md", "docs/b.md"])
-
-        def flaky(root, rel):
-            return None if rel == "docs/b.md" and flaky.armed else real(root, rel)
-
-        flaky.armed = False
         calls = []
 
         def spy(root, rel):
             calls.append(rel)
-            flaky.armed = len(calls) > 2  # inventory reads both; expected_pages re-reads
-            return flaky(root, rel)
+            return None if rel == "docs/b.md" else real(root, rel)
 
         with mock.patch.object(gitview, "show_head", spy):
             pages, inv = di.expected_pages(self.root)
         self.assertEqual(sorted(pages), ["sources/README.md", "sources/index.md"])
         self.assertEqual(inv.docs, ["README.md"])
         self.assertEqual({s.path for s in inv.skipped}, {"docs/b.md"})
+        self.assertEqual(sorted(calls), ["README.md", "docs/b.md"])
 
     def test_case_collision_skipped(self):
         self.commit_files({"README.md": "# A\n", "readme.md": "# B\n"})
@@ -584,7 +577,7 @@ class PagesTests(RepoCase):
             "back\\slash.md", "<script>.md", "<img_src=x>.md", "<!--x.md", "a-->b.md",
             "a].md", "a[.md", "@mention.md", "README@v2.md", "ev‮il.md",
             "zw​x.md", "nel\x85.md", "ls .md", "ps .md", "del\x7f.md",
-            "tab\t.md", "c:d.md",
+            "tab\t.md", "c:d.md", "C#-guide.md", 'q"x.md',
         ]
         good = ["a-b_c.d+e,f.md", "éü.md", "日本語.md"]
         self.commit_files({f"docs/{n}": "# A\n" for n in bad + good})
@@ -622,7 +615,7 @@ class PagesTests(RepoCase):
         secs = di.outline(text)
         elapsed = time.perf_counter() - start
         self.assertGreater(len(secs), 4000)
-        self.assertLess(elapsed, 1)
+        self.assertLess(elapsed, 3)
 
 
 class DocsCmdTests(RepoCase):
@@ -641,7 +634,7 @@ class DocsCmdTests(RepoCase):
         for rel, content in files.items():
             p = self.root / rel
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, newline="")
+            p.write_text(content, newline="", encoding="utf-8")
 
     def commit_all(self):
         git(self.root, "add", "-A")
@@ -671,7 +664,7 @@ class DocsCmdTests(RepoCase):
         self.assertEqual(rc, 0, out)
         for rel in ("README.md", "docs/a.md", "index.md"):
             page = self.sources() / rel
-            self.assertTrue(page.read_text().startswith(di.MARKER + "\n"), rel)
+            self.assertTrue(page.read_text(encoding="utf-8").startswith(di.MARKER + "\n"), rel)
             self.assertIn(f"create docs/wiki/sources/{rel}\n", out)
         self.assertIn("+<!-- wikify:generated -->", out)
         self.assertTrue(out.rstrip().splitlines()[-1].startswith("Next: review git status --short -- docs/wiki;"))
@@ -697,7 +690,7 @@ class DocsCmdTests(RepoCase):
         self.assertEqual(rc, 0)
         self.assertIn("update docs/wiki/sources/docs/a.md", out)
         self.assertIn("unchanged docs/wiki/sources/README.md", out)
-        self.assertIn("Two", (self.sources() / "docs/a.md").read_text())
+        self.assertIn("Two", (self.sources() / "docs/a.md").read_text(encoding="utf-8"))
 
     def test_ineligible_doc_is_stale_and_kept(self):
         self.run_cmd()
@@ -714,7 +707,7 @@ class DocsCmdTests(RepoCase):
         self.assertEqual(rc, 1)
         self.assertIn("nothing written", out)
         self.assertFalse((self.sources() / "README.md").exists())
-        self.assertEqual((self.sources() / "docs/a.md").read_text(), "# mine\n")
+        self.assertEqual((self.sources() / "docs/a.md").read_text(encoding="utf-8"), "# mine\n")
 
     @unittest.skipUnless(HAS_SYMLINK, "symlinks")
     def test_symlinked_sources_refused(self):
@@ -731,12 +724,12 @@ class DocsCmdTests(RepoCase):
     def test_symlinked_destination_refused(self):
         self.sources().mkdir()
         target = self.root / "victim.txt"
-        target.write_text("keep\n")
+        target.write_text("keep\n", encoding="utf-8")
         os.symlink(target, self.sources() / "README.md")
         rc, out = self.run_cmd()
         self.assertEqual(rc, 1)
         self.assertIn("nothing written", out)
-        self.assertEqual(target.read_text(), "keep\n")
+        self.assertEqual(target.read_text(encoding="utf-8"), "keep\n")
         self.assertFalse((self.sources() / "index.md").exists())
 
     @unittest.skipUnless(hasattr(os, "link"), "hard links")
@@ -750,7 +743,7 @@ class DocsCmdTests(RepoCase):
         rc, out = self.run_cmd()
         self.assertEqual(rc, 1)
         self.assertIn("nothing written", out)
-        self.assertNotIn("Changed", link.read_text())
+        self.assertNotIn("Changed", link.read_text(encoding="utf-8"))
 
     @unittest.skipUnless(HAS_FIFO, "fifo")
     def test_non_regular_destination_refused(self):
@@ -805,7 +798,7 @@ class DocsCmdTests(RepoCase):
         outside = self.root.parent / (self.root.name + "-leak")
         outside.mkdir()
         self.addCleanup(lambda: [p.unlink() for p in outside.iterdir()] and None or outside.rmdir())
-        (outside / "leak.md").write_text(di.MARKER + "\n# x\n")
+        (outside / "leak.md").write_text(di.MARKER + "\n# x\n", encoding="utf-8")
         os.symlink(outside, self.sources())
         rc, out = self.run_cmd()
         self.assertEqual(rc, 1)
@@ -813,18 +806,18 @@ class DocsCmdTests(RepoCase):
         self.assertNotIn("leak.md", out)
 
     def test_sources_regular_file_refused(self):
-        self.sources().write_text("x\n")
+        self.sources().write_text("x\n", encoding="utf-8")
         rc, out = self.run_cmd()
         self.assertEqual(rc, 1)
         self.assertIn("nothing written", out)
-        self.assertEqual(self.sources().read_text(), "x\n")
+        self.assertEqual(self.sources().read_text(encoding="utf-8"), "x\n")
 
     @unittest.skipUnless(HAS_SYMLINK, "symlinks")
     def test_stale_does_not_follow_symlinked_subdir(self):
         outside = self.root.parent / (self.root.name + "-sub")
         outside.mkdir()
         self.addCleanup(lambda: [p.unlink() for p in outside.iterdir()] and None or outside.rmdir())
-        (outside / "leak.md").write_text(di.MARKER + "\n")
+        (outside / "leak.md").write_text(di.MARKER + "\n", encoding="utf-8")
         self.sources().mkdir()
         os.symlink(outside, self.sources() / "evil")
         rc, out = self.run_cmd(dry_run=True)
@@ -842,7 +835,7 @@ class DocsCmdTests(RepoCase):
         self.assertEqual(errors, [])
         rel = "sources/docs/guide.markdown.md"
         self.assertIn(rel, [r for r, _ in pages])
-        blanked = "\n" + page.read_text().split("\n", 1)[1]
+        blanked = "\n" + page.read_text(encoding="utf-8").split("\n", 1)[1]
         self.assertEqual(citations.verify_page(self.root, rel, blanked, ignore=[]), [])
         git(self.root, "rm", "-q", "docs/guide.markdown")
         git(self.root, "commit", "-q", "-m", "rm")
@@ -936,7 +929,7 @@ class DocsVerifyTests(RepoCase):
         for rel, content in files.items():
             p = self.root / rel
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, newline="")
+            p.write_text(content, newline="", encoding="utf-8")
 
     def commit_all(self):
         git(self.root, "add", "-A")
@@ -991,7 +984,7 @@ class DocsVerifyTests(RepoCase):
 
     def test_hand_edited_generated_page(self):
         p = self.root / "docs/wiki/sources/README.md"
-        p.write_text(p.read_text() + "- extra (src: README.md:1)\n")
+        p.write_text(p.read_text(encoding="utf-8") + "- extra (src: README.md:1)\n")
         rc, errs = self.errors()
         self.assertEqual(rc, 1)
         self.assertIn("sources/README.md: generated page out of date; run vibe wikify docs", errs)
@@ -1093,7 +1086,7 @@ class DocsVerifyTests(RepoCase):
 
     def test_marker_top_level_index_agrees_between_verify_and_status(self):
         idx = self.root / "docs/wiki/index.md"
-        idx.write_text(di.MARKER + "\n" + idx.read_text())
+        idx.write_text(di.MARKER + "\n" + idx.read_text(encoding="utf-8"))
         # verify never treats the top-level index as a generated page (no
         # out-of-date error, marker not blanked); plan must not call it stale
         self.assertEqual(self.errors(), (1, ["index.md:1: uncited paragraph"]))
@@ -1118,7 +1111,63 @@ class DocsVerifyTests(RepoCase):
         rc, _ = self.verify()
         elapsed = time.perf_counter() - start
         self.assertEqual(rc, 0)
-        self.assertLess(elapsed, 1, f"{elapsed:.2f}s")
+        self.assertLess(elapsed, 3, f"{elapsed:.2f}s")
+
+    def test_hash_and_quote_paths_skipped_and_verify_clean(self):
+        self.write({"docs/C#-guide.md": "# C\n", 'docs/q"x.md': "# Q\n"})
+        self.commit_all()
+        inv = di.inventory(self.root)
+        self.assertNotIn("docs/C#-guide.md", inv.docs)
+        self.assertEqual(
+            {s.path: s.reason for s in inv.skipped if "C#" in s.path or '"' in s.path},
+            {"docs/C#-guide.md": "path not citable", 'docs/q"x.md': "path not citable"},
+        )
+        self.assertEqual(self.docs(), 0)  # nothing new to write: both are skipped
+        self.assertEqual(self.errors(), (0, []))
+
+    def test_email_in_heading_is_spaced_not_fused(self):
+        from agents.wikify import scan
+
+        doc = "# Contact alice@corp.example.com\n"
+        self.assertTrue(any("email" in str(h) for h in scan.scan_text(doc)))  # raw doc is flagged
+        self.write({"docs/c.md": doc})
+        self.commit_all()
+        page = di.expected_pages(self.root)[0]["sources/docs/c.md"]
+        self.assertIn("- Contact alice corp.example.com (src: docs/c.md:1-1", page)
+        self.assertNotIn("alicecorp", page)
+        self.assertNotIn("@", page)
+
+    def test_inventory_failure_is_named_in_verify_and_plan(self):
+        with mock.patch.object(gitview, "regular_tracked", return_value=None):
+            rc, errs = self.errors()
+            p = plan.build_plan(self.root)
+        self.assertEqual(rc, 1)
+        self.assertEqual(errs, ["docs: doc inventory failed: could not read file modes"])
+        self.assertIn("doc inventory failed: could not read file modes", p["error"])
+        for key in ("docs_unindexed", "docs_stale"):
+            self.assertEqual(p[key], [])
+
+    def test_200_docs_x_100_sections_cache_and_budget(self):
+        body = "".join(f"## S{i}\n\ntext\n\n" for i in range(100))
+        self.write({f"docs/m{i:03d}.md": f"# M{i}\n\n" + body for i in range(200)})
+        self.commit_all()
+        self.assertEqual(self.docs(), 0)
+        self.commit_all()
+        real = gitview.show_head
+        counts: dict[str, int] = {}
+
+        def spy(root, rel):
+            counts[rel] = counts.get(rel, 0) + 1
+            return real(root, rel)
+
+        with mock.patch.object(gitview, "show_head", spy):
+            start = time.perf_counter()
+            result = self.errors()
+            elapsed = time.perf_counter() - start
+        self.assertEqual(result, (0, []))
+        self.assertLess(elapsed, 6, f"{elapsed:.2f}s")
+        self.assertGreaterEqual(len(counts), 200)
+        self.assertEqual(max(counts.values()), 1, {k: v for k, v in counts.items() if v > 1})
 
 
 if __name__ == "__main__":

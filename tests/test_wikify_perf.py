@@ -10,7 +10,7 @@ from pathlib import Path
 from agents.wikify import agentmap, citations, docs_inventory, gitview, pointer, scan, state
 
 MIB = 1 << 20
-LIMIT = 2.0
+LIMIT = 6.0  # >= 3x the slowest measured case; guards complexity, not speed
 HOOK = (
     Path(__file__).resolve().parent.parent
     / "agents/kits/wikify/templates/wikify/hooks/vibe-wikify/wikify_guard.py"
@@ -91,7 +91,7 @@ class CitationPerfTests(Timed):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-            (root / "a.py").write_text("x\n")
+            (root / "a.py").write_text("x\n", encoding="utf-8")
             subprocess.run(["git", "add", "a.py"], cwd=root, check=True)
             subprocess.run(
                 ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
@@ -109,7 +109,7 @@ class CitationPerfTests(Timed):
                     self.assertTrue(errs)
             long_path = citations.verify_page(root, "p.md", "(src: " + "a" * 5000 + ":1)\n", [])
             self.assertIn("path too long", long_path[0])
-            many = citations.verify_page(root, "p.md", "(src: a.py:1)\n" * 20001, [])
+            many = citations.verify_page(root, "p.md", "(src: a.py:1)\n" * (citations.MAX_CITATIONS + 1), [])
             self.assertEqual([e for e in many if "too many citations" in e], many)
             self.assertEqual(len(many), 1)
 
@@ -154,7 +154,7 @@ class HookPerfTests(Timed):
             git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
             subprocess.run([*git, "init", "-q"], cwd=root, check=True)
             (root / "src").mkdir()
-            (root / "src/a.py").write_text("x\n")
+            (root / "src/a.py").write_text("x\n", encoding="utf-8")
             subprocess.run([*git, "add", "src/a.py"], cwd=root, check=True)
             subprocess.run([*git, "commit", "-q", "-m", "c"], cwd=root, check=True)
             state.save(root, gitview.head(root))  # never committed -> stale

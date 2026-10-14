@@ -22,7 +22,7 @@ MAX_DOC_BYTES = 1 << 20
 SUFFIXES = (".md", ".markdown")
 EXCLUDED_NAMES = {"agents.md", "claude.md", "gemini.md", "skill.md"}  # casefolded
 DEFAULT_PREFIXES = ("readme", "contributing", "changelog", "architecture")
-_PATH_BAD = frozenset(":`()[]<>@\\")
+_PATH_BAD = frozenset(":`()[]<>@\\#\"")
 
 
 @dataclass(frozen=True)
@@ -66,11 +66,27 @@ def _default_eligible(path: str) -> bool:
     )
 
 
-def inventory(root: Path) -> Inventory:
+FAIL_SAFE_REASON = "could not read file modes"
+
+
+def failure(inv: Inventory) -> str | None:
+    """Reason when the inventory failed closed (so ``docs`` is empty for that
+    reason, not because nothing is eligible); a rejected ignore file is already
+    reported on its own."""
+    for skip in inv.skipped:
+        if skip.path == "" and skip.reason == FAIL_SAFE_REASON:
+            return skip.reason
+        if skip.path == ".wikifyignore" and skip.reason.startswith("ignore file rejected"):
+            return skip.reason
+    return None
+
+
+def inventory(root: Path, blobs: dict[str, str | None] | None = None) -> Inventory:
+    """``blobs``, when given, receives every doc text read (path -> text)."""
     root = Path(root)
     regular = gitview.regular_tracked(root)
     if regular is None:  # fail closed: modes unknown, so no path can be trusted
-        return Inventory([], [Skip("", "could not read file modes")])
+        return Inventory([], [Skip("", FAIL_SAFE_REASON)])
     if citations.ignore_status(root) == "rejected":  # fail closed: privacy control
         return Inventory([], [Skip(".wikifyignore", "ignore file rejected; ignore rules not applied")])
     includes = load_includes(root)
@@ -101,6 +117,8 @@ def inventory(root: Path) -> Inventory:
             skipped.extend(Skip(p, f"over {MAX_DOCS} docs") for p in candidates[n:])
             break
         text = gitview.show_head(root, path)
+        if blobs is not None:
+            blobs[path] = text
         if text is None:
             reason = "unreadable at HEAD (not committed?)"
         elif not text.strip():
@@ -152,7 +170,8 @@ def _unclose(raw: str) -> str:
 
 
 def _title(raw: str) -> str:
-    kept = "".join(" " if ch.isspace() else ch for ch in raw if not _drop(ch) or ch.isspace())
+    # dropped chars become spaces, so tokens never fuse (``a@b`` -> ``a b``)
+    kept = "".join(" " if ch.isspace() or _drop(ch) else ch for ch in raw)
     return _SPACE.sub(" ", kept).strip()[:MAX_TITLE].strip() or "(untitled)"
 
 
@@ -249,14 +268,18 @@ def render_index(rows: list[tuple[str, str, int, int]]) -> str:
     return "\n".join(out) + "\n"
 
 
-def expected_pages(root: Path) -> tuple[dict[str, str], Inventory]:
+def expected_pages(
+    root: Path, blobs: dict[str, str | None] | None = None
+) -> tuple[dict[str, str], Inventory]:
     """Every generated page (path relative to docs/wiki) plus the inventory used.
 
     Docs that vanish between inventory and read, or whose page path collides
     with an earlier doc's, move to ``skipped`` instead of raising.
     """
     root = Path(root)
-    inv = inventory(root)
+    if blobs is None:
+        blobs = {}
+    inv = inventory(root, blobs)
     pages: dict[str, str] = {}
     rows: list[tuple[str, str, int, int]] = []
     docs: list[str] = []
@@ -264,7 +287,7 @@ def expected_pages(root: Path) -> tuple[dict[str, str], Inventory]:
     taken: set[str] = set()
     for doc in sorted(inv.docs):
         rel = page_rel(doc)
-        text = gitview.show_head(root, doc)
+        text = blobs[doc] if doc in blobs else gitview.show_head(root, doc)
         if text is None:
             skipped.append(Skip(doc, "unreadable at HEAD (not committed?)"))
         elif citations._shape_error(doc):  # defensive: never emit a page that cannot verify
@@ -302,9 +325,11 @@ def status(
     do not recompute it.
     """
     expected, inv = built if built is not None else expected_pages(root)
+    error = failure(inv)
     return {
-        "unindexed": [d for d in inv.docs if page_rel(d) not in texts],
-        "stale": sorted(  # top-level index.md is exempt, as in verify
+        "error": error,
+        "unindexed": [] if error else [d for d in inv.docs if page_rel(d) not in texts],
+        "stale": [] if error else sorted(  # top-level index.md is exempt, as in verify
             rel for rel, text in texts.items()
             if rel != "index.md" and is_generated(text) and text != expected.get(rel)
         ),

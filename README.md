@@ -489,7 +489,7 @@ vibe wikify docs             # write pages under docs/wiki/sources/ only
   `CLAUDE.md`, `GEMINI.md`, `SKILL.md`, anything under `docs/wiki/`, secret paths
   and `.wikifyignore` matches; those always win over `.wikifydocs`.
 - **Skipped, with a reason printed** (not an error): paths with whitespace,
-  `` : ` ( ) [ ] < > @ \ ``, control characters or any Unicode `C*` character
+  `` : ` ( ) [ ] < > @ \ # " ``, control characters or any Unicode `C*` character
   (`path not citable`); empty docs; docs over 1 MiB; docs that are not valid
   UTF-8; docs beyond the first 500 (`over 500 docs`).
 - **Page shape.** Page path is `sources/<doc path>` and always ends in `.md`
@@ -510,8 +510,14 @@ vibe wikify docs             # write pages under docs/wiki/sources/ only
   byte for byte; after any doc edit `verify` fails with `generated page out of
   date; run vibe wikify docs`, and a generated page whose doc is gone or no
   longer eligible fails with `generated page has no eligible source`. In `plan`,
-  `docs_unindexed`, `docs_stale` and `docs_skipped` report the same state; if
-  the doc inventory itself fails, `plan` exits 1 with an `error` line.
+  `docs_unindexed`, `docs_stale` and `docs_skipped` report the same state. If
+  the doc inventory itself fails (for example git file modes cannot be read, or
+  `expected_pages` raises), `plan` sets `error` and exits 1, and `verify` fails
+  with `docs: doc inventory failed: <cause>` instead of blaming every page.
+- **Upgrading.** Existing pages that cite an eligible doc (README, `docs/*.md`)
+  from outside `sources/` now fail `verify` with `doc citation outside
+  sources/`, even if you never run `docs`. Move the claim into `sources/` or
+  cite the code that backs it.
 - **Reachability is transitive.** A page counts as reachable when the map lists
   it or a reachable page links to it with a relative `.md` link, up to 2 hops
   from a map entry. Add one map entry for `sources/index.md`; the per-doc pages
@@ -523,7 +529,15 @@ vibe wikify docs             # write pages under docs/wiki/sources/ only
   docs are not covered); at most 500 docs, 200 sections per page, 1 MiB per doc
   (unmeasured defaults); the outline restates heading text and does not
   summarise; citing a doc does not verify the code; heading text is untrusted
-  data, sanitised and length-capped but still the author's words.
+  data, sanitised and length-capped but still the author's words. Sanitising
+  replaces markup characters (including `@`) with a space, so an email address
+  in a heading is split rather than reproduced.
+- **Known limits.** The provenance check covers only docs that were outlined:
+  docs skipped as over the cap, over 1 MiB, not valid UTF-8 or colliding page
+  paths can still be cited from code pages. On case-insensitive filesystems,
+  directories that differ only in case (`docs/Guide/` vs `docs/guide/`) are not
+  detected as colliding. A hand-written page under `sources/` may cite eligible
+  docs without the "documented, not code-verified" label.
 - **Freshness is unchanged.** Editing a doc is a code-side change after the base
   commit, so the push gate stays stale until you run `docs`, `verify` and `mark`
   and make the docs-only commit.
