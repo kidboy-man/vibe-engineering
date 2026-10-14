@@ -114,6 +114,31 @@ class CitationPerfTests(Timed):
             self.assertEqual(len(many), 1)
 
 
+class IgnoreMatcherPerfTests(Timed):
+    def test_many_patterns_times_many_paths(self):
+        globs = [f"*/*/a*b?c/**/f{i}.py" for i in range(citations.MAX_IGNORE_PATTERNS)]
+        paths = [f"d{i % 40}/x/{'s/' * (i % 12)}file{i}.py" for i in range(3000)]
+        self.timed(lambda: [citations.is_ignored(p, globs) for p in paths])
+
+    def test_double_star_runs_do_not_backtrack(self):
+        glob = "/".join(["**"] * 100) + "/zzz"
+        path = "/".join(["a"] * 2000) + "/q"
+        self.assertFalse(self.timed(citations.is_ignored, path, [glob]))
+        stars = "*a" * 8 + "*b"
+        self.assertFalse(self.timed(citations.is_ignored, "a" * 4000, [stars]))
+
+    def test_caps_reject_before_matching(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "docs/wiki").mkdir(parents=True)
+            ign = root / "docs/wiki/.wikifyignore"
+            for body in ("a\n" * 20000, "*" * 300 + "\n", "*a" * 9 + "\n"):
+                ign.write_text(body, encoding="utf-8")
+                self.assertEqual(self.timed(citations.ignore_status, root), "rejected")
+            ign.write_text("vendor/\n", encoding="utf-8")
+            self.assertEqual(citations.ignore_status(root), "ok")
+
+
 class MapAndDocsPerfTests(Timed):
     def test_agentmap(self):
         for unit in ("](", "](a", "](a.md", "[x](a.md) ", "<!-- wikify:map -->\n"):

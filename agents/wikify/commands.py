@@ -51,15 +51,17 @@ def _verify(root: Path) -> tuple[int, list[str]]:
     errors, pages = citations.walk_wiki(root)
     if citations.ignore_status(root) == "rejected":
         neg = citations.ignore_negations(root)
-        errors.append(
-            f"{citations.IGNORE_REL}: rejected ("
-            + (
-                f"'!' negation is not supported, line {','.join(neg)}"
-                if neg
-                else "symlink, not a regular file, not valid UTF-8, or over 64 KiB"
+        if neg:
+            why = f"'!' negation is not supported, line {','.join(neg)}"
+        elif citations.ignore_over_limits(root):
+            why = (
+                f"over the pattern limits ({citations.MAX_IGNORE_PATTERNS} patterns, "
+                f"{citations.MAX_IGNORE_PATTERN_LEN} chars, "
+                f"{citations.MAX_IGNORE_WILDCARDS} wildcards each)"
             )
-            + "); ignore rules were NOT applied"
-        )
+        else:
+            why = "symlink, not a regular file, not valid UTF-8, or over 64 KiB"
+        errors.append(f"{citations.IGNORE_REL}: rejected ({why}); ignore rules were NOT applied")
     errors += state.ignored_control_files(root)
     notices: list[str] = []
     allowed: list[str] = []
@@ -85,7 +87,11 @@ def _verify(root: Path) -> tuple[int, list[str]]:
                 if not reason.startswith("ignore file rejected"):  # reported already
                     errors.append(f"docs: doc inventory failed: {reason}")
         for rel, path in pages:
-            text = path.read_text(encoding="utf-8")
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                errors.append(f"{rel}: not valid UTF-8")
+                continue
             texts[rel] = text
             checked = text
             if rel == "index.md":  # only the top-level index carries the map

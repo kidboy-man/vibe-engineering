@@ -8,6 +8,7 @@ reads committed content only, so uncommitted edits never satisfy a citation.
 from __future__ import annotations
 
 import fnmatch
+import functools
 import os
 import re
 import stat
@@ -171,38 +172,94 @@ def ignore_negations(root: Path) -> list[str]:
     return [str(n) for n, ln in enumerate(lines, 1) if ln.strip().startswith("!")]
 
 
-def ignore_status(root: Path) -> str:
+def ignore_over_limits(root: Path) -> bool:
+    """True when .wikifyignore exceeds the pattern-count/length/wildcard caps."""
     lines, status = read_control_lines(Path(root) / IGNORE_REL)
-    if status == "ok" and any(ln.strip().startswith("!") for ln in lines):
-        return "rejected"  # fail closed: a negation would silently un-ignore nothing
+    globs = _globs(lines) if status == "ok" else []
+    return len(globs) > MAX_IGNORE_PATTERNS or any(
+        len(g) > MAX_IGNORE_PATTERN_LEN or len(_WILD.findall(g)) > MAX_IGNORE_WILDCARDS
+        for g in globs
+    )
+
+
+def ignore_status(root: Path) -> str:
+    status = read_control_lines(Path(root) / IGNORE_REL)[1]
+    if status == "ok" and (ignore_negations(root) or ignore_over_limits(root)):
+        return "rejected"  # fail closed: never silently apply a partial rule set
     return status
 
 
 def load_ignore(root: Path) -> list[str]:
+    if ignore_over_limits(root):
+        return []  # rejected by ignore_status; never run an unbounded rule set
     return _globs(read_control_lines(Path(root) / IGNORE_REL)[0])
 
 
 
-def _segs_match(pat: list[str], parts: list[str]) -> bool:
-    """Match ``pat`` against a leading run of ``parts``; ``**`` spans 0+ segments."""
-    if not pat:
-        return True  # pattern consumed: the rest of the path is under the match
-    if pat[0] == "**":
-        return any(_segs_match(pat[1:], parts[i:]) for i in range(len(parts) + 1))
-    return bool(parts) and fnmatch.fnmatchcase(parts[0], pat[0]) and _segs_match(pat[1:], parts[1:])
+_WILD = re.compile(r"[*?\[]")
+MAX_IGNORE_PATTERNS = 200
+MAX_IGNORE_PATTERN_LEN = 200
+MAX_IGNORE_WILDCARDS = 8  # per pattern: bounds fnmatch backtracking
+
+
+@functools.lru_cache(maxsize=4096)
+def _compile_glob(glob: str) -> tuple[str, tuple[tuple[str, object], ...]]:
+    """(kind, segments): kind is any (slash-less, component match) or root."""
+    pat = glob.lstrip("/").rstrip("/")
+    anchored = "/" in pat or glob.startswith("/")
+    segs: list[str] = []
+    for seg in pat.split("/"):
+        if seg == "**" and segs and segs[-1] == "**":
+            continue  # collapse runs: keeps the matcher linear in the pattern
+        segs.append(seg)
+    wild = tuple(
+        (seg, re.compile(fnmatch.translate(seg)).match if _WILD.search(seg) else None)
+        for seg in segs
+    ) if pat else ()
+    return ("root" if anchored else "any"), wild
+
+
+def _seg(part: str, seg: tuple[str, object]) -> bool:
+    return seg[1](part) is not None if seg[1] else part == seg[0]
+
+
+def _root_match(segs: tuple[tuple[str, object], ...], parts: list[str]) -> bool:
+    """Match ``segs`` against a leading run of ``parts`` (set-of-states DP, no
+    backtracking); ``**`` spans 0+ segments; a fully consumed pattern matches."""
+    if segs[0][0] == "**" and len(segs) == 1:
+        return True
+    if segs[0][1] is None and parts[0] != segs[0][0]:
+        return False  # literal first segment: cheap reject
+    states = {0}
+    for part in parts:
+        nxt: set[int] = set()
+        for i in states:
+            if segs[i][0] == "**":
+                if i + 1 >= len(segs):
+                    return True  # trailing `**`: the whole subtree
+                nxt.add(i)  # consume the segment, stay
+                if _seg(part, segs[i + 1]):  # or skip `**` and match
+                    nxt.add(i + 2)
+            elif _seg(part, segs[i]):
+                nxt.add(i + 1)
+        if any(i >= len(segs) for i in nxt):
+            return True
+        # a leading `**` may also match zero segments, handled by the i + 2 branch
+        states = nxt
+    return False
 
 
 def _ignored(path: str, glob: str) -> bool:
     """gitignore-like: no ``/`` -> any path component; otherwise (leading ``/`` or not)
     anchored at the repo root with ``*`` confined to one segment and ``**`` spanning
-    segments. A match covers the whole subtree. ``!`` negation is rejected earlier."""
-    pat = glob.lstrip("/").rstrip("/")
-    if not pat:
+    segments. A match covers the subtree. ``!`` negation is rejected earlier."""
+    kind, segs = _compile_glob(glob)
+    if not segs:
         return False
     parts = path.split("/")
-    if "/" not in pat and not glob.startswith("/"):
-        return any(fnmatch.fnmatchcase(part, pat) for part in parts)
-    return _segs_match(pat.split("/"), parts)
+    if kind == "any":
+        return any(_seg(part, segs[0]) for part in parts)
+    return _root_match(segs, parts)
 
 
 def is_ignored(path: str, globs: list[str]) -> bool:
