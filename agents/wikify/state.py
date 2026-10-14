@@ -29,11 +29,14 @@ CONTROL_RELS = tuple(
 def ignored_control_files(root: Path) -> list[str]:
     """One error per control file git would ignore (it would never be committed,
     so the state base would never advance and the hook would block forever)."""
+    hits = gitview.ignored_or_none(root, CONTROL_RELS)
+    if hits is None:
+        return ["docs/wiki control files: could not determine whether git ignores them (git check-ignore failed)"]
     return [
         f"{rel}: ignored by git, so it would never be committed; un-ignore it "
         "(e.g. add `!docs/wiki/` then `!docs/wiki/**` at the end of .gitignore; "
         "if a parent directory such as `docs/` is ignored, narrow that rule instead)"
-        for rel in gitview.ignored(root, CONTROL_RELS)
+        for rel in hits
     ]
 
 

@@ -227,6 +227,12 @@ class PlanTests(RepoCase):
             self.assertEqual(p[key], [], key)
         self.assertEqual(p["symbols"], {})
 
+    def test_ignored_control_files_fail_closed_on_git_error(self):
+        with self._failing("check-ignore"):
+            errs = state.ignored_control_files(self.root)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("could not determine", errs[0])
+
     def test_error_none_when_healthy_or_empty_tree(self):
         self.commit("src/a.py")
         self.assertIsNone(plan.build_plan(self.root)["error"])
