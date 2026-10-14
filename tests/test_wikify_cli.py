@@ -98,6 +98,17 @@ class VerifyTests(VerifyCase):
         self.assertFalse(any("ALLOW-LIST CHANGED" in ln for ln in self.verify()[1]))
 
 
+class IgnoreNegationTests(VerifyCase):
+    def test_negation_is_a_verify_error(self):
+        self.page("x (src: src/a.py:1)\n")
+        (self.root / "docs/wiki/.wikifyignore").write_text("# c\nvendor/\n!vendor/keep.py\n")
+        rc, lines = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertTrue(
+            any("'!' negation is not supported, line 3" in ln for ln in lines), lines
+        )
+
+
 class LegacyAllowTests(VerifyCase):
     def test_plaintext_entry_honoured_with_migration_notice(self):
         self.page("Contact (src: src/a.py:1) x@example.org\n")

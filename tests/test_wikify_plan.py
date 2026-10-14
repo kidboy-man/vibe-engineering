@@ -239,6 +239,15 @@ class PlanTests(RepoCase):
         self.assertEqual(p["mode"], "full")
         self.assertIn("src/a.py", p["changed"])
 
+    def test_negation_in_ignore_is_rejected(self):
+        self.commit("src/a.py", "def a():\n    pass\n")
+        self.mark()
+        self.commit("src/b.py", "def b():\n    pass\n")
+        (self.root / "docs/wiki/.wikifyignore").write_text("src/\n!src/b.py\n")
+        p = plan.build_plan(self.root)
+        self.assertIn("rejected", p["error"])
+        self.assertEqual(p["changed"], [])
+
     def test_rejected_ignore_emits_no_path_data(self):
         self.commit("src/a.py", "def a():\n    pass\n")
         self.mark()

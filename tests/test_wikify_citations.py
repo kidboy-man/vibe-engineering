@@ -229,6 +229,33 @@ class HardeningTests(RepoCase):
         self.assertEqual(len(self.verify("x (src: src/crlf.txt:3)\n")), 1)
 
 
+class IgnoreMatcherTests(unittest.TestCase):
+    def test_semantics(self):
+        cases = [
+            ("secrets", "secrets", True),
+            ("secrets", "a/b/secrets", True),
+            ("secrets", "a/secrets/k.txt", True),
+            ("secrets", "a/mysecrets", False),
+            ("*.pem", "x/y/k.pem", True),
+            ("private/", "private/a.py", True),
+            ("private/", "src/private/a.py", True),
+            ("/private", "private/a.py", True),
+            ("/private", "src/private/a.py", False),
+            ("/private/", "src/private/a.py", False),
+            ("src/*.py", "src/a.py", True),
+            ("src/*.py", "src/sub/a.py", False),
+            ("src/*", "src/sub/a.py", True),  # matched dir covers its subtree
+            ("src/**/a.py", "src/a.py", True),
+            ("src/**/a.py", "src/x/y/a.py", True),
+            ("src/**/a.py", "lib/src/a.py", False),
+            ("gen/**", "gen/x/y.py", True),
+            ("docs", "docs2/x.py", False),
+        ]
+        for glob, path, want in cases:
+            with self.subTest(glob=glob, path=path):
+                self.assertEqual(citations.is_ignored(path, [glob]), want)
+
+
 class LoadIgnoreTests(RepoCase):
     def test_missing(self):
         self.assertEqual(citations.load_ignore(self.root), [])

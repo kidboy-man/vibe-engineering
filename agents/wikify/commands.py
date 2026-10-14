@@ -50,9 +50,15 @@ def _verify(root: Path) -> tuple[int, list[str]]:
     ignore = citations.load_ignore(root)
     errors, pages = citations.walk_wiki(root)
     if citations.ignore_status(root) == "rejected":
+        neg = citations.ignore_negations(root)
         errors.append(
-            f"{citations.IGNORE_REL}: rejected (symlink, not a regular file, not valid "
-            "UTF-8, or over 64 KiB); ignore rules were NOT applied"
+            f"{citations.IGNORE_REL}: rejected ("
+            + (
+                f"'!' negation is not supported, line {','.join(neg)}"
+                if neg
+                else "symlink, not a regular file, not valid UTF-8, or over 64 KiB"
+            )
+            + "); ignore rules were NOT applied"
         )
     errors += state.ignored_control_files(root)
     notices: list[str] = []

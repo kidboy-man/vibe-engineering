@@ -165,8 +165,17 @@ def _globs(lines: list[str]) -> list[str]:
     return [g for g in globs if g and not g.startswith("#")]
 
 
+def ignore_negations(root: Path) -> list[str]:
+    """Line numbers of unsupported ``!`` negation lines in .wikifyignore."""
+    lines = read_control_lines(Path(root) / IGNORE_REL)[0]
+    return [str(n) for n, ln in enumerate(lines, 1) if ln.strip().startswith("!")]
+
+
 def ignore_status(root: Path) -> str:
-    return read_control_lines(Path(root) / IGNORE_REL)[1]
+    lines, status = read_control_lines(Path(root) / IGNORE_REL)
+    if status == "ok" and any(ln.strip().startswith("!") for ln in lines):
+        return "rejected"  # fail closed: a negation would silently un-ignore nothing
+    return status
 
 
 def load_ignore(root: Path) -> list[str]:
@@ -174,13 +183,26 @@ def load_ignore(root: Path) -> list[str]:
 
 
 
+def _segs_match(pat: list[str], parts: list[str]) -> bool:
+    """Match ``pat`` against a leading run of ``parts``; ``**`` spans 0+ segments."""
+    if not pat:
+        return True  # pattern consumed: the rest of the path is under the match
+    if pat[0] == "**":
+        return any(_segs_match(pat[1:], parts[i:]) for i in range(len(parts) + 1))
+    return bool(parts) and fnmatch.fnmatchcase(parts[0], pat[0]) and _segs_match(pat[1:], parts[1:])
+
+
 def _ignored(path: str, glob: str) -> bool:
-    prefix = glob.rstrip("/")
-    return (
-        fnmatch.fnmatchcase(path, glob)
-        or path == prefix
-        or path.startswith(prefix + "/")
-    )
+    """gitignore-like: no ``/`` -> any path component; otherwise (leading ``/`` or not)
+    anchored at the repo root with ``*`` confined to one segment and ``**`` spanning
+    segments. A match covers the whole subtree. ``!`` negation is rejected earlier."""
+    pat = glob.lstrip("/").rstrip("/")
+    if not pat:
+        return False
+    parts = path.split("/")
+    if "/" not in pat and not glob.startswith("/"):
+        return any(fnmatch.fnmatchcase(part, pat) for part in parts)
+    return _segs_match(pat.split("/"), parts)
 
 
 def is_ignored(path: str, globs: list[str]) -> bool:

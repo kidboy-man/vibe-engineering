@@ -489,6 +489,7 @@ vibe wikify docs             # write pages under docs/wiki/sources/ only
   prefix; `init` scaffolds it comment-only). Never eligible: `AGENTS.md`,
   `CLAUDE.md`, `GEMINI.md`, `SKILL.md`, anything under `docs/wiki/`, secret paths
   and `.wikifyignore` matches; those always win over `.wikifydocs`.
+  `.wikifyignore` patterns: no `/` matches that name at any depth; a `/` inside or a leading `/` anchors at the repo root (`*` never crosses `/`, `**` spans directories); a trailing `/` means a directory. `!` negation lines are an error.
 - **Skipped, with a reason printed** (not an error): paths with whitespace,
   `` : ` ( ) [ ] < > @ \ # " ``, control characters or any Unicode `C*` character
   (`path not citable`); empty docs; docs over 1 MiB; docs that are not valid

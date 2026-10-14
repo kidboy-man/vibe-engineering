@@ -19,6 +19,7 @@ STATE = '{\n  "version": 1,\n  "covered": null\n}\n'
 IGNORE = (
     "# Repo paths the wiki must not cite, one glob per line.\n"
     "# Example: a vendored directory such as third_party/\n"
+    "# A name without / matches at any depth; a / anchors at the repo root; no ! lines.\n"
 )
 DOCS = (
     "# Extra docs to outline in docs/wiki/sources, one glob per line.\n"
