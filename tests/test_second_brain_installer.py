@@ -1550,9 +1550,7 @@ class SecondBrainCursorMcpTests(unittest.TestCase):
             self.assertNotIn("qmd", result.get("mcpServers", {}))
             self.assertEqual(result["mcpServers"]["other"], {"command": "keep-me"})
 
-    def test_uninstall_removes_qmd_entry_matching_claude_behavior(self):
-        """uninstall's shared _strip_qmd_mcp removes any qmd entry regardless of
-        shape, matching Claude's existing (shape-agnostic) uninstall behavior."""
+    def test_uninstall_preserves_foreign_qmd_entry_in_cursor_mcp(self):
         with tempfile.TemporaryDirectory() as home_str:
             home = Path(home_str)
             install(home=str(home), dry_run=False, yes=True, setup_deps=False)
@@ -1564,7 +1562,38 @@ class SecondBrainCursorMcpTests(unittest.TestCase):
             uninstall(home=str(home), dry_run=False, yes=True)
 
             result = json.loads(mcp_path.read_text(encoding="utf-8"))
-            self.assertNotIn("qmd", result.get("mcpServers", {}))
+            self.assertEqual(result["mcpServers"]["qmd"], {"command": "my-own", "args": ["mcp"]})
+
+    def test_uninstall_preserves_foreign_qmd_entry_in_claude_settings(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            settings = home / ".claude" / "settings.json"
+            settings.parent.mkdir()
+            foreign = {"command": "my-own", "args": ["mcp"]}
+            settings.write_text(json.dumps({"mcpServers": {"qmd": foreign}}), encoding="utf-8")
+            (home / "second-brain").mkdir()  # make an install appear present
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            self.assertEqual(json.loads(settings.read_text(encoding="utf-8"))["mcpServers"]["qmd"], foreign)
+
+    def test_uninstall_backs_up_and_leaves_no_temp_files_when_rewriting_config(self):
+        with tempfile.TemporaryDirectory() as home_str:
+            home = Path(home_str)
+            install(home=str(home), dry_run=False, yes=True, setup_deps=False)
+            mcp_path = home / ".cursor" / "mcp.json"
+            config = json.loads(mcp_path.read_text(encoding="utf-8"))
+            config["mcpServers"]["other"] = {"command": "keep-me"}
+            before = json.dumps(config)
+            mcp_path.write_text(before, encoding="utf-8")
+
+            uninstall(home=str(home), dry_run=False, yes=True)
+
+            backups = list((home / ".cursor" / "backups").rglob("mcp.json"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), before)
+            leftovers = [p.name for p in (home / ".cursor").iterdir() if p.name.endswith(".tmp") or p.name.startswith(".mcp")]
+            self.assertEqual(leftovers, [])
 
     @patch("agents.kits.second_brain.installer.shutil.which")
     @patch("agents.kits.second_brain.installer.subprocess.run")
@@ -1871,6 +1900,62 @@ class SecondBrainDoctorDepTests(unittest.TestCase):
 
 class SecondBrainQmdAutoInstallTests(unittest.TestCase):
     """qmd auto-install behavior during install."""
+
+    def _cli_install_calls_npm(self, extra_args, qmd_present=False, all_calls=None):
+        import shutil as real_shutil
+
+        from agents import cli
+
+        npm_calls = []
+        real_run = subprocess.run
+        real_which = real_shutil.which
+
+        def fake_which(name, *a, **kw):
+            if name == "qmd":
+                return "/fake/qmd" if qmd_present else None
+            if name in ("npm", "node"):
+                return f"/fake/{name}"
+            return real_which(name, *a, **kw)
+
+        def fake_run(cmd, *a, **kw):
+            if cmd and cmd[0] == "/fake/npm":
+                npm_calls.append([*cmd, kw.get("timeout")])
+                return subprocess.CompletedProcess(cmd, 1, "", "")
+            if cmd and cmd[0] == "qmd":
+                if all_calls is not None:
+                    all_calls.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if cmd and cmd[0] == "node":
+                return subprocess.CompletedProcess(cmd, 0, "v22.0.0", "")
+            return real_run(cmd, *a, **kw)
+
+        with tempfile.TemporaryDirectory() as home_str:
+            with patch("agents.kits.second_brain.qmd.shutil.which", fake_which), \
+                 patch("agents.kits.second_brain.installer.shutil.which", fake_which), \
+                 patch("agents.kits.second_brain.qmd.subprocess.run", fake_run), \
+                 patch("agents.kits.second_brain.installer.subprocess.run", fake_run), \
+                 redirect_stdout(io.StringIO()):
+                cli.main(["kits", "second-brain", "install", "--yes", "--home", home_str, *extra_args])
+        return npm_calls
+
+    def test_cli_install_yes_never_runs_npm_without_setup_deps(self):
+        self.assertEqual(self._cli_install_calls_npm([]), [])
+
+    def test_cli_default_install_registers_collection_when_qmd_present_without_npm(self):
+        qmd_calls = []
+        npm_calls = self._cli_install_calls_npm([], qmd_present=True, all_calls=qmd_calls)
+        self.assertEqual(npm_calls, [])
+        self.assertTrue(any(c[:3] == ["qmd", "collection", "add"] for c in qmd_calls), qmd_calls)
+        self.assertIn(["qmd", "update"], qmd_calls)
+
+    def test_cli_no_setup_deps_is_accepted_and_runs_nothing(self):
+        self.assertEqual(self._cli_install_calls_npm(["--no-setup-deps"]), [])
+
+    def test_cli_setup_deps_runs_npm_with_timeout(self):
+        calls = self._cli_install_calls_npm(["--setup-deps"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][:4], ["/fake/npm", "install", "-g", "@tobilu/qmd"])
+        self.assertIsNotNone(calls[0][4])  # timeout set
 
     @patch("agents.kits.second_brain.installer._setup_qmd")
     def test_install_skips_qmd_when_setup_deps_false(self, mock_setup):

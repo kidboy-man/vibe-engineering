@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import unittest
@@ -7,6 +8,15 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "cli_help"
+
+
+def _plain_env() -> dict:
+    """Environment with colour forcing removed so argparse help is plain text."""
+    env = {
+        k: v for k, v in os.environ.items() if k not in ("FORCE_COLOR", "PYTHON_COLORS")
+    }
+    env["NO_COLOR"] = "1"
+    return env
 
 
 class CliHelpContractTests(unittest.TestCase):
@@ -22,6 +32,7 @@ class CliHelpContractTests(unittest.TestCase):
             [sys.executable, "-m", "agents.cli", *args, "--help"],
             capture_output=True,
             text=True,
+            env=_plain_env(),
         )
         self.assertEqual(result.returncode, 0, f"help failed: {result.stderr}")
         return result.stdout
@@ -42,6 +53,15 @@ class CliHelpContractTests(unittest.TestCase):
     def test_upgrade_help(self):
         self._assert_matches_fixture("upgrade_help.txt", "upgrade")
 
+    def test_wikify_help(self):
+        self._assert_matches_fixture("wikify_help.txt", "wikify")
+
+    def test_wikify_link_help(self):
+        self._assert_matches_fixture("wikify_link_help.txt", "wikify", "link")
+
+    def test_wikify_docs_help(self):
+        self._assert_matches_fixture("wikify_docs_help.txt", "wikify", "docs")
+
     def test_kits_help(self):
         self._assert_matches_fixture("kits_help.txt", "kits")
 
@@ -58,6 +78,12 @@ class CliHelpContractTests(unittest.TestCase):
         self._assert_matches_fixture(
             "kits_guardrails_install_help.txt", "kits", "guardrails", "install"
         )
+
+    def test_kits_wikify_help(self):
+        self._assert_matches_fixture("kits_wikify_help.txt", "kits", "wikify")
+
+    def test_kits_wikify_install_help(self):
+        self._assert_matches_fixture("kits_wikify_install_help.txt", "kits", "wikify", "install")
 
     def test_kits_claude_code_help(self):
         self._assert_matches_fixture("kits_claude_code_help.txt", "kits", "claude-code")
@@ -146,6 +172,7 @@ class CliDispatchContractTests(unittest.TestCase):
             [sys.executable, "-m", "agents.cli", "kits", "list"],
             capture_output=True,
             text=True,
+            env=_plain_env(),
         )
         self.assertEqual(result.returncode, 0)
         lines = result.stdout.strip().splitlines()
@@ -161,6 +188,7 @@ class CliDispatchContractTests(unittest.TestCase):
             [sys.executable, "-m", "agents.cli", "kits", "no-such-kit"],
             capture_output=True,
             text=True,
+            env=_plain_env(),
         )
         self.assertNotEqual(result.returncode, 0)
 
@@ -178,6 +206,7 @@ class CliDispatchContractTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            env=_plain_env(),
         )
 
         self.assertNotEqual(result.returncode, 0)
@@ -289,6 +318,7 @@ class SecondBrainCliEnableHookWiringTests(unittest.TestCase):
             [sys.executable, "-m", "agents.cli", "kits", "second-brain", "enable-hook", "--help"],
             capture_output=True,
             text=True,
+            env=_plain_env(),
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("enable-hook", result.stdout)
@@ -298,6 +328,7 @@ class SecondBrainCliEnableHookWiringTests(unittest.TestCase):
             [sys.executable, "-m", "agents.cli", "kits", "claude-code", "enable-hook", "--help"],
             capture_output=True,
             text=True,
+            env=_plain_env(),
         )
         self.assertNotEqual(result.returncode, 0)
 
@@ -306,6 +337,7 @@ class SecondBrainCliEnableHookWiringTests(unittest.TestCase):
             [sys.executable, "-m", "agents.cli", "kits", "opencode", "enable-hook", "--help"],
             capture_output=True,
             text=True,
+            env=_plain_env(),
         )
         self.assertNotEqual(result.returncode, 0)
 

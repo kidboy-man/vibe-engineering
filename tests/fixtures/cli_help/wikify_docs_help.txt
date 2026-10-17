@@ -1,0 +1,5 @@
+usage: vibe wikify docs [-h] [--dry-run]
+
+options:
+  -h, --help  show this help message and exit
+  --dry-run   Show the pages without writing files

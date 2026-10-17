@@ -1,13 +1,14 @@
 usage: vibe kits second-brain install [-h] [--home HOME] [--dry-run] [--yes]
-                                      [--no-settings] [--no-setup-deps]
+                                      [--no-settings] [--setup-deps]
                                       [--no-hooks]
 
 options:
-  -h, --help       show this help message and exit
-  --home HOME      Target config base directory (default: $XDG_CONFIG_HOME or
-                   current user's home)
-  --dry-run        Show changes without writing files
-  --yes, -y        Apply without interactive confirmation
-  --no-settings    Do not merge the safe settings fragment
-  --no-setup-deps  Do not auto-install qmd or other dependencies
-  --no-hooks       Skip the proactive SessionStart hook / CLAUDE.md prompt
+  -h, --help     show this help message and exit
+  --home HOME    Target config base directory (default: $XDG_CONFIG_HOME or
+                 current user's home)
+  --dry-run      Show changes without writing files
+  --yes, -y      Apply without interactive confirmation
+  --no-settings  Do not merge the safe settings fragment
+  --setup-deps   Also install qmd with npm when missing (network + global
+                 install); never implied by --yes
+  --no-hooks     Skip the proactive SessionStart hook / CLAUDE.md prompt

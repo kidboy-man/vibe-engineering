@@ -220,9 +220,17 @@ def _confirm(prompt: str) -> bool:
         return False
 
 
-def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
+NPM_INSTALL_TIMEOUT = 600  # seconds
+QMD_CMD_TIMEOUT = 300
+
+
+def _setup_qmd(vault_path: Path, yes: bool = False, allow_install: bool = True) -> int:
     """Ensure qmd, the vault collection, and its BM25 index are ready."""
     if not shutil.which("qmd"):
+        if not allow_install:
+            print("[second-brain] qmd not found; pass --setup-deps to install it with npm "
+                  "(network + global install), or run: npm install -g @tobilu/qmd")
+            return 0
         ok_node, msg_node = _check_min_version("node", ["--version"], QMD_MIN_NODE_MAJOR)
         if not ok_node:
             print(f"[second-brain] {msg_node}")
@@ -238,7 +246,11 @@ def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
         if not yes and not _confirm("  Proceed? [y/N] "):
             print("  Skipped. Run manually: npm install -g @tobilu/qmd")
             return 1
-        r = subprocess.run([npm, "install", "-g", "@tobilu/qmd"], check=False)
+        try:
+            r = subprocess.run([npm, "install", "-g", "@tobilu/qmd"], check=False, timeout=NPM_INSTALL_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            print("[second-brain] npm install timed out. Run manually: npm install -g @tobilu/qmd")
+            return 1
         if r.returncode != 0:
             print("[second-brain] npm install failed. Run manually: npm install -g @tobilu/qmd")
             return 1
@@ -250,22 +262,27 @@ def _setup_qmd(vault_path: Path, yes: bool = False) -> int:
         return 1
 
     wiki_path = (vault_path / "wiki").resolve()
-    if not collection_match:
-        added = subprocess.run(
-            ["qmd", "collection", "add", str(wiki_path), "--name", QMD_COLLECTION_NAME],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if added.returncode != 0:
-            print("[second-brain] qmd collection add failed.")
-            if added.stderr:
-                print(f"  {added.stderr.strip()}")
-            return 1
+    try:
+        if not collection_match:
+            added = subprocess.run(
+                ["qmd", "collection", "add", str(wiki_path), "--name", QMD_COLLECTION_NAME],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=QMD_CMD_TIMEOUT,
+            )
+            if added.returncode != 0:
+                print("[second-brain] qmd collection add failed.")
+                if added.stderr:
+                    print(f"  {added.stderr.strip()}")
+                return 1
 
-    updated = subprocess.run(
-        ["qmd", "update"], check=False, capture_output=True, text=True
-    )
+        updated = subprocess.run(
+            ["qmd", "update"], check=False, capture_output=True, text=True, timeout=QMD_CMD_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        print(f"[second-brain] qmd timed out after {QMD_CMD_TIMEOUT}s; rerun install.")
+        return 1
     if updated.returncode != 0:
         print("[second-brain] qmd update failed.")
         if updated.stderr:
@@ -377,7 +394,7 @@ def install(
     dry_run: bool = False,
     yes: bool = False,
     merge_settings: bool = True,
-    setup_deps: bool = False,
+    setup_deps: bool | None = False,
     enable_hooks: bool = True,
     **kwargs,
 ) -> int:
@@ -445,7 +462,9 @@ def install(
     _git_init(paths.vault)
     print("git repo ready")
 
-    if setup_deps and _setup_qmd(paths.vault, yes=yes) != 0:
+    # False: skip qmd entirely; None: local collection/index setup only;
+    # True: additionally allow the npm install of a missing qmd.
+    if setup_deps is not False and _setup_qmd(paths.vault, yes=yes, allow_install=bool(setup_deps)) != 0:
         state = _manifest_state(managed, status="incomplete", phase="qmd")
         core.write_text(paths.manifest, json.dumps(state, indent=2) + "\n")
         print("qmd setup incomplete; re-run install after resolving the error")

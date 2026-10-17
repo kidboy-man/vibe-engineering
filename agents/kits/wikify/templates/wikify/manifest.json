@@ -1,0 +1,9 @@
+{
+  "kit": "wikify",
+  "version": "0.1.0",
+  "description": "Push-gate hook that blocks an agent's git push while docs/wiki is stale, for Claude Code, Codex CLI and Cursor.",
+  "managed_files": [
+    "hooks/vibe-wikify/wikify_guard.py"
+  ],
+  "secret_policy": "Never reads credentials; hook only reads git metadata; no network."
+}
