@@ -21,6 +21,8 @@ from agents import merge_strategies as ms
 MANIFEST_FILE = core.MANIFEST_FILE
 KIT_NAME = "wikify"
 GUARD_REL = "hooks/vibe-wikify/wikify_guard.py"
+SKILL_REL = "skills/wikify-adopt/SKILL.md"
+SKILL_KINDS = {"claude"}  # agents with a skills directory this kit knows how to use
 
 CLAUDE_MATCHER = "Bash"
 CODEX_MATCHER = "^Bash$"
@@ -216,6 +218,8 @@ def install(
 
     for agent in present:
         print(f"install {agent.dirname}/{GUARD_REL}")
+        if agent.kind in SKILL_KINDS:
+            print(f"install {agent.dirname}/{SKILL_REL}")
         print(f"register hooks in {agent.dirname}/{agent.config_name}")
     print(f"write {paths.manifest_path}")
     if dry_run:
@@ -233,6 +237,11 @@ def install(
         if core.install_copy_style_file(paths.template_dir / GUARD_REL, agent.dir(paths) / GUARD_REL, agent.dir(paths)):
             print(f"installed {agent.dirname}/{GUARD_REL}")
         managed.add(f"{agent.dirname}/{GUARD_REL}")
+        if agent.kind in SKILL_KINDS:
+            skill_dst = agent.dir(paths) / SKILL_REL
+            if core.install_copy_style_file(paths.template_dir / SKILL_REL, skill_dst, agent.dir(paths)):
+                print(f"installed {agent.dirname}/{SKILL_REL}")
+            managed.add(f"{agent.dirname}/{SKILL_REL}")
         _register(paths, agent)
 
     core.write_text(paths.manifest_path, json.dumps(core.manifest_state(KIT_NAME, managed), indent=2) + "\n")
@@ -244,9 +253,10 @@ def diff_kit(home: str | None = None) -> int:
     paths = _paths(home)
     any_diff = False
     for agent in AGENTS:
-        dst = agent.dir(paths) / GUARD_REL
-        if dst.exists() and core.diff_copy_style(paths.template_dir / GUARD_REL, dst, f"{agent.dirname}/{GUARD_REL}"):
-            any_diff = True
+        for rel in (GUARD_REL, SKILL_REL) if agent.kind in SKILL_KINDS else (GUARD_REL,):
+            dst = agent.dir(paths) / rel
+            if dst.exists() and core.diff_copy_style(paths.template_dir / rel, dst, f"{agent.dirname}/{rel}"):
+                any_diff = True
     if not any_diff:
         print("managed files match kit templates")
     return 0
@@ -271,11 +281,12 @@ def doctor(home: str | None = None) -> int:
         print("manifest: installed")
     else:
         print("manifest: not installed")
-    if (paths.template_dir / GUARD_REL).exists():
+    missing = [rel for rel in (GUARD_REL, SKILL_REL) if not (paths.template_dir / rel).exists()]
+    if not missing:
         print("templates: ok")
-    else:
+    for rel in missing:
         ok = False
-        print(f"missing template: {GUARD_REL}")
+        print(f"missing template: {rel}")
     print(
         "note: this is a convenience gate, not a security control; pushes typed in a plain terminal "
         "are not covered and the hook fails open on errors"
@@ -333,6 +344,7 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
     for agent in AGENTS:
         if agent.present(paths):
             core.prune_empty_dirs(agent.dir(paths) / "hooks" / "vibe-wikify", agent.dir(paths) / "hooks")
+            core.prune_empty_dirs(agent.dir(paths) / "skills" / "wikify-adopt", agent.dir(paths) / "skills")
     paths.manifest_path.unlink(missing_ok=True)
     try:
         paths.manifest_dir.rmdir()

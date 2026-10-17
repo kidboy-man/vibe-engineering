@@ -15,6 +15,7 @@ from agents.kits.wikify.installer import diff_kit, doctor, install, uninstall
 
 REL = "hooks/vibe-wikify/wikify_guard.py"
 GUARD_REL = "hooks/vibe-guardrails/guard.py"
+SKILL_REL = "skills/wikify-adopt/SKILL.md"
 
 
 def make_home(tmp: str, *agents: str) -> Path:
@@ -149,7 +150,9 @@ class InstallTests(unittest.TestCase):
             do_install(home)
             manifest = read_json(home / ".vibe-wikify" / ".vibe-engineering-manifest.json")
             self.assertEqual(manifest["kit"], "wikify")
-            self.assertEqual(manifest["managed_files"], [f".claude/{REL}", f".cursor/{REL}"])
+            self.assertEqual(
+                manifest["managed_files"], [f".claude/{REL}", f".claude/{SKILL_REL}", f".cursor/{REL}"]
+            )
 
 
 class UninstallTests(unittest.TestCase):
@@ -301,6 +304,76 @@ class CoexistenceTests(unittest.TestCase):
             self.assertEqual(len(commands()), 1)
             self.assertIn("vibe-wikify", commands()[0])
             self.assertTrue((home / ".claude" / REL).exists())
+
+
+
+class SkillTests(unittest.TestCase):
+    TEMPLATE = Path(wikify.__file__).resolve().parent / "templates" / "wikify" / SKILL_REL
+
+    def test_skill_is_a_managed_template(self):
+        manifest = read_json(self.TEMPLATE.parents[2] / "manifest.json")
+        self.assertIn(SKILL_REL, manifest["managed_files"])
+        self.assertTrue(self.TEMPLATE.is_file())
+
+    def test_install_puts_the_skill_only_in_agents_that_exist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude", ".cursor")
+            rc, out = do_install(home)
+            self.assertEqual(rc, 0)
+            self.assertTrue((home / ".claude" / SKILL_REL).is_file())
+            self.assertFalse((home / ".cursor" / "skills").exists())
+            self.assertIn(f".claude/{SKILL_REL}", read_json(home / ".vibe-wikify" / wikify.MANIFEST_FILE)["managed_files"])
+
+    def test_dry_run_lists_the_skill_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude")
+            rc, out = run(install, home=str(home), dry_run=True, yes=True)
+            self.assertIn(f"install .claude/{SKILL_REL}", out)
+            self.assertEqual(list((home / ".claude").iterdir()), [])
+
+    def test_uninstall_removes_the_skill_but_keeps_modified_or_foreign_skills(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude")
+            other = home / ".claude" / "skills" / "mine" / "SKILL.md"
+            other.parent.mkdir(parents=True)
+            other.write_text("mine")
+            do_install(home)
+            rc, out = run(uninstall, home=str(home), yes=True)
+            self.assertEqual(rc, 0)
+            self.assertFalse((home / ".claude" / "skills" / "wikify-adopt").exists())
+            self.assertEqual(other.read_text(), "mine")
+            do_install(home)
+            skill = home / ".claude" / SKILL_REL
+            skill.write_text("edited")
+            run(uninstall, home=str(home), yes=True)
+            self.assertEqual(skill.read_text(), "edited")
+
+    def test_diff_reports_a_changed_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude")
+            do_install(home)
+            (home / ".claude" / SKILL_REL).write_text("edited")
+            rc, out = run(diff_kit, home=str(home))
+            self.assertIn("skills/wikify-adopt/SKILL.md", out)
+
+    def test_skill_text_is_portable_and_only_names_real_commands(self):
+        text = self.TEMPLATE.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("---\nname: wikify-adopt\n"))
+        for bad in ("/home/", "/Users/", "C:\\", "token", "password", "api_key", "api-key"):
+            self.assertNotIn(bad, text)
+        import re
+        real = {"init", "plan", "verify", "mark", "link", "docs", "adopt"}
+        used = set(re.findall(r"vibe wikify ([a-z]+)", text))
+        self.assertTrue(used)
+        self.assertLessEqual(used, real)
+        for sentence in (
+            "never rewrite migrated prose",
+            "never invent facts",
+            "contradiction",
+            "untrusted",
+            "one bounded context",
+        ):
+            self.assertIn(sentence, text.lower(), sentence)
 
 
 if __name__ == "__main__":

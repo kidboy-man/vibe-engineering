@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-from agents.wikify import agentmap, citations, docs_cmd, docs_inventory, gitview, init_cmd, plan, pointer, scan, state
+from agents.wikify import adopt_cmd, agentmap, citations, docs_cmd, docs_inventory, gitview, init_cmd, plan, pointer, scan, state
 
 
 def _human_blocks(text: str) -> list[tuple[int, str]]:
@@ -221,5 +221,17 @@ def cmd_wikify(args: argparse.Namespace, cwd: str | Path | None = None) -> int:
         return pointer.cmd_link(cwd, args.dry_run)
     if sub == "docs":
         return docs_cmd.cmd_docs(cwd, args.dry_run)
+    if sub == "adopt":
+        return adopt_cmd.cmd_adopt(
+            cwd,
+            map_file=args.map_file,
+            include=args.include,
+            exclude=args.exclude,
+            apply=args.apply,
+            report=args.report,
+            rewrite_refs=args.rewrite_refs,
+            prune_sources=args.prune_sources,
+            force=args.force,
+        )
     print(f"unknown wikify command: {sub}")
     return 2

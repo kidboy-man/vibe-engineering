@@ -111,6 +111,33 @@ def status_paths(root: Path, rel: str) -> list[str] | None:
     return out
 
 
+def dirty_paths(root: Path) -> list[str] | None:
+    """Paths ``git status`` lists (staged, unstaged, untracked); None on error."""
+    result = run_git(root, "status", "--porcelain", "-z", "--untracked-files=all")
+    if result.returncode != 0:
+        return None
+    out: list[str] = []
+    entries = iter(result.stdout.split("\0"))
+    for entry in entries:
+        if not entry:
+            continue
+        out.append(entry[3:])
+        if "R" in entry[:2] or "C" in entry[:2]:
+            out.append(next(entries, ""))  # rename/copy source path follows
+    return out
+
+
+def is_clean(root: Path, ignore: tuple[str, ...] = ()) -> bool:
+    """True when nothing but ``ignore`` paths shows in ``git status``."""
+    paths = dirty_paths(root)
+    return paths is not None and all(p in ignore for p in paths)
+
+
+def on_branch(root: Path) -> bool:
+    """False on a detached HEAD (or any error)."""
+    return run_git(root, "symbolic-ref", "-q", "HEAD").returncode == 0
+
+
 def show_head(root: Path, rel: str) -> str | None:
     """Content of ``rel`` at HEAD, so uncommitted edits never count."""
     result = run_git(root, "show", f"HEAD:{rel}")

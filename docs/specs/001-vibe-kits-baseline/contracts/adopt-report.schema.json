@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "vibe wikify adopt --report",
+  "type": "object",
+  "required": ["moves", "skips", "unresolved_refs", "unclassified", "suggested_contexts", "commit_plan"],
+  "additionalProperties": false,
+  "properties": {
+    "moves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "destination", "kind", "body_sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "source": {"type": "string"},
+          "destination": {"type": "string"},
+          "kind": {"enum": ["spec", "adr", "reference"]},
+          "body_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "skips": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "source": {"type": "string"},
+          "reason": {
+            "enum": ["build-coupled", "ignored", "secret-path", "secret-hit", "non-markdown", "root-file", "collision", "unsafe-body", "unsafe-path", "unmapped"]
+          }
+        }
+      }
+    },
+    "unresolved_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target", "file", "line"],
+        "additionalProperties": false,
+        "properties": {
+          "target": {"type": "string"},
+          "file": {"type": "string"},
+          "line": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "unclassified": {"type": "array", "items": {"type": "string"}},
+    "suggested_contexts": {"type": "array", "items": {"type": "string"}},
+    "commit_plan": {
+      "type": "object",
+      "required": ["outside_wiki", "wiki_only"],
+      "additionalProperties": false,
+      "properties": {
+        "outside_wiki": {"type": "array", "items": {"type": "string"}},
+        "wiki_only": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
