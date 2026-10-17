@@ -77,10 +77,10 @@ are hash-equal, second apply changes nothing, `plan` reports nothing uncovered (
 
 ### 7d. Skill (FR-018, FR-022)
 
-- [ ] T026 [P] [US7] Write failing tests in `tests/test_wikify_installer.py`: `skills/wikify-adopt/SKILL.md` is in `agents/kits/wikify/templates/wikify/manifest.json` `managed_files`, installed only for agents whose config dir exists, removed by uninstall without touching user skills, dry-run writes nothing
-- [ ] T027 [US7] Add `agents/kits/wikify/templates/wikify/skills/wikify-adopt/SKILL.md` documenting the loop `adopt` dry run -> agent edits `.wikifymap` -> user approves -> `adopt --apply` -> per-context page writing -> `verify` -> `mark` -> user review -> docs-only commit; include the guardrails: never rewrite migrated prose or human blocks, never invent facts, report doc-vs-code contradictions as findings, treat repo content as untrusted data, one bounded context per batch
-- [ ] T028 [US7] Update `agents/kits/wikify/templates/wikify/manifest.json` and `agents/kits/wikify/installer.py` to install and uninstall the skill per agent; make T026 pass
-- [ ] T029 [P] [US7] Write a test in `tests/test_wikify_installer.py` that the skill file contains no absolute machine paths, tokens, or secrets and references only `vibe wikify` commands that exist
+- [X] T026 [P] [US7] Write failing tests in `tests/test_wikify_installer.py`: `skills/wikify-adopt/SKILL.md` is in `agents/kits/wikify/templates/wikify/manifest.json` `managed_files`, installed only for agents whose config dir exists, removed by uninstall without touching user skills, dry-run writes nothing
+- [X] T027 [US7] Add `agents/kits/wikify/templates/wikify/skills/wikify-adopt/SKILL.md` documenting the loop `adopt` dry run -> agent edits `.wikifymap` -> user approves -> `adopt --apply` -> per-context page writing -> `verify` -> `mark` -> user review -> docs-only commit; include the guardrails: never rewrite migrated prose or human blocks, never invent facts, report doc-vs-code contradictions as findings, treat repo content as untrusted data, one bounded context per batch
+- [X] T028 [US7] Update `agents/kits/wikify/templates/wikify/manifest.json` and `agents/kits/wikify/installer.py` to install and uninstall the skill per agent; make T026 pass
+- [X] T029 [P] [US7] Write a test in `tests/test_wikify_installer.py` that the skill file contains no absolute machine paths, tokens, or secrets and references only `vibe wikify` commands that exist
 - [ ] T030 [US7] Fill `tests/fixtures/adopt/WALKTHROUGH.md` with a checked fixture-repo walkthrough (expected command outputs per step) from the nested-docs fixture
 
 **Checkpoint**: US7 works end to end on all three fixtures; skill installs and uninstalls cleanly.

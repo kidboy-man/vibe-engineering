@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -621,6 +622,55 @@ class RewriteApplyTests(ApplyCase):
         self.assertIn("src/app.py", {r["file"] for r in data["unresolved_refs"]})  # code comment: only listed
         self.assertIn("docs/overview.md", data["commit_plan"]["outside_wiki"])
         self.cycle(rewrite_refs=True)
+
+
+@unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
+class SymlinkSafetyTests(ApplyCase):
+    def test_symlinked_index_is_refused_and_the_target_is_untouched(self):
+        self.build("flat-docs")
+        outside = self.root.parent / (self.root.name + "-outside.md")
+        outside.write_text("# secret\n")
+        self.addCleanup(outside.unlink)
+        index = self.root / "docs/wiki/index.md"
+        index.unlink()
+        index.symlink_to(outside)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "link")
+        self.write_map("docs/** -> w/\n")
+        rc, out = self.apply()
+        self.assertEqual(rc, 1)
+        self.assertIn("symlink", out)
+        self.assertEqual(outside.read_text(), "# secret\n")
+        self.assertTrue((self.root / "docs/overview.md").exists())
+
+    def test_symlinked_sources_dir_is_refused_and_nothing_outside_is_deleted(self):
+        self.build("flat-docs")
+        outside = self.root.parent / (self.root.name + "-sources")
+        (outside / "docs").mkdir(parents=True)
+        victim = outside / "docs" / "overview.md"
+        victim.write_text(docs_inventory.MARKER + "\n# victim\n")
+        self.addCleanup(lambda: (victim.unlink(), (outside / "docs").rmdir(), outside.rmdir()))
+        (self.root / "docs/wiki/sources").symlink_to(outside)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "link")
+        self.write_map("docs/overview.md -> w/\n")
+        rc, out = self.apply()
+        self.assertEqual(rc, 1)
+        self.assertTrue(victim.exists())
+        self.assertTrue((self.root / "docs/overview.md").exists())
+
+    def test_symlinked_destination_directory_is_refused(self):
+        self.build("flat-docs")
+        outside = self.root.parent / (self.root.name + "-dest")
+        outside.mkdir()
+        self.addCleanup(outside.rmdir)
+        (self.root / "docs/wiki/w").symlink_to(outside)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "link")
+        self.write_map("docs/** -> w/\n")
+        rc, out = self.apply()
+        self.assertEqual(rc, 1)
+        self.assertEqual(list(outside.iterdir()), [])
 
 
 if __name__ == "__main__":

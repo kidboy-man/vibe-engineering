@@ -104,8 +104,16 @@ def cmd_adopt(
     root = _root(cwd)
     if root is None:
         return 1
-    if not (root / INDEX_REL).is_file():
+    try:
+        index_mode = os.lstat(root / INDEX_REL).st_mode
+    except FileNotFoundError:
         print(f"{INDEX_REL} is missing; run vibe wikify init first")
+        return 1
+    except OSError as exc:
+        print(f"refused: cannot inspect {INDEX_REL}: {type(exc).__name__}\nnothing written")
+        return 1
+    if not stat.S_ISREG(index_mode):
+        print(f"refused: {INDEX_REL} is a symlink or not a regular file\nnothing written")
         return 1
     try:
         state.check_wiki_path(root)
@@ -178,6 +186,41 @@ def _dirs_safe(root: Path, rel: str) -> bool:
     return True
 
 
+def _read_wiki_text(root: Path, rel: str) -> str | None:
+    """UTF-8 text of ``docs/wiki/<rel>``; None unless it is a regular file reached through plain directories."""
+    if not _dirs_safe(root, rel):
+        return None
+    data = ap._read_body(root, WIKI_DIR + rel)
+    try:
+        return None if data is None else data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _remove_wiki_file(root: Path, rel: str) -> bool:
+    """Unlink ``docs/wiki/<rel>`` only when no path component is a symlink and it is a regular file."""
+    path = root / WIKI_DIR / rel
+    if not _dirs_safe(root, rel):
+        return False
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return False
+        path.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _sources_ok(root: Path) -> bool:
+    try:
+        mode = os.lstat(root / WIKI_DIR / "sources").st_mode
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return stat.S_ISDIR(mode)
+
+
 def _body(root: Path, c: ap.Candidate) -> str | None:
     data = ap._read_body(root, WIKI_DIR + c.destination if c.moved else c.source)
     if data is None:
@@ -195,43 +238,36 @@ def _outline_cleanup(root: Path, moves: list[ap.Candidate], prune: bool) -> tupl
     removed: list[str] = []
     gone = {di.page_rel(c.source) for c in moves}
     for rel in sorted(gone):
-        path = root / WIKI_DIR / rel
-        if _is_generated_file(path):
-            path.unlink()
+        if _is_generated_file(root, rel) and _remove_wiki_file(root, rel):
             removed.append(rel)
-    index = root / WIKI_DIR / di.INDEX_PAGE
-    if removed and _is_generated_file(index):
+    index = di.INDEX_PAGE
+    if removed and _is_generated_file(root, index):
         links = {"](" + rel[len("sources/"):] + ")" for rel in removed}
-        keep = [ln for ln in index.read_text(encoding="utf-8").split("\n") if not any(l in ln for l in links)]
+        text = _read_wiki_text(root, index) or ""
+        keep = [ln for ln in text.split("\n") if not any(l in ln for l in links)]
         if any(ln.startswith("- [") for ln in keep):
-            _write_atomic(index, "\n".join(keep))
-        else:
-            index.unlink()
-            removed.append(di.INDEX_PAGE)
+            _write_atomic(root / WIKI_DIR / index, "\n".join(keep))
+        elif _remove_wiki_file(root, index):
+            removed.append(index)
     pages, _ = di.expected_pages(root)
     expected = {WIKI_DIR + rel for rel in pages if rel not in gone}
     if not any(rel != di.INDEX_PAGE for rel in pages if rel not in gone):
         expected.discard(WIKI_DIR + di.INDEX_PAGE)
     stale = [rel[len(WIKI_DIR):] for rel in docs_cmd._stale(root, expected)]
     if prune:
-        for rel in stale:
-            (root / WIKI_DIR / rel).unlink(missing_ok=True)
-        removed += stale
+        removed += [rel for rel in stale if _remove_wiki_file(root, rel)]
     _prune_empty(root / WIKI_DIR / "sources")
     return removed, [] if prune else stale
 
 
-def _is_generated_file(path: Path) -> bool:
-    try:
-        if path.is_symlink() or not path.is_file():
-            return False
-        data = docs_cmd._read(path)
-    except OSError:
-        return False
-    return data is not None and docs_cmd._is_generated(data)
+def _is_generated_file(root: Path, rel: str) -> bool:
+    text = _read_wiki_text(root, rel)
+    return text is not None and text.split("\n", 1)[0].rstrip("\r") == di.MARKER
 
 
 def _prune_empty(top: Path) -> None:
+    if top.is_symlink() or not top.is_dir():
+        return
     for dirpath, _, _ in os.walk(top, topdown=False):
         if Path(dirpath) != top:
             try:
@@ -272,7 +308,11 @@ def _apply(root: Path, plan: ap.Plan, prune_sources: bool, rewrite: bool = False
             return 1
         pages.append(adopt_map.Page(c.destination, c.source, body))
     index_path = root / INDEX_REL
-    planned = adopt_map.plan_map(index_path.read_text(encoding="utf-8"), pages)
+    index_before = _read_wiki_text(root, "index.md")
+    if index_before is None or not _sources_ok(root):
+        print("refused: index.md or sources/ is a symlink or not plain; nothing written")
+        return 1
+    planned = adopt_map.plan_map(index_before, pages)
     if isinstance(planned, str):
         print(f"refused: {_safe(planned)}\nnothing written")
         return 1
@@ -307,15 +347,15 @@ def _apply(root: Path, plan: ap.Plan, prune_sources: bool, rewrite: bool = False
     for rel, text in sorted(extra.items()):
         (root / WIKI_DIR / rel).parent.mkdir(parents=True, exist_ok=True)
         _write_atomic(root / WIKI_DIR / rel, text, exclusive=True)
-    if index_text != index_path.read_text(encoding="utf-8"):
+    if index_text != index_before:
         _write_atomic(index_path, index_text)
     edited = _rewrite_incoming(root, moves, new_paths) if rewrite else []
     for rel in edited:
         print(f"rewrote links in {_safe(rel)} (staged)")
     removed, stale = _outline_cleanup(root, moves, prune_sources)
-    current = index_path.read_text(encoding="utf-8")
-    pruned = adopt_map.drop_entries(current, set(removed))
-    if pruned != current:
+    current = _read_wiki_text(root, "index.md")
+    pruned = adopt_map.drop_entries(current, set(removed)) if current is not None else None
+    if pruned is not None and pruned != current:
         _write_atomic(index_path, pruned)
     for rel in removed:
         print(f"removed {WIKI_DIR}{_safe(rel)}")
