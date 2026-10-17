@@ -217,7 +217,7 @@ Single Python package: source in `agents/wikify/`, kit in `agents/kits/wikify/`,
 - [X] T060 [P] Security pass per Constitution "Development Workflow": confirm untrusted page/token text is sanitised in every new output, new writers refuse symlinks (`state.check_wiki_path`), hook script still never creates files, `install-hook` never overwrites, no secret rule text appears; record findings in the PR description
 - [X] T061 [P] In `tests/test_wikify_control_files.py` snapshot the bytes of `docs/wiki/.wikifyignore`, `.wikify-allow`, `.wikifydocs`, generated pages and human blocks before and after `reanchor --apply`, `fix-links --apply`, `migrate-imported --apply`, `install-hook --apply`, `init --update-protocol --apply` and `mark`; assert they are byte-identical (`docs/wiki/.wikify.json` and `WIKIFY.md` excepted where the command owns them)
 - [X] T062 Run the quickstart in `docs/specs/002-wikify-sync-drift/quickstart.md` manually on a scratch repo; run `python3 -m unittest discover -s tests`; run `vibe kits wikify install --dry-run --yes`; confirm `tests/test_second_brain_contract.py` is untouched
-- [ ] T063 Conventional-commit slices and PR notes: one commit per phase (`feat(wikify): ...`), PR body lists user-visible changes, tests run, and installer safety implications (hook script and skill files written, no network)
+- [X] T063 Conventional-commit slices and PR notes: one commit per phase (`feat(wikify): ...`), PR body lists user-visible changes, tests run, and installer safety implications (hook script and skill files written, no network)
 
 ---
 
