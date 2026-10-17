@@ -329,8 +329,12 @@ class ReferenceTests(ImportedCase):
         self.assertEqual(rc, 0)
         self.assertIn("name-only matching is a floor", text)
         self.assertIn("DEAD PATH docs/removed.md", text)
-        rc_ci, _ = quiet(check_cmd.cmd_check, self.root, True)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "page with references")  # --ci judges what is committed
+        rc_ci, ci_text = quiet(check_cmd.cmd_check, self.root, True)
         self.assertEqual(rc_ci, 0)
+        self.assertIn("references: 3", ci_text)
+        self.assertNotIn("docs/removed.md", ci_text)  # the concise gate output is a count only
 
     def test_json_lists_references(self):
         self.set_body()

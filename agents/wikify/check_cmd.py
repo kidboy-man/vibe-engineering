@@ -152,7 +152,8 @@ def render_ci(result: CheckResult) -> str:
     lines = [_safe(f"{f.category} {f.page}:{f.line} {f.path}:{f.start}-{f.end}{_detail(f)}")
              for f in result.drift + result.moved]
     lines += [_safe(f"uncovered {a['area']}/") for a in result.uncovered_areas]
-    lines += [_safe(f"reference {r['kind']} {r['page']}:{r['line']} {r['token']}") for r in result.references]
+    if result.references:  # a hook prints this on every push: the count, not the list
+        lines.append(f"references: {len(result.references)} (name-only matches; run vibe wikify check to list)")
     lines += [_safe(n) for n in result.notices]
     lines.append("ok" if result.ok else f"drift: {len(result.drift)}")
     return "\n".join(lines) + "\n"
