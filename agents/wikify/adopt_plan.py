@@ -217,6 +217,7 @@ def plan_candidates(
     refs = adopt_refs.scan(root, docs)
     wiki_pages = {p for p in (gitview.tracked_files(root)) if p.startswith(WIKI_DIR)}
     taken = {p[len(WIKI_DIR):].casefold() for p in wiki_pages}
+    taken |= {rel.casefold() for rel, _ in citations.walk_wiki(root)[1]}  # untracked pages count too
     out: list[Candidate] = []
     for source in docs:
         mine = tuple(refs.get(source, ()))

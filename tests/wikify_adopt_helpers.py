@@ -50,7 +50,7 @@ class AdoptCase(RepoCase):
         git(self.root, "add", "-A")
         git(self.root, "commit", "-q", "-m", "init")
 
-    def write_map(self, text=MAPPING, commit=True):
+    def write_map(self, text=MAPPING, commit=False):
         (self.root / "docs/wiki/.wikifymap").write_text(text, encoding="utf-8")
         if commit:
             git(self.root, "add", "-A")
@@ -102,9 +102,7 @@ def materialize(root, name="nested-docs", init=True):
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
     (root / "docs/wiki").mkdir(parents=True, exist_ok=True)
-    (root / "docs/wiki/.wikifymap").write_text(MAPPING, encoding="utf-8")
-    git(root, "add", "-A")
-    git(root, "commit", "-q", "-m", "map")
+    (root / "docs/wiki/.wikifymap").write_text(MAPPING, encoding="utf-8")  # left uncommitted, as a user would
 
 
 if __name__ == "__main__":

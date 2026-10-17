@@ -412,6 +412,8 @@ class ApplyTests(ApplyCase):
         self.build("flat-docs")
         (self.root / "docs/wiki/w").mkdir()
         (self.root / "docs/wiki/w/overview.md").write_text("# mine\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "mine")
         self.write_map("docs/** -> w/\n")
         rc, out = self.apply()
         self.assertEqual(rc, 0, out)
@@ -427,6 +429,67 @@ class ApplyTests(ApplyCase):
         self.assertEqual(rc, 0)
         self.assertIn("nothing to move", out)
         self.assertEqual(git(self.root, "status", "--porcelain"), before)
+
+
+class UncommittedMapTests(ApplyCase):
+    def test_an_uncommitted_map_applies_cleanly_and_lands_in_the_docs_only_commit(self):
+        self.build("flat-docs")
+        self.write_map("docs/** -> w/\n")  # written, not committed: the real sequence
+        self.assertIn("?? docs/wiki/.wikifymap", git(self.root, "status", "--porcelain"))
+        rc, out = self.apply()
+        self.assertEqual(rc, 0, out)
+        git(self.root, "commit", "-q", "-m", "docs(wiki): move docs")
+        self.assertEqual(self.verify()[0], 0)
+        self.assertEqual(self.mark()[0], 0)
+        git(self.root, "add", "--", "docs/wiki")
+        files = git(self.root, "diff", "--cached", "--name-only").splitlines()
+        self.assertTrue(files and all(f.startswith("docs/wiki/") for f in files), files)
+        self.assertIn("docs/wiki/.wikifymap", files)
+
+    def test_an_uncommitted_map_plus_another_dirty_file_is_still_refused(self):
+        self.build("flat-docs")
+        self.write_map("docs/** -> w/\n")
+        (self.root / "scratch.txt").write_text("x")
+        rc, out = self.apply()
+        self.assertEqual(rc, 1)
+        self.assertIn("uncommitted changes", out)
+
+    def test_a_map_file_inside_the_repo_given_with_map_is_exempt_too(self):
+        self.build("flat-docs")
+        (self.root / "adopt.map").write_text("docs/** -> w/\n")
+        rc, out = self.apply(map_file=str(self.root / "adopt.map"))
+        self.assertEqual(rc, 0, out)
+
+    def test_legacy_index_without_a_map_block_is_refused_before_any_move(self):
+        self.build("flat-docs")
+        (self.root / "docs/wiki/index.md").write_text("# Wiki index\n")
+        (self.root / "docs/wiki/extra.md").write_text("# Extra\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "legacy")
+        self.write_map("docs/** -> w/\n")
+        rc, out = self.apply()
+        self.assertEqual(rc, 1)
+        self.assertIn("no wikify:map block", out)
+        self.assertTrue((self.root / "docs/overview.md").exists())
+        self.assertEqual(git(self.root, "diff", "--cached", "--name-only"), "")
+
+    def test_a_wiki_with_only_an_index_may_start_its_first_map(self):
+        self.build("flat-docs")
+        (self.root / "docs/wiki/index.md").write_text("# Wiki index\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "bare")
+        self.write_map("docs/** -> w/\n")
+        self.cycle()
+
+    def test_report_with_apply_is_refused(self):
+        self.build("flat-docs")
+        self.write_map("docs/** -> w/\n")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = adopt_cmd.cmd_adopt(self.root, report=True, apply=True)
+        self.assertEqual(rc, 1)
+        self.assertIn("--report never writes", buf.getvalue())
+        self.assertTrue((self.root / "docs/overview.md").exists())
 
 
 class IdempotenceTests(ApplyCase):
@@ -539,6 +602,7 @@ class MapAndOutlineTests(ApplyCase):
         self.assertIn("stale docs/wiki/sources/docs/gone.md", out)
         git(self.root, "reset", "-q", "--hard")
         git(self.root, "clean", "-fdq")
+        self.write_map("docs/overview.md -> w/\n")
         rc, out = self.apply(prune_sources=True)
         self.assertEqual(rc, 0, out)
         self.assertFalse(stale.exists())

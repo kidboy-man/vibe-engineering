@@ -11,10 +11,10 @@ vibe wikify adopt [--map FILE] [--include GLOB] [--exclude GLOB]
 | `--map FILE` | Mapping file to use; default `docs/wiki/.wikifymap`. |
 | `--include` / `--exclude` | Narrow the candidate set by glob; same grammar limits as `.wikifyignore`. |
 | `--apply` | Perform `git mv` (staged), wrap bodies in human blocks (unstaged), update the map, remove outline pages of moved docs. Does not run `verify`: it reads HEAD, which only matches after commit 1; run it as step 2 of the printed plan. |
-| `--report` | Print the JSON in `adopt-report.schema.json` to stdout; implies no writes unless `--apply` is also given. |
+| `--report` | Print the JSON in `adopt-report.schema.json` to stdout. Never writes; combining it with `--apply` is refused (exit 1). |
 | `--rewrite-refs` | Also rewrite relative links in moved files and in other tracked docs-only files. |
 | `--prune-sources` | Also remove unrelated stale generated `sources/` pages. Outline pages of the docs this run moves are always removed. |
-| `--force` | Allow a dirty tree or detached HEAD. |
+| `--force` | Allow a dirty tree or detached HEAD. The mapping file itself may be uncommitted without `--force`. |
 
 ## Exit codes
 

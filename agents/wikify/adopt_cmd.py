@@ -14,7 +14,7 @@ import stat
 from pathlib import Path
 
 from agents.wikify import adopt_plan as ap
-from agents.wikify import adopt_map, adopt_refs, docs_cmd, gitview, state
+from agents.wikify import adopt_map, adopt_refs, agentmap, citations, docs_cmd, gitview, state
 from agents.wikify import docs_inventory as di
 from agents.wikify.pointer import _safe
 from agents.wikify.state import WIKI_DIR
@@ -124,8 +124,11 @@ def cmd_adopt(
     if errors:
         print("\n".join(f"refused: {_safe(e)}" for e in errors) + "\nnothing written")
         return 1
+    if report and apply:
+        print("refused: --report never writes; drop --apply (or drop --report)")
+        return 1
     if apply and not force:
-        why = _unsafe_tree(root)
+        why = _unsafe_tree(root, map_file)
         if why:
             print(f"refused: {why}; commit or stash first, or pass --force\nnothing written")
             return 1
@@ -147,10 +150,18 @@ def cmd_adopt(
     return 0
 
 
-def _unsafe_tree(root: Path) -> str | None:
+def _unsafe_tree(root: Path, map_file: str | None = None) -> str | None:
+    """Why apply must stop, or None. The mapping file may be uncommitted: it is the input
+    the user just approved, and it lands in the docs-only commit."""
     if not gitview.on_branch(root):
         return "detached HEAD"
-    if not gitview.is_clean(root):
+    allowed = [ap.MAP_REL]
+    if map_file:
+        try:
+            allowed.append(Path(map_file).resolve().relative_to(root.resolve()).as_posix())
+        except ValueError:
+            pass  # a map outside the repo cannot make the tree dirty
+    if not gitview.is_clean(root, tuple(allowed)):
         return "uncommitted changes"
     return None
 
@@ -295,6 +306,12 @@ def _rewrite_incoming(root: Path, moves: list[ap.Candidate], new_paths: dict[str
     return done
 
 
+def _other_pages(root: Path, moves: list[ap.Candidate]) -> bool:
+    """Wiki pages besides index.md that this run is not creating."""
+    mine = {c.destination for c in moves}
+    return any(rel not in ("index.md", *mine) for rel, _ in citations.walk_wiki(root)[1])
+
+
 def _apply(root: Path, plan: ap.Plan, prune_sources: bool, rewrite: bool = False) -> int:
     moves = [c for c in plan.candidates if not c.reason]
     if not moves:
@@ -311,6 +328,12 @@ def _apply(root: Path, plan: ap.Plan, prune_sources: bool, rewrite: bool = False
     index_before = _read_wiki_text(root, "index.md")
     if index_before is None or not _sources_ok(root):
         print("refused: index.md or sources/ is a symlink or not plain; nothing written")
+        return 1
+    if agentmap.parse_map(index_before).blocks == 0 and _other_pages(root, moves):
+        print(
+            "refused: index.md has no wikify:map block but the wiki has other pages; adding a block "
+            "would make verify reject them. Add the block (and entries) first\nnothing written"
+        )
         return 1
     planned = adopt_map.plan_map(index_before, pages)
     if isinstance(planned, str):
