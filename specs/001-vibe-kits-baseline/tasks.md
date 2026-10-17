@@ -53,10 +53,10 @@ are hash-equal, second apply changes nothing, `plan` reports nothing uncovered (
 
 ### 7a. Dry run and report (FR-017, FR-018)
 
-- [ ] T011 [US7] Write failing tests in `tests/test_wikify_adopt.py` for the dry run: prints per file source, destination, kind, skip reason, inbound refs; writes nothing (git status clean, no new files); refuses outside a git repo or without `docs/wiki/index.md` (exit 1)
-- [ ] T012 [US7] Write failing tests that `--report` output validates against `specs/001-vibe-kits-baseline/contracts/adopt-report.schema.json` (required keys `moves`, `skips`, `unresolved_refs`, `unclassified`, `suggested_contexts`, `commit_plan`; `body_sha256` is 64 lowercase hex) using a small stdlib validator in `tests/wikify_adopt_helpers.py`
-- [ ] T013 [US7] Implement `cmd_adopt` dry-run and `--report` in `agents/wikify/adopt_cmd.py`; apply the same safety preamble as `docs_cmd.cmd_docs` (`state.check_wiki_path`, lstat checks, fail-closed on inventory failure); make T011-T012 pass
-- [ ] T014 [US7] Add the `adopt` subparser (`--map`, `--include`, `--exclude`, `--apply`, `--report`, `--rewrite-refs`, `--prune-sources`, `--force`) in `agents/cli.py` and route it in `agents/wikify/commands.py`; update the matching snapshot in `tests/fixtures/cli_help/` and assertions in `tests/test_cli_contract.py`
+- [X] T011 [US7] Write failing tests in `tests/test_wikify_adopt.py` for the dry run: prints per file source, destination, kind, skip reason, inbound refs; writes nothing (git status clean, no new files); refuses outside a git repo or without `docs/wiki/index.md` (exit 1)
+- [X] T012 [US7] Write failing tests that `--report` output validates against `specs/001-vibe-kits-baseline/contracts/adopt-report.schema.json` (required keys `moves`, `skips`, `unresolved_refs`, `unclassified`, `suggested_contexts`, `commit_plan`; `body_sha256` is 64 lowercase hex) using a small stdlib validator in `tests/wikify_adopt_helpers.py`
+- [X] T013 [US7] Implement `cmd_adopt` dry-run and `--report` in `agents/wikify/adopt_cmd.py`; apply the same safety preamble as `docs_cmd.cmd_docs` (`state.check_wiki_path`, lstat checks, fail-closed on inventory failure); make T011-T012 pass
+- [X] T014 [US7] Add the `adopt` subparser (`--map`, `--include`, `--exclude`, `--apply`, `--report`, `--rewrite-refs`, `--prune-sources`, `--force`) in `agents/cli.py` and route it in `agents/wikify/commands.py`; update the matching snapshot in `tests/fixtures/cli_help/` and assertions in `tests/test_cli_contract.py`
 
 ### 7b. Apply, safety, idempotence (FR-019, FR-021)
 

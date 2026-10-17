@@ -74,3 +74,28 @@ def scan(root: Path, sources: list[str]) -> dict[str, list[Ref]]:
                     if resolved in wanted and resolved != rel:
                         out[resolved].add(Ref(rel, n, "link"))
     return {s: sorted(refs, key=lambda r: (r.file, r.line, r.kind)) for s, refs in out.items()}
+
+
+def outgoing(root: Path, sources: list[str]) -> list[tuple[str, int, str]]:
+    """(doc, line, target) for relative links inside ``sources`` that resolve to another tracked file.
+
+    These links keep pointing at the old location once the doc moves, so they
+    are reported unless a rewrite handles them.
+    """
+    root = Path(root)
+    tracked = set(gitview.tracked_files(root))
+    found: list[tuple[str, int, str]] = []
+    for doc in sources:
+        text = _read(root, doc)
+        if text is None:
+            continue
+        base = posixpath.dirname(doc)
+        for n, line in enumerate(text.split("\n"), 1):
+            for m in _LINK.finditer(line):
+                target = m.group(1)
+                if "://" in target or target.startswith(("/", "mailto:")):
+                    continue
+                resolved = posixpath.normpath(posixpath.join(base, target))
+                if resolved != doc and resolved in tracked:
+                    found.append((doc, n, resolved))
+    return found

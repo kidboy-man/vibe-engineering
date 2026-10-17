@@ -120,6 +120,30 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
         "--dry-run", action="store_true", help="Show the pages without writing files"
     )
 
+    adopt_parser = wik_sub.add_parser(
+        "adopt", help="Move existing markdown docs into docs/wiki (dry run unless --apply)"
+    )
+    adopt_parser.add_argument(
+        "--map", dest="map_file", help="Mapping file (default: docs/wiki/.wikifymap)"
+    )
+    adopt_parser.add_argument(
+        "--include", action="append", default=[], metavar="GLOB", help="Only consider matching docs"
+    )
+    adopt_parser.add_argument(
+        "--exclude", action="append", default=[], metavar="GLOB", help="Ignore matching docs"
+    )
+    adopt_parser.add_argument("--apply", action="store_true", help="Move the docs (default: dry run)")
+    adopt_parser.add_argument("--report", action="store_true", help="Print the plan as JSON")
+    adopt_parser.add_argument(
+        "--rewrite-refs", action="store_true", help="Rewrite relative links in moved and docs-only files"
+    )
+    adopt_parser.add_argument(
+        "--prune-sources", action="store_true", help="Also remove unrelated stale generated pages"
+    )
+    adopt_parser.add_argument(
+        "--force", action="store_true", help="Allow a dirty tree or detached HEAD"
+    )
+
     kits = sub.add_parser("kits", help="List and manage kits")
     kits_sub = kits.add_subparsers(dest="kits_command", required=True)
 

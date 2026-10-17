@@ -1,0 +1,14 @@
+usage: vibe wikify adopt [-h] [--map MAP_FILE] [--include GLOB]
+                         [--exclude GLOB] [--apply] [--report]
+                         [--rewrite-refs] [--prune-sources] [--force]
+
+options:
+  -h, --help       show this help message and exit
+  --map MAP_FILE   Mapping file (default: docs/wiki/.wikifymap)
+  --include GLOB   Only consider matching docs
+  --exclude GLOB   Ignore matching docs
+  --apply          Move the docs (default: dry run)
+  --report         Print the plan as JSON
+  --rewrite-refs   Rewrite relative links in moved and docs-only files
+  --prune-sources  Also remove unrelated stale generated pages
+  --force          Allow a dirty tree or detached HEAD
