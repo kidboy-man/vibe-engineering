@@ -2,7 +2,7 @@
 
 **Branch**: `001-vibe-kits-baseline` (working branch: `feat/wikify-adopt`) | **Date**: 2026-10-17 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `/specs/001-vibe-kits-baseline/spec.md`
+**Input**: Feature specification from `/docs/specs/001-vibe-kits-baseline/spec.md`
 
 ## Summary
 
@@ -58,7 +58,7 @@ installs qmd. This plan does not depend on that line; the constitution amendment
 ### Documentation (this feature)
 
 ```text
-specs/001-vibe-kits-baseline/
+docs/specs/001-vibe-kits-baseline/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output
 ├── data-model.md        # Phase 1 output

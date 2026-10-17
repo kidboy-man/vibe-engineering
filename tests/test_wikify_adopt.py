@@ -14,7 +14,7 @@ from agents.wikify import citations, state
 from tests.test_wikify_state import git
 from tests.wikify_adopt_helpers import FIXTURES, AdoptCase, MAPPING, validate
 
-SPEC = Path(__file__).resolve().parents[1] / "specs" / "001-vibe-kits-baseline"
+SPEC = Path(__file__).resolve().parents[1] / "docs" / "specs" / "001-vibe-kits-baseline"
 
 
 def rules(text):

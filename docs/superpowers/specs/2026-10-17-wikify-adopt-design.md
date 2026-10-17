@@ -1,7 +1,7 @@
 # Design: `vibe wikify adopt`
 
 Status: decided (task T001). Source of truth for the feature spec in
-`specs/001-vibe-kits-baseline/`. Where this document and `research.md`/`data-model.md`
+`docs/specs/001-vibe-kits-baseline/`. Where this document and `research.md`/`data-model.md`
 differ, this document wins; those files were updated to match.
 
 ## Findings from the verifier source (what the plan assumed vs. what the code does)
