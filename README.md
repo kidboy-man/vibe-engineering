@@ -19,7 +19,7 @@ overwriting your existing config files. The `second-brain` kit optionally runs
 | `second-brain` | `vibe kits second-brain …` | Local Obsidian/qmd vault scaffold + non-secret AI-agent snippets |
 | `workflow` | `vibe kits workflow …` | Business requirement → PRD → TRD → tickets → TDD: `/prd`, `/flow`, `/implement-ticket`, `/push-tickets`, `vibe-flow` skill (Claude Code, OpenCode) |
 | `guardrails` | `vibe kits guardrails …` | Pre-tool-use hooks that block destructive commands and secret-file access (Claude Code, Codex CLI, Cursor) |
-| `wikify` | `vibe kits wikify …` | Push-gate hook that blocks an agent's `git push` while `docs/wiki` is stale (Claude Code, Codex CLI, Cursor) |
+| `wikify` | `vibe kits wikify …` | Push-gate hook that blocks an agent's `git push` while `docs/wiki` is stale (Claude Code, Codex CLI, Cursor); `vibe wikify` commands for the cited wiki, an agent map with `AGENTS.md` pointer, and outline pages for existing docs |
 
 ## Install
 
@@ -338,8 +338,42 @@ vibe wikify docs [--dry-run]                # outline pages for existing docs (s
 
 Push flow: the hook blocks the push, the agent updates `docs/wiki`, runs
 `vibe wikify verify` and `vibe wikify mark`, you confirm, a docs-only commit
-records the mark, and the push goes through. Freshness rule: the commit that last
+records the mark, and the push goes through. `plan` lists what to cover; it does a
+full plan, not an incremental one, when the commit that last touched
+`.wikify.json` also carries code. A page that is not valid UTF-8 is reported by
+`verify` as `<page>: not valid UTF-8`. Freshness rule: the commit that last
 touched `.wikify.json` and every commit since it may touch only `docs/wiki/`.
+`vibe kits wikify uninstall` unregisters the hooks before it removes the scripts;
+if a hook config cannot be edited (invalid JSON, a hand-edited Codex block) it
+keeps the scripts and manifest, says why, and exits non-zero rather than leave a
+hook pointing at a missing script.
+
+### Control files
+
+All live in `docs/wiki/` and must be committed (a gitignored control file is a
+`verify` error, and if git cannot say, `verify` reports "could not determine").
+
+- `.wikify.json`: state written by `mark` (covered files). The commit that last touched it is the freshness base.
+- `.wikifyignore`: paths wikify never reads, cites or outlines. A pattern with no
+  `/` matches that name at any depth; a `/` inside it or a leading `/` anchors at
+  the repo root (`*` never crosses `/`, `**` spans directories); a trailing `/`
+  means a directory. `!` negation is not supported. The file is rejected, and
+  `verify`, `plan` and `docs` fail closed (`plan` returns an error and no path
+  data), when it has `!` lines, more than 200 patterns, a pattern over 200
+  characters or with more than 8 wildcards, is not a regular UTF-8 file, or is
+  over 64 KiB.
+- `.wikify-allow`: reviewed secret-scan false positives, one `<page>|sha256:<16 hex>`
+  per line. `verify` prints the exact line for each unallowed hit (`ALLOW-LIST KEY`)
+  and never echoes the matched text. Legacy plaintext entries still work and are
+  reported as `ALLOW-LIST LEGACY`. Scan results that mean "could not scan"
+  (`unreadable`, `too-large`) cannot be allow-listed.
+- `.wikifydocs`: extra globs for `vibe wikify docs` (see Doc sources).
+
+Secret paths are never read or cited, whatever the ignore file says: `.env`,
+`.env.*`, `*.pem`, `id_rsa*` / `id_ed25519*` / `id_ecdsa*`, `*.key`, `*.p12`,
+`*.pfx`, `.npmrc`, `.netrc`, `.pgpass`, `.git-credentials`, `*.tfstate`,
+`credentials.json`, `kubeconfig`, `prod.env` and `.aws/credentials`, except names
+ending `.example`, `.sample`, `.template`, `.dist` or `.pub`.
 
 ### Agent map and `vibe wikify link`
 
@@ -361,7 +395,9 @@ Map block in `docs/wiki/index.md` (`vibe wikify init` writes an empty one):
   `..`, `@`, `:`, `<`, `>` or backslash; `index.md` and `WIKIFY.md` cannot be listed.
 - Title is 1-60 chars and hint 1-80 chars; neither may contain `@`, `<`, `>`,
   `://`, `www.` (any case), square brackets or parentheses (so no HTML,
-  comments or URLs).
+  comments or URLs). Title, hint and path also reject control and invisible
+  characters (Unicode category `C*`, such as ESC, bidi overrides, zero-width
+  and tag characters, plus U+2028/2029).
 - Titles and hints are agent-written untrusted text that other agents read;
   the pointer block tells agents to treat them as navigation, not
   instructions. The grammar keeps them inert, but it cannot judge what a hint
@@ -453,6 +489,15 @@ Registered as `PreToolUse` (Bash) in Claude Code `settings.json`, `[[hooks.PreTo
 (`^Bash$`) in Codex `config.toml`, and `beforeShellExecution` in Cursor `hooks.json`.
 `VIBE_WIKIFY=off` bypasses it. It coexists with the guardrails kit.
 
+What the hook recognises as a push: `git push` (also `git -C <dir> push` and
+`cd <dir> && git push`), after the prefixes `sudo`, `command`, `env`, `nohup`,
+`time`, `exec`, `timeout`, `nice`, `ionice`, `stdbuf` and `setsid` (with their
+flags and values), `VAR=value` assignments, and leading `(`, `{` or `!`. When a
+`cd` or `-C` target cannot be resolved (for example `cd $REPO`), it keeps the
+current directory and keeps scanning the rest of the command. `--dry-run`,
+`-n`, `-d` and `--delete` pushes are not gated. Commands that wrap the push in a
+string (`bash -c 'git push'`, `sh -c`), aliases and scripts are not parsed.
+
 Limitations:
 
 - Pushes typed in a plain terminal are not covered.
@@ -464,9 +509,10 @@ Limitations:
 - The hook gates freshness only; it does not re-run `verify`, so a docs-only
   commit made without `mark`/`verify` passes the gate.
 - After a squash merge the wiki reads as stale (the squashed commit mixes code
-  with `.wikify.json`): run `vibe wikify mark` and make one docs-only commit.
-- The built-in secret scan is a floor, not a complete scanner.
-  Reviewed false positives go in `docs/wiki/.wikify-allow` as `<page>|sha256:<16 hex>`; `verify` prints the exact line (`ALLOW-LIST KEY`). Legacy plaintext entries still work but are reported as `ALLOW-LIST LEGACY`.
+  with `.wikify.json`): `plan` then lists everything as uncovered (full plan);
+  update the wiki, run `vibe wikify mark` and make one docs-only commit.
+- The built-in secret scan is a floor, not a complete scanner. Reviewed false
+  positives go in `.wikify-allow` (see Control files).
 - Codex needs a one-time `/hooks` trust review.
 - Cursor's push-time payload shape is unverified; the hook fails open if it differs.
 
@@ -488,8 +534,8 @@ vibe wikify docs             # write pages under docs/wiki/sources/ only
   globs in `docs/wiki/.wikifydocs` (one per line, `#` comments, `dir/` matches a
   prefix; `init` scaffolds it comment-only). Never eligible: `AGENTS.md`,
   `CLAUDE.md`, `GEMINI.md`, `SKILL.md`, anything under `docs/wiki/`, secret paths
-  and `.wikifyignore` matches; those always win over `.wikifydocs`.
-  `.wikifyignore` patterns: no `/` matches that name at any depth; a `/` inside or a leading `/` anchors at the repo root (`*` never crosses `/`, `**` spans directories); a trailing `/` means a directory. `!` negation lines are an error.
+  and `.wikifyignore` matches (see Control files); those always win over
+  `.wikifydocs`.
 - **Skipped, with a reason printed** (not an error): paths with whitespace,
   `` : ` ( ) [ ] < > @ \ # " ``, control characters or any Unicode `C*` character
   (`path not citable`); empty docs; docs over 1 MiB; docs that are not valid
@@ -514,8 +560,9 @@ vibe wikify docs             # write pages under docs/wiki/sources/ only
   longer eligible fails with `generated page has no eligible source`. In `plan`,
   `docs_unindexed`, `docs_stale` and `docs_skipped` report the same state. If
   the doc inventory itself fails (for example git file modes cannot be read, or
-  `expected_pages` raises), `plan` sets `error` and exits 1, and `verify` fails
-  with `docs: doc inventory failed: <cause>` instead of blaming every page.
+  `expected_pages` raises), `plan` sets `error` and exits 1, `verify` fails
+  with `docs: doc inventory failed: <cause>` instead of blaming every page, and
+  `vibe wikify docs` exits 1 without writing anything.
 - **Upgrading.** Existing pages that cite an eligible doc (README, `docs/*.md`)
   from outside `sources/` now fail `verify` with `doc citation outside
   sources/`, even if you never run `docs`. Move the claim into `sources/` or
@@ -720,5 +767,9 @@ python3 -m unittest discover -s tests -v
 ```
 
 Inside an activated virtualenv where `python` points to Python 3, `python -m unittest discover -s tests -v` is also acceptable.
+
+The suite no longer needs colour variables unset: the CLI help snapshot tests
+neutralise `FORCE_COLOR` / `NO_COLOR` themselves. The publish workflow runs the
+test suite before it builds or uploads a release.
 
 The full suite covers kit registry, CLI contract, extension contract, manifest contracts, installer behavior (install / diff / doctor / uninstall) for every kit, and the shared merge strategies. All tests must pass before shipping.
