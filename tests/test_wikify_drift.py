@@ -155,6 +155,20 @@ class BaselineTests(DriftCase):
         self.assertEqual(quiet(commands.cmd_mark, self.root)[0], 0)
         self.assertEqual(list(self.keys()), ["svc.md|app/svc.py:1-2|"])
 
+    def test_marking_twice_survives_secret_looking_symbol_names(self):
+        """The first mark writes `...|RefreshToken: <hash>`; the second verify must not flag it."""
+        from agents.wikify import commands
+        self.write_code("def RefreshToken():\n    return 1\n\ndef ResetPassword():\n    return 2\n", rel="app/auth.py", msg="auth")
+        self.page("Refresh (src: app/auth.py:1-2 `RefreshToken`)\n\nReset (src: app/auth.py:4-5 `ResetPassword`)\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "auth page")
+        self.assertEqual(quiet(commands.cmd_mark, self.root)[0], 0)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "docs(wiki): mark")
+        rc, out = quiet(commands.cmd_mark, self.root)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("secret-assignment", out)
+
     def test_generated_pages_and_map_blocks_have_no_claims(self):
         index = (
             "<!-- wikify:map -->\n- [T](a.md) — hint\n<!-- /wikify:map -->\n\n"
@@ -163,6 +177,149 @@ class BaselineTests(DriftCase):
         self.assertEqual([c.path for c in drift.page_citations("index.md", index)], ["x.py"])
         generated = "<!-- wikify:generated -->\nDoc " + CITE + "\n"
         self.assertEqual(drift.page_citations("sources/a.md", generated), [])
+
+
+def two_blocks_file(top=0):
+    """A unique block U at 5-14 and an identical block X at 30-34 and again at 60-64."""
+    pad = lambda n, tag: [f"# {tag} {i}" for i in range(n)]
+    x = [f"xblk {n}" for n in range(5)]
+    u = [f"ublk {n}" for n in range(10)]
+    lines = ["# shift"] * top + pad(4, "head") + u + pad(15, "mid") + x + pad(25, "gap") + x + pad(5, "end")
+    return "\n".join(lines) + "\n"
+
+
+def twin_file(first="xblk 0"):
+    """Two identical 5-line blocks at 10-14 and 40-44 (the first one's first line is ``first``)."""
+    pad = lambda n, tag: [f"# {tag} {i}" for i in range(n)]
+    block = lambda head: [head] + [f"xblk {n}" for n in range(1, 5)]
+    return "\n".join(pad(9, "head") + block(first) + pad(25, "mid") + block("xblk 0") + pad(5, "end")) + "\n"
+
+
+class DiffGuidedTests(DriftCase):
+    """With the recorded commit available, git's own diff tells moved from edited."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_code(twin_file(), rel="app/twin.py", msg="twins")
+        self.page("X (src: app/twin.py:10-14 `xblk 0`)\n", rel="docs/wiki/twin.md")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "twin page")
+        from agents.wikify import commands
+        quiet(commands.cmd_mark, self.root)
+        git(self.root, "add", "--", "docs/wiki")
+        git(self.root, "commit", "-q", "-m", "docs(wiki): mark twins")
+
+    def classify(self, base="auto"):
+        return {
+            (f.page, f.start): f for f in drift.classify(
+                self.root, drift.read_pages(self.root, False), drift.read_state(self.root, False),
+                set(gitview.tracked_files(self.root)), citations.load_ignore(self.root),
+                base=drift.read_state(self.root, False)["covered"] if base == "auto" else base,
+            ).findings
+        }
+
+    def twin(self, findings):
+        return findings[("twin.md", 10)]
+
+    def test_editing_the_cited_block_is_changed_even_though_a_twin_still_matches(self):
+        text = twin_file().replace("xblk 1", "xblk 1 CHANGED", 1)  # edits the first block only
+        self.write_code(text, rel="app/twin.py", msg="edit first")
+        found = self.classify()
+        self.assertEqual(self.twin(found).category, "changed")
+        self.assertIn("edited", self.twin(found).reason)
+
+    def test_without_history_the_twin_is_taken_for_a_move_which_is_the_documented_limit(self):
+        self.write_code(twin_file().replace("xblk 1", "xblk 1 CHANGED", 1), rel="app/twin.py", msg="edit first")
+        self.assertEqual(self.twin(self.classify(base=None)).category, "moved")
+
+    def test_a_shift_is_mapped_through_the_diff_even_with_twins(self):
+        self.write_code("# new\n# new\n# new\n" + twin_file(), rel="app/twin.py", msg="shift 3")
+        found = self.twin(self.classify())
+        self.assertEqual((found.category, found.new_start, found.new_end), ("moved", 13, 17))
+
+    def test_an_insertion_inside_the_range_is_changed(self):
+        lines = twin_file().split("\n")
+        lines.insert(12, "# inserted inside the block")
+        self.write_code("\n".join(lines), rel="app/twin.py", msg="insert inside")
+        self.assertEqual(self.twin(self.classify()).category, "changed")
+
+    def test_an_insertion_right_after_the_range_leaves_it_in_place(self):
+        lines = twin_file().split("\n")
+        lines.insert(14, "# inserted after the block")
+        self.write_code("\n".join(lines), rel="app/twin.py", msg="insert after")
+        self.assertNotIn(("twin.md", 10), self.classify())
+
+    def test_an_edit_below_the_range_does_not_move_it(self):
+        self.write_code(twin_file().replace("# mid 5", "# mid changed"), rel="app/twin.py", msg="edit below")
+        self.assertNotIn(("twin.md", 10), self.classify())
+
+    def test_check_reports_the_edit_and_reanchor_refuses_it(self):
+        from agents.wikify import check_cmd, reanchor
+        self.write_code(twin_file().replace("xblk 1", "xblk 1 CHANGED", 1), rel="app/twin.py", msg="edit first")
+        rc, out = quiet(check_cmd.cmd_check, self.root)
+        self.assertEqual(rc, 1, out)
+        rc, out = quiet(reanchor.cmd_reanchor, self.root, True)
+        self.assertEqual(rc, 1)
+        self.assertIn("refused", out)
+        self.assertIn("app/twin.py:10-14", (self.root / "docs/wiki/twin.md").read_text())
+
+
+class ConsistentShiftTests(DriftCase):
+    """An ambiguous block is healed only when the file's other moved citations prove the shift."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_code(two_blocks_file(), rel="app/blocks.py", msg="blocks")
+        self.page(
+            "U (src: app/blocks.py:5-14 `ublk 0`)\n\nX (src: app/blocks.py:30-34 `xblk 0`)\n",
+            rel="docs/wiki/blocks.md",
+        )
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "blocks page")
+        from agents.wikify import commands
+        quiet(commands.cmd_mark, self.root)
+
+    def findings(self):
+        done = drift.classify(
+            self.root, drift.read_pages(self.root, False), drift.read_state(self.root, False),
+            set(gitview.tracked_files(self.root)), citations.load_ignore(self.root),
+        )
+        return {(f.page, f.start): f for f in done.findings}
+
+    def test_ambiguous_block_follows_the_shift_of_its_unique_neighbour(self):
+        self.write_code(two_blocks_file(top=3), rel="app/blocks.py", msg="shift 3")
+        found = self.findings()
+        self.assertEqual(found[("blocks.md", 5)].category, "moved")
+        x = found[("blocks.md", 30)]
+        self.assertEqual((x.category, x.new_start, x.new_end), ("moved", 33, 37))
+
+    def test_without_a_moved_neighbour_it_stays_ambiguous(self):
+        self.page("X (src: app/blocks.py:30-34 `xblk 0`)\n", rel="docs/wiki/blocks.md")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "only x")
+        from agents.wikify import commands
+        quiet(commands.cmd_mark, self.root)
+        self.write_code(two_blocks_file(top=3), rel="app/blocks.py", msg="shift 3")
+        x = self.findings()[("blocks.md", 30)]
+        self.assertEqual(x.category, "changed")
+        self.assertIn("ambiguous", x.reason)
+
+    def test_a_candidate_that_does_not_match_the_neighbours_shift_is_not_guessed(self):
+        # U shifts by 3, but both X blocks shift by 5 (two lines were inserted between them and U)
+        text = two_blocks_file(top=3).replace("xblk 0", "# ins\n# ins\nxblk 0", 1)
+        self.write_code(text, rel="app/blocks.py", msg="insert between")
+        found = self.findings()
+        self.assertEqual(found[("blocks.md", 5)].category, "moved")
+        x = found[("blocks.md", 30)]
+        self.assertEqual(x.category, "changed")  # start + 3 is not a candidate: never guessed
+        self.assertIn("ambiguous", x.reason)
+
+    def test_reanchor_heals_it(self):
+        from agents.wikify import reanchor
+        self.write_code(two_blocks_file(top=3), rel="app/blocks.py", msg="shift 3")
+        rc, out = quiet(reanchor.cmd_reanchor, self.root, True)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("app/blocks.py:33-37", (self.root / "docs/wiki/blocks.md").read_text())
 
 
 class ClassifyTests(DriftCase):

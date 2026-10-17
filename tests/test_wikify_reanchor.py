@@ -107,6 +107,8 @@ class ApplyTests(ReanchorCase):
 
 class RefusalTests(ReanchorCase):
     def test_ambiguous_relocation_is_refused_and_page_untouched(self):
+        # no usable recorded commit (as after a rebase or squash): only the hash windows can decide
+        state.save(self.root, "0" * 40, citations=self.keys())
         self.write_code(svc_source(top=3) + svc_source())
         before = self.page_text()
         rc, text = self.run_reanchor(apply=True)
@@ -119,7 +121,7 @@ class RefusalTests(ReanchorCase):
         self.write_code(svc_source(tag="!"))
         rc, text = self.run_reanchor(apply=True)
         self.assertEqual(rc, 1)
-        self.assertIn("cited body changed", text)
+        self.assertIn("cited lines were edited", text)
 
     def test_citation_without_a_hash_is_never_healed(self):
         state.save(self.root, state.load(self.root)["covered"], citations={})

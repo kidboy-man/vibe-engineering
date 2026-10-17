@@ -33,7 +33,7 @@ def plan(root: Path) -> Plan:
     everything = drift.read_pages(root, at_head=False)
     skip = imported.effective(everything, st)
     pages = {rel: text for rel, text in everything.items() if rel not in skip}
-    done = drift.classify(root, pages, st, tracked, citations.load_ignore(root))
+    done = drift.classify(root, pages, st, tracked, citations.load_ignore(root), st["covered"])
     return Plan(
         [f for f in done.findings if f.category == "moved"],
         [f for f in done.findings if f.category == "changed"],

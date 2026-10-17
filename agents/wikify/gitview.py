@@ -206,6 +206,21 @@ def show_head_strict(root: Path, rel: str) -> str | None:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+_HUNK = __import__("re").compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", __import__("re").M)
+
+
+def diff_hunks(root: Path, base: str, rel: str) -> list[tuple[int, int, int, int]] | None:
+    """``(old_start, old_count, new_start, new_count)`` per hunk of ``rel`` in ``base..HEAD``
+    (zero context, no rename detection); None when git cannot produce the diff."""
+    result = run_git(root, "diff", "--no-renames", "--no-color", "-U0", f"{base}..HEAD", "--", rel)
+    if result.returncode != 0:
+        return None
+    return [
+        (int(a), int(b) if b else 1, int(c), int(d) if d else 1)
+        for a, b, c, d in _HUNK.findall(result.stdout)
+    ]
+
+
 def last_commit_touching(root: Path, rel: str) -> str | None:
     result = run_git(root, "log", "-1", "--format=%H", "--", rel)
     if result.returncode != 0:

@@ -121,7 +121,7 @@ def moved_hashes(root: Path, pages: dict[str, str], st: dict) -> dict[str, str]:
     tracked = gitview.regular_tracked(Path(root))
     if tracked is None:
         return {}
-    done = classify(root, pages, st, tracked, load_ignore(root, at_head=False))
+    done = classify(root, pages, st, tracked, load_ignore(root, at_head=False), st["covered"])
     keys = (finding_key(f) for f in done.findings if f.category == "moved")
     return {key: st["citations"][key] for key in keys if key in st["citations"]}
 
@@ -157,6 +157,7 @@ class Finding:
     new_start: int | None = None
     new_end: int | None = None
     commits: tuple[str, ...] = ()
+    candidates: tuple[int, ...] = ()  # ambiguous relocation: every window start that matched
 
 
 @dataclass
@@ -181,10 +182,34 @@ def _blocked(cite: Citation, ignore: list[str]) -> str | None:
     return None
 
 
+def map_range(
+    hunks: list[tuple[int, int, int, int]], start: int, end: int
+) -> int | None:
+    """New start of old lines ``start..end`` after ``hunks``, or None when a hunk edits them.
+
+    A hunk that replaces or deletes any of the lines, or inserts between two of them, edits the
+    range; hunks wholly above it only shift it; hunks below it do nothing."""
+    offset = 0
+    for old_start, old_count, _, new_count in hunks:
+        if old_count == 0:  # pure insertion after old line ``old_start``
+            if start <= old_start < end:
+                return None
+            if old_start < start:
+                offset += new_count
+        else:
+            last = old_start + old_count - 1
+            if old_start <= end and last >= start:
+                return None
+            if last < start:
+                offset += new_count - old_count
+    return start + offset
+
+
 def _classify_one(
-    cite: Citation, lines: list[str], digest: str | None
-) -> tuple[str, str, int | None] | None:
-    """(category, reason, new start) or None when the citation is clean."""
+    cite: Citation, lines: list[str], digest: str | None,
+    hunks: list[tuple[int, int, int, int]] | None = None,
+) -> tuple[str, str, int | None, tuple[int, ...]] | None:
+    """(category, reason, new start, ambiguous candidates) or None when the citation is clean."""
     length = cite.end - cite.start + 1
     in_bounds = 1 <= cite.start <= cite.end <= len(lines)
 
@@ -193,24 +218,32 @@ def _classify_one(
 
     if digest is None:
         if not symbol_in_file():
-            return "missing", f"symbol `{cite.symbol}` not found in {cite.path}", None
+            return "missing", f"symbol `{cite.symbol}` not found in {cite.path}", None, ()
         if in_bounds and (
             cite.symbol is None or cite.symbol in "\n".join(lines[cite.start - 1 : cite.end])
         ):
             return None
-        return "changed", "no range hash yet; cannot prove the cited body moved unchanged", None
+        return "changed", "no range hash yet; cannot prove the cited body moved unchanged", None, ()
     if in_bounds and range_hash(lines, cite.start, cite.end) == digest:
         return None
     windows = find_windows(lines, length, digest, anchor=cite.symbol)
+    if hunks is not None:  # git's diff of the recorded commit settles moved versus edited
+        mapped = map_range(hunks, cite.start, cite.end)
+        if mapped is None:
+            if not symbol_in_file():
+                return "missing", f"symbol `{cite.symbol}` not found in {cite.path}", None, ()
+            return "changed", "cited lines were edited", None, ()
+        if windows and mapped in windows:
+            return "moved", "", mapped, ()
     if windows is None:
-        return "changed", "cited range too large to relocate", None
+        return "changed", "cited range too large to relocate", None, ()
     if len(windows) == 1:
-        return "moved", "", windows[0]
+        return "moved", "", windows[0], ()
     if len(windows) > 1:
-        return "changed", f"ambiguous: {len(windows)} matches", None
+        return "changed", f"ambiguous: {len(windows)} matches", None, tuple(windows)
     if not symbol_in_file():
-        return "missing", f"symbol `{cite.symbol}` not found in {cite.path}", None
-    return "changed", "cited body changed", None
+        return "missing", f"symbol `{cite.symbol}` not found in {cite.path}", None, ()
+    return "changed", "cited body changed", None, ()
 
 
 def classify(
@@ -219,10 +252,16 @@ def classify(
     st: dict,
     tracked: set[str],
     ignore: list[str],
+    base: str | None = None,
 ) -> Classification:
-    """Classify every citation of ``pages`` against the HEAD content of the cited files."""
+    """Classify every citation of ``pages`` against the HEAD content of the cited files.
+
+    With ``base`` (``covered``: the HEAD the hashes were recorded at; unusable after a rebase or
+    squash, when the diff simply fails and the hash windows decide) git's diff tells an edited range from
+    a moved one, so a twin block elsewhere cannot be mistaken for the cited one."""
     root = Path(root)
     cache: dict[str, list[str] | None] = {}
+    hunk_cache: dict[str, list[tuple[int, int, int, int]] | None] = {}
     hashes = st.get("citations", {})
     result = Classification([], [])
     for rel, text in sorted(pages.items()):
@@ -233,11 +272,12 @@ def classify(
             )
             continue
         for cite in cites:
-            def found(category, reason, new_start=None):
+            def found(category, reason, new_start=None, candidates=()):
                 length = cite.end - cite.start
                 result.findings.append(Finding(
                     rel, cite.line, category, cite.path, cite.start, cite.end, cite.symbol, reason,
                     new_start, None if new_start is None else new_start + length,
+                    candidates=candidates,
                 ))
             blocked = _blocked(cite, ignore)
             if blocked:
@@ -250,10 +290,43 @@ def classify(
             digest = hashes.get(citation_key(rel, cite))
             if digest is None:
                 result.unhashed.append((rel, cite))
-            verdict = _classify_one(cite, lines, digest)
+            if base and cite.path not in hunk_cache:
+                hunk_cache[cite.path] = gitview.diff_hunks(root, base, cite.path)
+            verdict = _classify_one(cite, lines, digest, hunk_cache.get(cite.path))
             if verdict:
                 found(*verdict)
+    result.findings = _resolve_by_shift(result.findings)
     return result
+
+
+def _resolve_by_shift(findings: list[Finding]) -> list[Finding]:
+    """Heal an ambiguous relocation when the same file's nearest unambiguous moved citations
+    (above and below it) prove the shift: a candidate sitting exactly at start + that shift is
+    the block that moved. Anything less certain stays ``changed``."""
+    shifts: dict[str, list[tuple[int, int]]] = {}
+    for f in findings:
+        if f.category == "moved":
+            shifts.setdefault(f.path, []).append((f.start, f.new_start - f.start))
+    out: list[Finding] = []
+    for f in findings:
+        if f.category != "changed" or not f.candidates or f.path not in shifts:
+            out.append(f)
+            continue
+        above = max((s for s in shifts[f.path] if s[0] < f.start), default=None)
+        below = min((s for s in shifts[f.path] if s[0] > f.start), default=None)
+        hits = {
+            f.start + delta for ref in (above, below) if ref for delta in (ref[1],)
+            if f.start + delta in f.candidates
+        }
+        if len(hits) == 1:
+            new = hits.pop()
+            out.append(replace(
+                f, category="moved", reason="", new_start=new, new_end=new + (f.end - f.start),
+                candidates=(),
+            ))
+        else:
+            out.append(f)
+    return out
 
 
 MAX_COMMITS_SHOWN = 5

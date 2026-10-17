@@ -70,7 +70,7 @@ def _check(root: Path, ci: bool) -> CheckResult:
             "NOTICE: could not read git history; commits are not attributed (shallow clone?)"
         )
     ignore = drift.load_ignore(root, at_head=ci)
-    done = drift.classify(root, pages, st, tracked, ignore)
+    done = drift.classify(root, pages, st, tracked, ignore, st["covered"])
     found = drift.attribute(done.findings, touched or {})
     result.drift = [f for f in found if f.category in FAILING]
     result.moved = [f for f in found if f.category == "moved"]

@@ -24,7 +24,7 @@ _TICKS = re.compile(r"`([^`\n]+)`")
 _LINK = adopt_refs._LINK
 _LOCATION = re.compile(r":\d+(?:-\d+)?$")
 _PATH = re.compile(r"^[\w.@+-]+(?:/[\w.@+-]+)+$")
-_EXT = re.compile(r"\.[A-Za-z0-9]{1,8}$")
+_EXT = re.compile(r"\.[a-z0-9]{1,8}$")  # lowercase: `server.Build` is a qualified name, not a file
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:(?:\.|::)[A-Za-z_][A-Za-z0-9_]*)*(?:\(\))?$")
 _WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _PROSE = (".md", ".markdown", ".rst", ".txt")
@@ -48,6 +48,15 @@ def _words(root: Path, tracked: set[str], ignore: list[str]) -> set[str]:
         if text is not None:
             found.update(_WORD.findall(text))
     return found
+
+
+def _tails(paths: set[str]) -> set[str]:
+    """Every trailing sub-path of every path ('a/b/c.go' -> 'b/c.go', 'c.go' excluded)."""
+    out: set[str] = set()
+    for path in paths:
+        parts = path.split("/")
+        out.update("/".join(parts[i:]) for i in range(1, len(parts) - 1))
+    return out
 
 
 def _body(text: str) -> tuple[str, int] | None:
@@ -89,6 +98,7 @@ def find(
     Ceiling: names and paths only. A hit is a floor, never proof a sentence is true."""
     root = Path(root)
     words: set[str] | None = None  # built lazily: one pass over the tracked files
+    tails: set[str] | None = None
     out: list[dict] = []
     wiki_pages = {WIKI_DIR + rel for rel in pages}
     for rel in sorted(pages):
@@ -101,6 +111,10 @@ def find(
             if kind == "path":
                 clean = token[2:] if token.startswith("./") else token
                 if clean not in tracked and WIKI_DIR + clean not in wiki_pages:
+                    if tails is None:
+                        tails = _tails(tracked | wiki_pages)
+                    if clean in tails:
+                        continue  # a partial path, as docs often write them (`port/service.go`)
                     out.append({"page": rel, "line": line, "kind": "DEAD PATH", "token": clean})
             elif kind == "symbol":
                 if words is None:

@@ -275,6 +275,15 @@ class ReferenceTests(ImportedCase):
         ])
         self.assertTrue(all(f["page"] == "w/overview.md" and f["line"] >= 3 for f in found))
 
+    def test_partial_paths_and_qualified_names_are_not_dead_paths(self):
+        # `service.go` style fragments match the tail of a tracked path; `pkg.Func` is no file
+        (self.root / "pkg/port").mkdir(parents=True)
+        (self.root / "pkg/port/service.go").write_text("package port\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "go file")
+        self.set_body("# T\n\n`src/app.py` `port/service.go` `internal/app/server.Build` `x/app.py` `a/b.go`\n")
+        self.assertEqual(self.kinds(self.find()), [("DEAD PATH", "a/b.go"), ("DEAD PATH", "x/app.py")])
+
     def test_line_numbers_are_page_lines(self):
         self.set_body()
         lines = (self.root / PAGE_PATH).read_text().splitlines()
