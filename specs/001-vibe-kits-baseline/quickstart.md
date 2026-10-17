@@ -17,11 +17,10 @@ Expected: all tests pass, every registered kit is listed, the dry run leaves `~/
 
 ## 2. Adopt on a fixture repo (User Story 7, after implementation)
 
-Use a scratch copy of a fixture from `tests/fixtures/adopt/` (never your real repo first).
+Build the fixture repo in a scratch directory (never your real repo first); it is defined in `tests/wikify_adopt_helpers.py` and walked through in `tests/fixtures/adopt/WALKTHROUGH.md`.
 
 ```bash
-cd "$(mktemp -d)" && cp -r <repo>/tests/fixtures/adopt/nested-docs/. . && git init -q && git add -A && git commit -qm init
-vibe wikify init
+D="$(mktemp -d)" && (cd <repo> && python3 -m tests.wikify_adopt_helpers "$D") && cd "$D"
 vibe wikify adopt                      # dry run: table of moves, skips, inbound refs
 vibe wikify adopt --report > report.json
 # edit docs/wiki/.wikifymap, review the dry run again
@@ -30,7 +29,7 @@ git commit -m 'docs(wiki): move docs'  # commit 1: staged renames only
 vibe wikify verify && vibe wikify mark
 git add -- docs/wiki && git commit -m 'docs(wiki): adopt'   # commit 2: docs-only
 vibe wikify adopt --apply              # second run: no-op
-vibe wikify plan                       # expect: nothing uncovered
+vibe wikify plan                       # expect: uncovered (0), map_missing (0); docs_unindexed lists only skipped docs
 ```
 
 Expected outcomes (map to Success Criteria):

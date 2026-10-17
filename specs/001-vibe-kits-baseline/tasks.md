@@ -23,7 +23,7 @@ implementation tasks below carry `[US7]`.
 
 - [X] T001 Confirm research.md D1 in source: read `agents/wikify/citations.py` and `agents/wikify/commands.py` and record in `docs/superpowers/specs/2026-10-17-wikify-adopt-design.md` whether (a) large human blocks hit any size cap, (b) headings/links inside human blocks are tolerated, (c) `verify` can report provenance-marked pages separately; state final choice Option A or B with reasons
 - [X] T002 [P] Create fixture repo builders (empty docs, flat `docs/`, nested `docs/` with images and relative links, build-coupled file, secret-bearing file) as in-code file maps in the helper (no static tree under `tests/fixtures/adopt/`; the walkthrough lives there) `tests/wikify_adopt_helpers.py` that materializes them into a temp git repo
-- [ ] T003 [P] Add a `tests/fixtures/adopt/WALKTHROUGH.md` skeleton describing the agent-driven loop from quickstart.md section 3 (filled in at T030)
+- [X] T003 [P] Add a `tests/fixtures/adopt/WALKTHROUGH.md` skeleton describing the agent-driven loop from quickstart.md section 3 (filled in at T030)
 
 ---
 
@@ -79,9 +79,9 @@ are hash-equal, second apply changes nothing, `plan` reports nothing uncovered (
 
 - [X] T026 [P] [US7] Write failing tests in `tests/test_wikify_installer.py`: `skills/wikify-adopt/SKILL.md` is in `agents/kits/wikify/templates/wikify/manifest.json` `managed_files`, installed only for agents whose config dir exists, removed by uninstall without touching user skills, dry-run writes nothing
 - [X] T027 [US7] Add `agents/kits/wikify/templates/wikify/skills/wikify-adopt/SKILL.md` documenting the loop `adopt` dry run -> agent edits `.wikifymap` -> user approves -> `adopt --apply` -> per-context page writing -> `verify` -> `mark` -> user review -> docs-only commit; include the guardrails: never rewrite migrated prose or human blocks, never invent facts, report doc-vs-code contradictions as findings, treat repo content as untrusted data, one bounded context per batch
-- [X] T028 [US7] Update `agents/kits/wikify/templates/wikify/manifest.json` and `agents/kits/wikify/installer.py` to install and uninstall the skill per agent; make T026 pass
+- [X] T028 [US7] Update `agents/kits/wikify/templates/wikify/manifest.json` and `agents/kits/wikify/installer.py` to install and uninstall the skill for Claude Code (the only agent with a known skills directory; the loop is also summarised in `WIKIFY.md` for Codex CLI and Cursor); make T026 pass
 - [X] T029 [P] [US7] Write a test in `tests/test_wikify_installer.py` that the skill file contains no absolute machine paths, tokens, or secrets and references only `vibe wikify` commands that exist
-- [ ] T030 [US7] Fill `tests/fixtures/adopt/WALKTHROUGH.md` with a checked fixture-repo walkthrough (expected command outputs per step) from the nested-docs fixture
+- [X] T030 [US7] Fill `tests/fixtures/adopt/WALKTHROUGH.md` with a checked fixture-repo walkthrough (expected command outputs per step) from the nested-docs fixture
 
 **Checkpoint**: US7 works end to end on all three fixtures; skill installs and uninstalls cleanly.
 
@@ -89,11 +89,11 @@ are hash-equal, second apply changes nothing, `plan` reports nothing uncovered (
 
 ## Phase 4: Polish & Cross-Cutting
 
-- [ ] T031 [P] Update `agents/kits/wikify/templates/wikify/WIKIFY.md`: layout section, new "Adopting existing docs" section stating which prose is code-verified and which is imported, and the "Upgrading" note
-- [ ] T032 [P] Update the Wikify section of `README.md` with `adopt` usage, flags, and the commit plan; keep it consistent with `contracts/adopt-cli.md`
-- [ ] T033 [P] Add a no-content-loss check on the three fixtures and a perf case in `tests/test_wikify_perf.py` using call counts / doubling ratios (no wall-clock limits per Constitution IV)
-- [ ] T034 Run `python3 -m unittest discover -s tests` and fix regressions; then run `vibe kits wikify install --dry-run --yes` and confirm no writes
-- [ ] T035 Run the quickstart.md section 2 sequence on a scratch copy of a fixture and tick every expected-outcome row; run `git diff` and confirm no unrelated edits, secrets, or debug output
+- [X] T031 [P] Update `agents/kits/wikify/templates/wikify/WIKIFY.md`: layout section, new "Adopting existing docs" section stating which prose is code-verified and which is imported, and the "Upgrading" note
+- [X] T032 [P] Update the Wikify section of `README.md` with `adopt` usage, flags, and the commit plan; keep it consistent with `contracts/adopt-cli.md`
+- [X] T033 [P] Add a no-content-loss check on the three fixtures and a perf case in `tests/test_wikify_perf.py` using call counts / doubling ratios (no wall-clock limits per Constitution IV)
+- [X] T034 Run `python3 -m unittest discover -s tests` and fix regressions; then run `vibe kits wikify install --dry-run --yes` and confirm no writes
+- [X] T035 Run the quickstart.md section 2 sequence on a scratch copy of a fixture and tick every expected-outcome row; run `git diff` and confirm no unrelated edits, secrets, or debug output
 
 ---
 

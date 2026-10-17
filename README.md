@@ -19,7 +19,7 @@ overwriting your existing config files. The `second-brain` kit optionally runs
 | `second-brain` | `vibe kits second-brain …` | Local Obsidian/qmd vault scaffold + non-secret AI-agent snippets |
 | `workflow` | `vibe kits workflow …` | Business requirement → PRD → TRD → tickets → TDD: `/prd`, `/flow`, `/implement-ticket`, `/push-tickets`, `vibe-flow` skill (Claude Code, OpenCode) |
 | `guardrails` | `vibe kits guardrails …` | Pre-tool-use hooks that block destructive commands and secret-file access (Claude Code, Codex CLI, Cursor) |
-| `wikify` | `vibe kits wikify …` | Push-gate hook that blocks an agent's `git push` while `docs/wiki` is stale (Claude Code, Codex CLI, Cursor); `vibe wikify` commands for the cited wiki, an agent map with `AGENTS.md` pointer, and outline pages for existing docs |
+| `wikify` | `vibe kits wikify …` | Push-gate hook that blocks an agent's `git push` while `docs/wiki` is stale (Claude Code, Codex CLI, Cursor); `vibe wikify` commands for the cited wiki, an agent map with `AGENTS.md` pointer, and outline pages for existing docs, and `vibe wikify adopt` to fold them into the wiki |
 
 ## Install
 
@@ -590,6 +590,53 @@ vibe wikify docs             # write pages under docs/wiki/sources/ only
 - **Freshness is unchanged.** Editing a doc is a code-side change after the base
   commit, so the push gate stays stale until you run `docs`, `verify` and `mark`
   and make the docs-only commit.
+
+### Adopting existing docs with `vibe wikify adopt`
+
+`vibe wikify docs` leaves the real docs in `docs/` and the wiki only points at
+them. `adopt` moves them into `docs/wiki/` so the wiki is the one tree. The CLI is
+deterministic (no model, no network); the judgment is a reviewable mapping file,
+`docs/wiki/.wikifymap`, that you or an agent write:
+
+```text
+# <glob> -> <folder>/ [kind=spec|adr|reference]   (first match wins)
+docs/trd/**  -> specs/trd/  kind=spec
+docs/adr/**  -> decisions/  kind=adr
+```
+
+```bash
+vibe wikify adopt                       # dry run: moves, skips with reasons, inbound refs
+vibe wikify adopt --report              # same plan as JSON
+vibe wikify adopt --apply               # git mv (staged), wrap bodies, update map, drop outline pages
+vibe wikify adopt --apply --rewrite-refs  # also re-point relative links
+```
+
+After `--apply` it prints the order to finish in: (1) commit the staged renames
+(a pure rename, so `git log --follow` works), (2) `vibe wikify verify` then `mark`,
+(3) a docs-only commit. It never commits or pushes.
+
+- **Content is preserved.** Each body is wrapped byte for byte in a
+  `<!-- wikify:human -->` block whose first line is `<!-- imported from=<path> -->`. It is
+  documented prose, not code-verified; `verify` lists the new blocks as human-block notices
+  and stays strict for every other page. With `--rewrite-refs` the only change is relative link
+  targets.
+- **Dry run by default; never overwrites.** A destination that exists is a `collision` skip.
+  A dirty tree or detached HEAD is refused without `--force`. A second run after both commits
+  is a no-op; resuming an interrupted run needs `--force`.
+- **What stays put** (listed with a reason): files without a rule (`unmapped`), root files
+  without an exact rule, `.markdown` files and images (only `.md` pages can live in the wiki;
+  links to them are reported as unresolved unless `--rewrite-refs` re-points them), docs read
+  by a build or config file, secret-scan hits, and files whose body contains a human-block marker.
+- **Outline pages.** Apply removes the `sources/` outline pages of the docs it moves and
+  rewrites `sources/index.md`; `--prune-sources` also removes unrelated stale generated pages.
+- **Map.** One map entry per page; past 60 entries or 6144 bytes, pages are grouped under
+  per-folder `index.md` pages.
+- **Skill.** `vibe kits wikify install` also installs the `wikify-adopt` skill into
+  `~/.claude/skills` (Claude Code only); a short version of the loop is in `docs/wiki/WIKIFY.md` for
+  other agents. The skill never rewrites migrated prose and reports doc-versus-code
+  contradictions as findings.
+- **Limits.** Inbound references from code comments, CI files and the root `README.md` are listed,
+  never edited. Reference detection matches written-out paths and relative markdown links only.
 
 ## Second-Brain Kit
 

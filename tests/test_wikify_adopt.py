@@ -673,5 +673,117 @@ class SymlinkSafetyTests(ApplyCase):
         self.assertEqual(list(outside.iterdir()), [])
 
 
+class WalkthroughTests(ApplyCase):
+    DOC = Path(__file__).resolve().parent / "fixtures" / "adopt" / "WALKTHROUGH.md"
+
+    def test_every_expected_line_in_the_walkthrough_is_real(self):
+        expected = [
+            ln.split("expect: ", 1)[1].strip()
+            for ln in self.DOC.read_text(encoding="utf-8").splitlines()
+            if "expect: " in ln
+        ]
+        self.assertGreaterEqual(len(expected), 10)
+        self.build("nested-docs")
+        self.write_map()
+        out = []
+        out.append(self.run_dry())
+        rc, apply_out = self.apply(rewrite_refs=True)
+        self.assertEqual(rc, 0, apply_out)
+        out.append(apply_out)
+        git(self.root, "commit", "-q", "-m", "docs(wiki): move docs into the wiki")
+        rc, v = self.verify()
+        self.assertEqual(rc, 0, v)
+        out.append(v)
+        rc, m = self.mark()
+        self.assertEqual(rc, 0, m)
+        out.append(m)
+        git(self.root, "add", "--", "docs/wiki")
+        git(self.root, "commit", "-q", "-m", "docs(wiki): adopt moved docs")
+        out.append(self.apply()[1])
+        joined = "\n".join(out)
+        for line in expected:
+            self.assertIn(line, joined, line)
+
+    def run_dry(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            adopt_cmd.cmd_adopt(self.root)
+        return buf.getvalue()
+
+
+class NoLossTests(ApplyCase):
+    def test_every_moved_body_survives_on_each_fixture(self):
+        for name, mapping in (("flat-docs", "docs/** -> w/\n"), ("nested-docs", MAPPING), ("empty-docs", "docs/** -> w/\n")):
+            with self.subTest(fixture=name):
+                self.setUp()
+                self.build(name)
+                self.write_map(mapping)
+                report = json.loads(self._report())
+                if not report["moves"]:
+                    rc, out = self.apply()
+                    self.assertEqual((rc, "nothing to move" in out), (0, True))
+                    continue
+                self.cycle()
+                for m in report["moves"]:
+                    src, body = ap.unwrap(self.read(m["destination"]))
+                    self.assertEqual(src, m["source"])
+                    self.assertEqual(ap.sha256(body.encode()), m["body_sha256"])
+                rc, out = self.apply()
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(git(self.root, "status", "--porcelain"), "")
+                result = plan.build_plan(self.root)
+                self.assertIsNone(result["error"])
+                moved = {m["source"] for m in report["moves"]}
+                self.assertFalse(moved & set(result["docs_unindexed"]))
+
+    def _report(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            adopt_cmd.cmd_adopt(self.root, report=True)
+        return buf.getvalue()
+
+
+class PerfTests(AdoptCase):
+    CALLS_PER_DOC = 3
+    CALLS_FIXED = 30
+
+    def make(self, n):
+        self.setUp()
+        self.build("empty-docs")
+        for i in range(n):
+            (self.root / f"docs/d{i:04d}.md").write_text(f"# Doc {i}\n\nsee [next](d{(i + 1) % n:04d}.md)\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "docs")
+        self.write_map("docs/** -> w/\n")
+        rules, _ = ap.load_rules(self.root)
+        return self.root, rules
+
+    def test_git_calls_grow_with_the_number_of_docs_not_with_pairs(self):
+        calls = []
+        real = gitview.run_git
+
+        def counting(root, *args):
+            calls.append(args)
+            return real(root, *args)
+
+        for n in (10, 40):
+            root, rules = self.make(n)
+            calls.clear()
+            with mock.patch.object(gitview, "run_git", counting):
+                result = ap.plan_candidates(root, rules)
+                adopt_refs.outgoing(root, [c.source for c in result.candidates if not c.reason])
+            self.assertEqual(len(result.candidates), n)
+            self.assertLessEqual(len(calls), self.CALLS_FIXED + self.CALLS_PER_DOC * n, f"{n} docs: {len(calls)} git calls")
+
+    def test_planning_scales_linearly(self):
+        from tests.wikify_perf_helpers import assert_scales_linearly
+
+        assert_scales_linearly(
+            self, self.make,
+            lambda root, rules: (ap.plan_candidates(root, rules), adopt_refs.outgoing(root, [])),
+            small=25, label="adopt plan",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

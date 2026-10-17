@@ -82,3 +82,32 @@ def validate(instance, schema, path="$"):
         for i, item in enumerate(instance):
             errors += validate(item, schema.get("items", {}), f"{path}[{i}]")
     return errors
+
+
+def materialize(root, name="nested-docs", init=True):
+    """Write FIXTURES[name] into ``root`` as a committed git repo (with docs/wiki when ``init``)."""
+    import subprocess
+    from pathlib import Path
+
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+    for rel, content in FIXTURES[name].items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+    if init:
+        with contextlib.redirect_stdout(io.StringIO()):
+            init_cmd.cmd_init(root)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "init")
+    (root / "docs/wiki").mkdir(parents=True, exist_ok=True)
+    (root / "docs/wiki/.wikifymap").write_text(MAPPING, encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "map")
+
+
+if __name__ == "__main__":
+    import sys
+
+    materialize(sys.argv[1])
