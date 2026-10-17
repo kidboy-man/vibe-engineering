@@ -33,6 +33,15 @@ def load_module():
 
 
 guard = load_module()
+# Whatever `vibe` happens to be on this machine's PATH must not change the commit-order tests;
+# DelegationTests opt in with their own fake.
+guard._find_vibe = lambda: None
+
+
+def path_without_vibe():
+    """PATH with every directory that contains a `vibe` executable removed."""
+    keep = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and not os.path.exists(os.path.join(d, "vibe"))]
+    return os.pathsep.join(keep)
 
 
 def git(root, *args):
@@ -73,7 +82,7 @@ class RepoCase(unittest.TestCase):
         return guard.decide(bash(command, self.root))
 
     def run_script(self, stdin, *argv, env=None):
-        full_env = {**os.environ, **(env or {})}
+        full_env = {**os.environ, "PATH": path_without_vibe(), **(env or {})}
         return subprocess.run(
             [sys.executable, str(SCRIPT), *argv], input=stdin, capture_output=True,
             text=True, env=full_env, check=False, timeout=60,

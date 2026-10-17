@@ -109,6 +109,23 @@ class ReaderTests(DriftCase):
         self.assertEqual([names for _, names in commits], [["app/svc.py"], ["app/other.py"]])
         self.assertIsNone(gitview.log_names_since(self.root, "deadbeef"))
 
+    def test_diff_hunks_only_accepts_a_full_commit_id(self):
+        victim = self.root / "injected.txt"
+        for bad in (f"--output={victim}", "-p", "HEAD~1", "abc123", "", "g" * 40):
+            self.assertIsNone(gitview.diff_hunks(self.root, bad, "app/svc.py"), bad)
+        self.assertFalse(victim.exists())
+        self.assertFalse(list(self.root.rglob("*..HEAD")))
+        self.assertEqual(gitview.diff_hunks(self.root, gitview.head(self.root), "app/svc.py"), [])
+
+    def test_a_hostile_covered_value_never_reaches_git_as_an_option(self):
+        victim = self.root / "injected.txt"
+        state.save(self.root, f"--output={victim}", citations=state.load(self.root)["citations"])
+        self.insert_lines_above(2)
+        from agents.wikify import check_cmd
+        rc, text = quiet(check_cmd.cmd_check, self.root)
+        self.assertEqual(rc, 0, text)  # fell back to the hash windows: still a plain move
+        self.assertFalse(victim.exists())
+
     def test_log_names_since_gives_up_when_history_is_truncated(self):
         base = gitview.head(self.root)
         self.write_code("x = 1\n", rel="app/a.py", msg="a")

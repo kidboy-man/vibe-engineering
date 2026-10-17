@@ -27,6 +27,7 @@ def load_guard():
     spec = importlib.util.spec_from_file_location("wikify_guard_perf", HOOK)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module._find_vibe = lambda: None  # the machine's own `vibe` must not change the verdict
     return module
 
 

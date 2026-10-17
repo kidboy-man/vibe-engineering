@@ -206,12 +206,18 @@ def show_head_strict(root: Path, rel: str) -> str | None:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+_COMMIT_ID = __import__("re").compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 _HUNK = __import__("re").compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", __import__("re").M)
 
 
 def diff_hunks(root: Path, base: str, rel: str) -> list[tuple[int, int, int, int]] | None:
     """``(old_start, old_count, new_start, new_count)`` per hunk of ``rel`` in ``base..HEAD``
-    (zero context, no rename detection); None when git cannot produce the diff."""
+    (zero context, no rename detection); None when git cannot produce the diff.
+
+    ``base`` may come from a repo-controlled file (``covered`` in .wikify.json), so only a full
+    commit id is accepted: anything else, such as ``--output=...``, would be read as an option."""
+    if not _COMMIT_ID.fullmatch(base):
+        return None
     result = run_git(root, "diff", "--no-renames", "--no-color", "-U0", f"{base}..HEAD", "--", rel)
     if result.returncode != 0:
         return None
