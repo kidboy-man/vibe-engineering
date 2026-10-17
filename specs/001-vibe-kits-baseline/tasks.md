@@ -22,7 +22,7 @@ implementation tasks below carry `[US7]`.
 **Purpose**: Resolve the open design checks and create fixtures.
 
 - [X] T001 Confirm research.md D1 in source: read `agents/wikify/citations.py` and `agents/wikify/commands.py` and record in `docs/superpowers/specs/2026-10-17-wikify-adopt-design.md` whether (a) large human blocks hit any size cap, (b) headings/links inside human blocks are tolerated, (c) `verify` can report provenance-marked pages separately; state final choice Option A or B with reasons
-- [ ] T002 [P] Create fixture repo builders (empty docs, flat `docs/`, nested `docs/` with images and relative links, build-coupled swagger file, secret-bearing file) in `tests/fixtures/adopt/` and a helper `tests/wikify_adopt_helpers.py` that materializes them into a temp git repo
+- [X] T002 [P] Create fixture repo builders (empty docs, flat `docs/`, nested `docs/` with images and relative links, build-coupled file, secret-bearing file) as in-code file maps in the helper (no static tree under `tests/fixtures/adopt/`; the walkthrough lives there) `tests/wikify_adopt_helpers.py` that materializes them into a temp git repo
 - [ ] T003 [P] Add a `tests/fixtures/adopt/WALKTHROUGH.md` skeleton describing the agent-driven loop from quickstart.md section 3 (filled in at T030)
 
 ---
@@ -31,13 +31,13 @@ implementation tasks below carry `[US7]`.
 
 **Purpose**: Shared pieces every adopt behavior depends on. No adopt command work starts before this phase.
 
-- [ ] T004 Write failing tests in `tests/test_wikify_adopt.py` for mapping-file parsing: `source-glob -> destination-folder/` lines, `#` comments, first-match-wins, rejection over the `.wikifyignore`-style limits (size, pattern count, wildcards per pattern), non-UTF-8 and symlinked file rejected
-- [ ] T005 Implement mapping parse/render in `agents/wikify/adopt_plan.py` reusing `citations.read_control_lines` and glob compile helpers; make T004 pass
-- [ ] T006 [P] Write failing test in `tests/test_wikify_citations.py` that `.wikifymap` is a control file reported by `verify` when git ignores it; then add `.wikifymap` to `CONTROL_FILES` in `agents/wikify/citations.py` and `CONTROL_RELS` in `agents/wikify/state.py`
-- [ ] T007 Write failing tests for candidate classification in `tests/test_wikify_adopt.py`: kinds `spec|adr|reference|asset|skipped` and skip reasons `build-coupled|ignored|secret-path|secret-hit|non-markdown|collision|unmapped` from data-model.md; unique destination; never an existing path; symlinks skipped
-- [ ] T008 Implement candidate model and classification in `agents/wikify/adopt_plan.py` reusing `docs_inventory.inventory`, `citations.is_ignored`, and the `scan` secret checks (no auto allow-listing); make T007 pass
-- [ ] T009 Write failing tests for the page wrapper in `tests/test_wikify_adopt.py`: body wrapped verbatim in one `<!-- wikify:human -->` block with first inner line `<!-- imported from=<source> -->`; body SHA-256 recorded before the move equals the hash of the unwrapped inner body; a body that already contains the human end marker is refused as a skip
-- [ ] T010 Implement the wrapper in `agents/wikify/adopt_plan.py`; make T009 pass (if T001 chose Option B, replace with the page-kind marker design and update tests first)
+- [X] T004 Write failing tests in `tests/test_wikify_adopt.py` for mapping-file parsing: `source-glob -> destination-folder/` lines, `#` comments, first-match-wins, rejection over the `.wikifyignore`-style limits (size, pattern count, wildcards per pattern), non-UTF-8 and symlinked file rejected
+- [X] T005 Implement mapping parse/render in `agents/wikify/adopt_plan.py` reusing `citations.read_control_lines` and glob compile helpers; make T004 pass
+- [X] T006 [P] Write failing test in `tests/test_wikify_citations.py` that `.wikifymap` is a control file reported by `verify` when git ignores it; then add `.wikifymap` to `CONTROL_FILES` in `agents/wikify/citations.py` and `CONTROL_RELS` in `agents/wikify/state.py`
+- [X] T007 Write failing tests for candidate classification in `tests/test_wikify_adopt.py`: kinds `spec|adr|reference|asset|skipped` and skip reasons `build-coupled|ignored|secret-path|secret-hit|non-markdown|collision|unmapped` from data-model.md; unique destination; never an existing path; symlinks skipped
+- [X] T008 Implement candidate model and classification in `agents/wikify/adopt_plan.py` reusing `docs_inventory.inventory`, `citations.is_ignored`, and the `scan` secret checks (no auto allow-listing); make T007 pass
+- [X] T009 Write failing tests for the page wrapper in `tests/test_wikify_adopt.py`: body wrapped verbatim in one `<!-- wikify:human -->` block with first inner line `<!-- imported from=<source> -->`; body SHA-256 recorded before the move equals the hash of the unwrapped inner body; a body that already contains the human end marker is refused as a skip
+- [X] T010 Implement the wrapper in `agents/wikify/adopt_plan.py`; make T009 pass (if T001 chose Option B, replace with the page-kind marker design and update tests first)
 
 **Checkpoint**: mapping, classification, and wrapping unit-tested; no command wiring yet.
 
