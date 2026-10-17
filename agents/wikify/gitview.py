@@ -79,6 +79,49 @@ def regular_tracked(root: Path) -> set[str] | None:
     return out
 
 
+def ls_tree_files(root: Path, rel: str) -> list[str] | None:
+    """Regular files (100644/100755) under ``rel`` in the HEAD tree; None on error.
+
+    Symlinks and gitlinks are dropped for the same reason as ``regular_tracked``.
+    """
+    if head(root) is None:
+        return []
+    result = run_git(root, "ls-tree", "-r", "-z", "HEAD", "--", rel)
+    if result.returncode != 0:
+        return None
+    out: list[str] = []
+    for entry in result.stdout.split("\0"):
+        meta, _, path = entry.partition("\t")
+        if path and meta.split(" ", 1)[0] in ("100644", "100755"):
+            out.append(path)
+    return sorted(out)
+
+
+MAX_LOG_COMMITS = 2000
+
+
+def log_names_since(root: Path, base: str) -> list[tuple[str, list[str]]] | None:
+    """``(short hash, paths)`` per commit in ``base..HEAD``, newest first; None on error.
+
+    One git call, capped at ``MAX_LOG_COMMITS`` commits.
+    """
+    result = run_git(
+        root, "log", "-m", "--no-renames", "--name-only", f"-n{MAX_LOG_COMMITS + 1}",
+        "--format=%x01%h", f"{base}..HEAD",
+    )
+    if result.returncode != 0:
+        return None
+    commits: list[tuple[str, list[str]]] = []
+    for line in result.stdout.splitlines():
+        if line.startswith("\x01"):
+            commits.append((line[1:], []))
+        elif line and commits:
+            commits[-1][1].append(line)
+    if len(commits) > MAX_LOG_COMMITS:
+        return None  # truncated history would undercount touched files; callers say so
+    return commits
+
+
 def ignored(root: Path, rels: list[str] | tuple[str, ...]) -> list[str]:
     """Which untracked ``rels`` git would ignore; [] on error or timeout."""
     result = run_git(root, "check-ignore", "--", *rels)
@@ -142,6 +185,46 @@ def show_head(root: Path, rel: str) -> str | None:
     """Content of ``rel`` at HEAD, so uncommitted edits never count."""
     result = run_git(root, "show", f"HEAD:{rel}")
     return result.stdout if result.returncode == 0 else None
+
+
+def show_head_strict(root: Path, rel: str) -> str | None:
+    """UTF-8 text of ``rel`` at HEAD with universal newlines, like ``Path.read_text``;
+    None when the blob is missing or not valid UTF-8 (so HEAD and work-tree reads agree)."""
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotePath=false", "show", f"HEAD:{rel}"],
+            cwd=root, capture_output=True, check=False, timeout=TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        text = result.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+_COMMIT_ID = __import__("re").compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+_HUNK = __import__("re").compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", __import__("re").M)
+
+
+def diff_hunks(root: Path, base: str, rel: str) -> list[tuple[int, int, int, int]] | None:
+    """``(old_start, old_count, new_start, new_count)`` per hunk of ``rel`` in ``base..HEAD``
+    (zero context, no rename detection); None when git cannot produce the diff.
+
+    ``base`` may come from a repo-controlled file (``covered`` in .wikify.json), so only a full
+    commit id is accepted: anything else, such as ``--output=...``, would be read as an option."""
+    if not _COMMIT_ID.fullmatch(base):
+        return None
+    result = run_git(root, "diff", "--no-renames", "--no-color", "-U0", f"{base}..HEAD", "--", rel)
+    if result.returncode != 0:
+        return None
+    return [
+        (int(a), int(b) if b else 1, int(c), int(d) if d else 1)
+        for a, b, c, d in _HUNK.findall(result.stdout)
+    ]
 
 
 def last_commit_touching(root: Path, rel: str) -> str | None:

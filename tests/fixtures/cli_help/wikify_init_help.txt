@@ -1,0 +1,7 @@
+usage: vibe wikify init [-h] [--update-protocol] [--apply]
+
+options:
+  -h, --help         show this help message and exit
+  --update-protocol  Replace WIKIFY.md only if it is an unmodified older
+                     shipped version (dry run unless --apply)
+  --apply            With --update-protocol: write the file

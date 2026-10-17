@@ -1,3 +1,4 @@
+import json
 import subprocess
 import tempfile
 import unittest
@@ -110,7 +111,7 @@ class StateTests(RepoCase):
     def test_corrupt_state_defaults(self):
         p = self.root / STATE
         p.parent.mkdir(parents=True)
-        default = {"version": 1, "covered": None}
+        default = state._default()
         for bad in ("[]", '{"covered": 5}', "not json", '"s"', '{"covered": ["a"]}'):
             p.write_text(bad)
             self.assertEqual(state.load(self.root), default, bad)
@@ -118,7 +119,7 @@ class StateTests(RepoCase):
 
     def test_load_valid(self):
         state.save(self.root, "abc")
-        self.assertEqual(state.load(self.root), {"version": 1, "covered": "abc"})
+        self.assertEqual(state.load(self.root), {**state._default(), "covered": "abc"})
 
     def test_loop_proof(self):
         self.commit("src/a.py")
@@ -201,6 +202,107 @@ class StateTests(RepoCase):
             sorted(["src/ü.py", "docs/wiki/é.md", STATE]),
         )
         self.assertTrue(state.is_fresh(self.root))
+
+
+class AtomicWriteTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    def test_exclusive_never_overwrites_and_leaves_no_temp_file(self):
+        from agents.wikify import atomic
+        target = self.dir / "page.md"
+        atomic.write_atomic(target, "first", exclusive=True)
+        with self.assertRaises(FileExistsError):
+            atomic.write_atomic(target, "second", exclusive=True)
+        self.assertEqual(target.read_text(), "first")
+        self.assertEqual([p.name for p in self.dir.iterdir()], ["page.md"])
+
+    def test_plain_write_replaces(self):
+        from agents.wikify import atomic
+        target = self.dir / "page.md"
+        atomic.write_atomic(target, "first")
+        atomic.write_atomic(target, "second")
+        self.assertEqual(target.read_text(), "second")
+
+    def test_a_stale_temp_file_from_a_recycled_pid_does_not_block(self):
+        import os
+        from agents.wikify import atomic
+        (self.dir / f".page.md.{os.getpid()}.tmp").write_text("stale")
+        atomic.write_atomic(self.dir / "page.md", "ok", exclusive=True)
+        self.assertEqual((self.dir / "page.md").read_text(), "ok")
+
+
+class StateKeysTests(RepoCase):
+    def write_raw(self, payload):
+        path = self.root / STATE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_defaults_when_absent(self):
+        self.assertEqual(
+            state.load(self.root),
+            {"version": 1, "covered": None, "citations": {}, "imported": {}, "imported_mode": "editable"},
+        )
+
+    def test_new_keys_load(self):
+        self.write_raw({
+            "version": 1, "covered": "abc", "imported_mode": "frozen",
+            "citations": {"p|a.py:1-2|f": "0123456789ab"}, "imported": {"specs/x.md": "0123456789abcdef"},
+        })
+        loaded = state.load(self.root)
+        self.assertEqual(loaded["imported_mode"], "frozen")
+        self.assertEqual(loaded["citations"], {"p|a.py:1-2|f": "0123456789ab"})
+        self.assertEqual(loaded["imported"], {"specs/x.md": "0123456789abcdef"})
+
+    def test_mistyped_values_fall_back(self):
+        self.write_raw({"imported_mode": "bogus", "citations": ["x"], "imported": {"p": 3}})
+        loaded = state.load(self.root)
+        self.assertEqual(loaded["imported_mode"], "editable")
+        self.assertEqual(loaded["citations"], {})
+        self.assertEqual(loaded["imported"], {})
+
+    def test_save_preserves_existing_keys_and_unknown_ones(self):
+        self.write_raw({
+            "version": 1, "covered": "old", "imported_mode": "frozen", "future": {"k": 1},
+            "citations": {"k": "v"}, "imported": {"p": "h"},
+        })
+        state.save(self.root, "new")
+        data = json.loads((self.root / STATE).read_text())
+        self.assertEqual(data["covered"], "new")
+        self.assertEqual(data["imported_mode"], "frozen")
+        self.assertEqual(data["future"], {"k": 1})
+        self.assertEqual(data["citations"], {"k": "v"})
+        self.assertEqual(data["imported"], {"p": "h"})
+
+    def test_save_replaces_maps_when_given(self):
+        state.save(self.root, "a", citations={"k": "v"}, imported={"p": "h"})
+        state.save(self.root, "b", citations={"k2": "v2"})
+        data = json.loads((self.root / STATE).read_text())
+        self.assertEqual(data["citations"], {"k2": "v2"})
+        self.assertEqual(data["imported"], {"p": "h"})
+
+    def test_output_is_sorted_one_key_per_line_and_version_one(self):
+        state.save(self.root, "a", citations={"b": "2", "a": "1"})
+        text = (self.root / STATE).read_text()
+        self.assertEqual(json.loads(text)["version"], 1)
+        self.assertLess(text.index('"a": "1"'), text.index('"b": "2"'))
+        self.assertIn('\n    "a": "1",\n', text)
+
+    def test_save_refuses_to_rewrite_an_unparseable_state_file(self):
+        path = self.root / STATE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conflict = '<<<<<<< ours\n{"imported": {"a.md": "x"}}\n=======\n{}\n>>>>>>> theirs\n'
+        path.write_text(conflict)
+        with self.assertRaises(state.UnsafeWikiPath):
+            state.save(self.root, "abc")
+        self.assertEqual(path.read_text(), conflict)
+
+    def test_save_keeps_old_minimal_shape_when_unused(self):
+        state.save(self.root, "a")
+        data = json.loads((self.root / STATE).read_text())
+        self.assertEqual(data, {"version": 1, "covered": "a"})
 
 
 if __name__ == "__main__":

@@ -239,3 +239,34 @@ def validate_map(
     for rel in sorted(pages - covered - {"index.md"}):
         errors.append(f"index.md:{block.begin_line}: page not reachable from the map: {rel}")
     return errors
+
+
+CAP_WARN_RATIO = 0.8
+GROUP_MIN_ENTRIES = 5
+
+
+def cap_usage(text: str) -> tuple[float, float]:
+    """(entries / MAX_ENTRIES, bytes / MAX_BYTES) of the map block in ``text``; (0, 0) without one."""
+    masked = _mask(text)
+    found = _first_block(masked)
+    if found is None:
+        return 0.0, 0.0
+    _, body_start, end = found
+    count = len(parse_map(text).entries)
+    return count / MAX_ENTRIES, len(masked[body_start:end].encode("utf-8")) / MAX_BYTES
+
+
+def group_suggestions(block: MapBlock) -> list[tuple[str, int]]:
+    """(folder, entries) for folders with many direct entries and no folder index entry yet."""
+    folders: dict[str, int] = {}
+    indexed: set[str] = set()
+    for entry in block.entries:
+        folder, sep, rest = entry.path.partition("/")
+        if not sep:
+            continue
+        folders[folder] = folders.get(folder, 0) + 1
+        if rest == "index.md":
+            indexed.add(folder)
+    return sorted(
+        (folder, n) for folder, n in folders.items() if n >= GROUP_MIN_ENTRIES and folder not in indexed
+    )

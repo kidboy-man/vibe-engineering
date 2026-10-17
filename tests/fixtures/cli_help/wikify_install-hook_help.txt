@@ -1,0 +1,5 @@
+usage: vibe wikify install-hook [-h] [--apply]
+
+options:
+  -h, --help  show this help message and exit
+  --apply     Write the hook (default: dry run)

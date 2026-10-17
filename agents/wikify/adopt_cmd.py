@@ -14,7 +14,8 @@ import stat
 from pathlib import Path
 
 from agents.wikify import adopt_plan as ap
-from agents.wikify import adopt_map, adopt_refs, agentmap, citations, docs_cmd, gitview, state
+from agents.wikify.atomic import write_atomic as _write_atomic
+from agents.wikify import adopt_map, adopt_refs, agentmap, citations, docs_cmd, gitview, imported, state
 from agents.wikify import docs_inventory as di
 from agents.wikify.pointer import _safe
 from agents.wikify.state import WIKI_DIR
@@ -166,21 +167,6 @@ def _unsafe_tree(root: Path, map_file: str | None = None) -> str | None:
     return None
 
 
-def _write_atomic(path: Path, text: str, exclusive: bool = False) -> None:
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(tmp, flags, 0o666)
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(text.encode("utf-8"))
-        if exclusive and path.exists():
-            raise FileExistsError(path.name)
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-
-
 def _dirs_safe(root: Path, rel: str) -> bool:
     """Every existing directory on the way to ``docs/wiki/<rel>`` is a plain directory."""
     here = root
@@ -312,6 +298,19 @@ def _other_pages(root: Path, moves: list[ap.Candidate]) -> bool:
     return any(rel not in ("index.md", *mine) for rel, _ in citations.walk_wiki(root)[1])
 
 
+def _register(root: Path, moves: list[ap.Candidate]) -> None:
+    """Record the hash of every page this run created, so edits to them are tracked."""
+    hashes: dict[str, str] = {}
+    for c in moves:
+        text = _read_wiki_text(root, c.destination)
+        if text is not None and imported.is_imported_shape(text):
+            hashes[c.destination] = imported.page_hash(text)
+    try:
+        imported.register(root, hashes)
+    except (state.UnsafeWikiPath, OSError):
+        print("note: could not record the moved pages in .wikify.json; run vibe wikify migrate-imported")
+
+
 def _apply(root: Path, plan: ap.Plan, prune_sources: bool, rewrite: bool = False) -> int:
     moves = [c for c in plan.candidates if not c.reason]
     if not moves:
@@ -384,6 +383,7 @@ def _apply(root: Path, plan: ap.Plan, prune_sources: bool, rewrite: bool = False
         print(f"removed {WIKI_DIR}{_safe(rel)}")
     for rel in stale:
         print(f"stale {WIKI_DIR}{_safe(rel)} (use --prune-sources to remove)")
+    _register(root, moves)
     print(f"moved {len(moves)} doc(s). Next, in order:")
     print('  1. git commit -m "docs(wiki): move docs into the wiki"   # staged renames only')
     print("  2. vibe wikify verify && vibe wikify mark")

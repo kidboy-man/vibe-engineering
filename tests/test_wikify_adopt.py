@@ -312,6 +312,19 @@ class ReportTests(AdoptCase):
         self.assertEqual(git(self.root, "status", "--porcelain"), before)
 
 
+class ReplaceBlockTests(unittest.TestCase):
+    def test_a_quoted_marker_inside_a_human_block_is_not_the_map(self):
+        from agents.wikify import adopt_map
+        text = (
+            "# Wiki index\n\n<!-- wikify:human -->\nExample:\n<!-- wikify:map -->\n- [X](x.md) — old\n"
+            "<!-- /wikify:map -->\n<!-- /wikify:human -->\n\n<!-- wikify:map -->\n- [A](a.md) — hint\n<!-- /wikify:map -->\n"
+        )
+        new = adopt_map._replace_block(text, ["- [B](b.md) — new hint"])
+        self.assertIn("Example:\n<!-- wikify:map -->\n- [X](x.md) — old\n<!-- /wikify:map -->", new)
+        self.assertIn("- [B](b.md) — new hint", new)
+        self.assertNotIn("- [A](a.md)", new)
+
+
 class ApplyCase(AdoptCase):
     def apply(self, **kw):
         buf = io.StringIO()

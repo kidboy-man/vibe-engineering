@@ -11,7 +11,7 @@ publishing channel: nothing lands here without the verifier and the user.
 3. Run `vibe wikify verify` and fix every error line.
 4. Run `vibe wikify mark` (it re-runs verify, then records the covered commit).
 5. Show the user the verify output, including any `HUMAN BLOCK CHANGED`,
-   `ALLOW-LIST CHANGED` and `ALLOW-LISTED` lines; the exact path list
+   `IMPORTED PAGE EDITED`, `ALLOW-LIST CHANGED` and `ALLOW-LISTED` lines; the exact path list
    (`Files to commit:` from `mark`, or `git status --short -- docs/wiki`); and
    the content (`git add -N -- docs/wiki && git diff -- docs/wiki`, where `-N`
    makes new pages appear in the diff).
@@ -20,9 +20,10 @@ publishing channel: nothing lands here without the verifier and the user.
 7. Retry the push.
 
 If `.wikify.json` has a merge conflict, take either side and rerun
-`vibe wikify mark`. After a squash merge the wiki reads as stale (the squashed
-commit mixes code with `.wikify.json`): run `vibe wikify mark` and make one
-docs-only commit.
+`vibe wikify mark`. After a squash merge (code and `.wikify.json` in one
+commit) `vibe wikify check` still passes when nothing drifted, because it judges
+the tree, not the commit order. Run `vibe wikify mark` to re-baseline and make
+one docs-only commit.
 
 For a first or `--full` plan on a large repo, work one bounded context (see
 `contexts` in the plan) at a time and confirm each batch with the user before
@@ -88,6 +89,21 @@ Every factual paragraph needs a citation:
 - No personal data (authors, emails, commit messages), no secrets, no absolute
   paths.
 
+## Keeping the wiki in sync
+
+- `vibe wikify check` (read-only) names the pages whose citations drifted:
+  `moved` (same text, new line numbers), `changed` (the cited lines were edited),
+  `missing` (file or symbol gone), plus warnings for `uncovered` areas and edited
+  imported pages. It exits 1 only for `changed` or `missing`. `--ci` judges the
+  committed wiki at HEAD; `--json` prints the result for tools.
+- `vibe wikify reanchor` previews, and `--apply` rewrites, only the line numbers of
+  `moved` citations. It refuses ambiguous or edited citations. `vibe wikify mark
+  --reanchor` heals first, then verifies and records the baseline. Re-run `mark`
+  after any change to record the new range hashes in `.wikify.json`.
+- For a `changed` or `missing` page, read the code behind each claim before editing;
+  never invent facts, and report a doc that contradicts the code instead of
+  smoothing it over. Delete or rewrite a stale page only after the user agrees.
+
 ## Human blocks
 
 Text between these markers belongs to people:
@@ -97,7 +113,7 @@ Text between these markers belongs to people:
     <!-- /wikify:human -->
 
 Never rewrite or edit a human block. The verifier lists changed or removed blocks so the user
-can review them.
+can review them. Imported pages (next section) are different: they are editable.
 
 ## Doc sources
 
@@ -118,8 +134,15 @@ can review them.
 
 `vibe wikify adopt` moves docs into the wiki (dry run unless `--apply`). Write `.wikifymap`
 (`<glob> -> <folder>/ [kind=spec|adr|reference]`), get approval, `--apply`, commit the renames,
-`verify`, `mark`, show the diff, docs-only commit. Imported prose is documented, not code-verified:
-never edit it; report contradictions. Docs that cannot move stay put with a reason.
+`verify`, `mark`, show the diff, docs-only commit. Docs that cannot move stay put with a reason.
+
+Moved docs are **imported pages**: recorded by content hash in `.wikify.json`. They are
+documented, not code-verified, and they are editable: when a feature changes a spec or guide,
+update it. After editing, run `verify` (it prints `IMPORTED PAGE EDITED: <page>`, a notice, not an
+error), then `mark` to record the new hash. Report doc-versus-code contradictions to the user.
+Docs adopted before this existed are registered with `vibe wikify migrate-imported` (dry run
+unless `--apply`). A repo can freeze them with `"imported_mode": "frozen"` in `.wikify.json`;
+then an edit is a `verify` error.
 
 ## Trust and limits
 
@@ -137,4 +160,5 @@ never edit it; report contradictions. Docs that cannot move stay put with a reas
   code and headings are not checked for citations, and link text is not
   verified. The built-in secret scan is a floor, not a full scanner. The user
   must still review the wiki before it is pushed.
-- The push hook checks freshness only; it does not re-run `verify`.
+- The push hook asks `vibe wikify check --ci` for drift (and falls back to commit order); it
+  does not re-run `verify`.

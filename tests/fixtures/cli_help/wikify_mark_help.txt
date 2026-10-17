@@ -1,0 +1,5 @@
+usage: vibe wikify mark [-h] [--reanchor]
+
+options:
+  -h, --help  show this help message and exit
+  --reanchor  Re-anchor moved citations before verifying

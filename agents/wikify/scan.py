@@ -9,6 +9,7 @@ well-known token shapes, home paths, emails and quoted credential assignments.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -119,6 +120,24 @@ def load_allow(root: Path) -> set[tuple[str, str]]:
     return parse_allow(raw)
 
 
+STATE_NAME = ".wikify.json"
+
+
+def _without_baselines(text: str) -> str:
+    """The state file minus its machine-written hash maps. Their keys embed cited symbol names
+    (``...|RefreshToken``) next to a hex hash, which reads as a secret assignment. Every other
+    key is still scanned; an unparseable file is scanned whole."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text
+    if not isinstance(data, dict):
+        return text
+    for key in ("citations", "imported"):
+        data.pop(key, None)
+    return json.dumps(data, indent=2, sort_keys=True)
+
+
 def _all_hits(root: Path) -> list[tuple[str, int, str, str]]:
     wiki = Path(root) / WIKI_DIR
     if not wiki.is_dir():
@@ -155,6 +174,8 @@ def _all_hits(root: Path) -> list[tuple[str, int, str, str]]:
             except OSError:
                 items.append((path, [(rel, 0, "unreadable", "unreadable")]))
                 continue
+            if rel == STATE_NAME:
+                text = _without_baselines(text)
             items.append((path, [(rel, line, rule, hit) for line, rule, hit in _scan(text)]))
     return [hit for _, hits in sorted(items, key=lambda i: i[0]) for hit in hits]
 

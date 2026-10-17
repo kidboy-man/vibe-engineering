@@ -1,4 +1,5 @@
 import base64
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -226,6 +227,40 @@ class ExternalCase(unittest.TestCase):
             self.assertEqual(scan.external_scanner(), "trufflehog")
         with mock.patch.object(scan.shutil, "which", return_value=None):
             self.assertIsNone(scan.external_scanner())
+
+
+class StateFileScanTests(unittest.TestCase):
+    """Hash-map keys embed cited symbol names; they must not read as secret assignments."""
+
+    def write(self, root, payload):
+        path = Path(root) / "docs/wiki/.wikify.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+    def test_symbol_names_in_the_baseline_maps_are_not_secrets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write(tmp, {
+                "version": 1, "covered": "abc",
+                "citations": {
+                    "p.md|a/refresh_token.go:9-28|RefreshToken": "4138532df1c2",
+                    "p.md|a/auth.go:809-868|ResetPassword": "83feb576b074",
+                    "p.md|a/c.go:1-2|ApiSecretKey": "0123456789ab",
+                },
+                "imported": {"specs/password-policy.md": "0123456789abcdef"},
+            })
+            self.assertEqual(scan.scan_wiki(tmp), [])
+
+    def test_other_state_keys_are_still_scanned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write(tmp, {"version": 1, "api_key": "AKIAABCDEFGHIJKLMNOP", "citations": {}})
+            self.assertTrue(scan.scan_wiki(tmp))
+
+    def test_an_unparseable_state_file_is_scanned_whole(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "docs/wiki/.wikify.json"
+            path.parent.mkdir(parents=True)
+            path.write_text('{"token": "AKIAABCDEFGHIJKLMNOP"')
+            self.assertTrue(scan.scan_wiki(tmp))
 
 
 if __name__ == "__main__":

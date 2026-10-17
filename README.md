@@ -334,9 +334,33 @@ vibe kits wikify uninstall --yes
 vibe wikify init | plan | verify | mark     # per-repo commands
 vibe wikify link [--dry-run]                # agent pointer block (see below)
 vibe wikify docs [--dry-run]                # outline pages for existing docs (see below)
+vibe wikify check [--ci] [--json]           # which pages drifted from the code (read-only)
+vibe wikify reanchor [--apply]              # fix line numbers of moved citations
+vibe wikify sync                            # check + reanchor preview + ordered work list
+vibe wikify migrate-imported [--apply]      # register adopted docs as editable imported pages
+vibe wikify fix-links [--apply]             # repoint dead paths in imported pages via .wikifymap
+vibe wikify install-hook [--apply]          # pre-push git hook running check --ci
+vibe wikify init --update-protocol [--apply]  # refresh WIKIFY.md if it is an unmodified older version
 ```
 
-Push flow: the hook blocks the push, the agent updates `docs/wiki`, runs
+### Drift checks and sync
+
+`vibe wikify check` compares every citation with the code at `HEAD` and names the pages
+that need work: `moved` (same lines, new numbers; heal with `reanchor`), `changed` (the cited
+lines were edited), `missing` (file or symbol gone). It also warns about `uncovered` code areas, edited
+imported pages, dead references in imported prose (`DEAD PATH`, `DEAD SYMBOL`, `STALE LINK`; name-only
+matching, a floor not proof) and a map near its caps. It exits 1 only for `changed` or `missing`, and
+fails closed on any error. `mark` stores a hash of each cited range in `docs/wiki/.wikify.json`, which
+is what lets `check` tell `changed` from `moved`; citations without a hash yet are reported as
+"no range hash yet" until the next `mark`.
+
+`--ci` judges the committed wiki, so it also works as a CI step and as a git `pre-push` hook (see
+[docs/wikify-ci.md](docs/wikify-ci.md)). The agent hook asks the same check when `vibe` is on `PATH`.
+Squash merges no longer need a manual fix: the check judges the tree, not the commit order. The loop an
+agent follows is in [docs/wikify-sync-walkthrough.md](docs/wikify-sync-walkthrough.md); upgrading is
+described in [docs/wikify-migration.md](docs/wikify-migration.md).
+
+Push flow (commit-order fallback; with a recent `vibe` the hook asks `vibe wikify check --ci` first): the hook blocks the push, the agent updates `docs/wiki`, runs
 `vibe wikify verify` and `vibe wikify mark`, you confirm, a docs-only commit
 records the mark, and the push goes through. `plan` lists what to cover; it does a
 full plan, not an incremental one, when the commit that last touched
@@ -500,17 +524,17 @@ string (`bash -c 'git push'`, `sh -c`), aliases and scripts are not parsed.
 
 Limitations:
 
-- Pushes typed in a plain terminal are not covered.
+- Pushes typed in a plain terminal are not covered by the agent hook; use `vibe wikify install-hook` or CI.
 - The hook checks `HEAD`, not the ref being pushed.
 - It is a convenience gate, not a security control, and fails open on errors.
 - The verifier is structural, not semantic: one citation covers its whole
   paragraph, fenced code and headings are not checked for citations, and link
   text is not verified. You must still review the wiki.
-- The hook gates freshness only; it does not re-run `verify`, so a docs-only
-  commit made without `mark`/`verify` passes the gate.
-- After a squash merge the wiki reads as stale (the squashed commit mixes code
-  with `.wikify.json`): `plan` then lists everything as uncovered (full plan);
-  update the wiki, run `vibe wikify mark` and make one docs-only commit.
+- The hook gates drift (via `check`) or, without `vibe` or hashes, freshness; it does not re-run
+  `verify`, so a docs-only commit made without `mark`/`verify` can pass the gate.
+- After a squash merge the commit-order rule reads the wiki as stale (the squashed commit mixes code
+  with `.wikify.json`) and `plan` lists everything as uncovered (full plan); `check` still passes when
+  nothing drifted. Run `vibe wikify mark` and make one docs-only commit to re-baseline.
 - The built-in secret scan is a floor, not a complete scanner. Reviewed false
   positives go in `.wikify-allow` (see Control files).
 - Codex needs a one-time `/hooks` trust review.
@@ -617,9 +641,12 @@ After `--apply` it prints the order to finish in: (1) commit the staged renames
 
 - **Content is preserved.** Each body is wrapped byte for byte in a
   `<!-- wikify:human -->` block whose first line is `<!-- imported from=<path> -->`. It is
-  documented prose, not code-verified; `verify` lists the new blocks as human-block notices
-  and stays strict for every other page. With `--rewrite-refs` the only change is relative link
-  targets.
+  documented prose, not code-verified. `adopt --apply` records each moved page's content hash in
+  `.wikify.json`, so the page is an **imported page**: editing it later is allowed and shows as an
+  `IMPORTED PAGE EDITED: <page>` notice (not an error) until `mark` re-records the hash. Docs adopted
+  by an earlier version are registered with `vibe wikify migrate-imported --apply`; a repo can set
+  `"imported_mode": "frozen"` in `.wikify.json` to make such an edit an error. With `--rewrite-refs`
+  the only change adopt itself makes is relative link targets.
 - **Dry run by default; never overwrites.** A destination that exists is a `collision` skip.
   A dirty tree or detached HEAD is refused without `--force`. A second run after both commits
   is a no-op; resuming an interrupted run needs `--force`.
@@ -631,10 +658,10 @@ After `--apply` it prints the order to finish in: (1) commit the staged renames
   rewrites `sources/index.md`; `--prune-sources` also removes unrelated stale generated pages.
 - **Map.** One map entry per page; past 60 entries or 6144 bytes, pages are grouped under
   per-folder `index.md` pages.
-- **Skill.** `vibe kits wikify install` also installs the `wikify-adopt` skill into
-  `~/.claude/skills` (Claude Code only); a short version of the loop is in `docs/wiki/WIKIFY.md` for
-  other agents. The skill never rewrites migrated prose and reports doc-versus-code
-  contradictions as findings.
+- **Skills.** `vibe kits wikify install` also installs the `wikify-adopt` and `wikify-sync` skills into
+  `~/.claude/skills` (Claude Code only); a short version of the loops is in `docs/wiki/WIKIFY.md` for
+  other agents. The adopt skill never rewrites migrated prose during adopt; the sync skill edits only
+  the pages `vibe wikify sync` names. Both report doc-versus-code contradictions as findings.
 - **Limits.** Inbound references from code comments, CI files and the root `README.md` are listed,
   never edited. Reference detection matches written-out paths and relative markdown links only.
 

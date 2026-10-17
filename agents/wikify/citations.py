@@ -172,14 +172,23 @@ def ignore_negations(root: Path) -> list[str]:
     return [str(n) for n, ln in enumerate(lines, 1) if ln.strip().startswith("!")]
 
 
-def ignore_over_limits(root: Path) -> bool:
-    """True when .wikifyignore exceeds the pattern-count/length/wildcard caps."""
-    lines, status = read_control_lines(Path(root) / IGNORE_REL)
-    globs = _globs(lines) if status == "ok" else []
+def _over_limits(globs: list[str]) -> bool:
     return len(globs) > MAX_IGNORE_PATTERNS or any(
         len(g) > MAX_IGNORE_PATTERN_LEN or len(_WILD.findall(g)) > MAX_IGNORE_WILDCARDS
         for g in globs
     )
+
+
+def ignore_over_limits(root: Path) -> bool:
+    """True when .wikifyignore exceeds the pattern-count/length/wildcard caps."""
+    lines, status = read_control_lines(Path(root) / IGNORE_REL)
+    return _over_limits(_globs(lines) if status == "ok" else [])
+
+
+def globs_from_text(text: str | None) -> list[str]:
+    """Ignore globs from committed ``.wikifyignore`` text; [] when absent or over the caps."""
+    globs = _globs((text or "").splitlines())
+    return [] if _over_limits(globs) else globs
 
 
 def ignore_status(root: Path) -> str:

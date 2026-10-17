@@ -27,6 +27,7 @@ def load_guard():
     spec = importlib.util.spec_from_file_location("wikify_guard_perf", HOOK)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module._find_vibe = lambda: None  # the machine's own `vibe` must not change the verdict
     return module
 
 
@@ -201,6 +202,71 @@ class HookPerfTests(Timed):
             self.assertEqual(blocked, self.guard.MESSAGE)
             over = f'git commit -m "{"x" * (70 * 1024)}" && git push'
             self.assertIsNone(self.decide(over, str(root)))
+
+
+class DriftPerfTests(unittest.TestCase):
+    """Call counts and doubling ratios, never wall-clock limits (constitution Principle IV)."""
+
+    def check_git_calls(self, pages):
+        from unittest import mock
+
+        from agents.wikify import check_cmd
+        from tests.wikify_drift_helpers import CITE, DriftCase, quiet
+        from tests.test_wikify_state import git
+
+        class Case(DriftCase):
+            def runTest(self):
+                pass
+
+        case = Case()
+        case.setUp()
+        try:
+            for n in range(pages):
+                case.page(f"Handle {CITE}\n\nTail (src: app/svc.py:21-30)\n", rel=f"docs/wiki/p{n}.md")
+            git(case.root, "add", "-A")
+            git(case.root, "commit", "-q", "-m", "pages")
+            real = gitview.subprocess.run
+            calls = []
+
+            def spy(argv, *args, **kwargs):
+                calls.append(tuple(argv[3:]))  # drop: git -c core.quotePath=false
+                return real(argv, *args, **kwargs)
+
+            with mock.patch.object(gitview.subprocess, "run", side_effect=spy):
+                quiet(check_cmd.cmd_check, case.root, True)
+            return calls
+        finally:
+            case.doCleanups()
+
+    def test_check_git_calls_do_not_grow_with_the_number_of_pages(self):
+        few = self.check_git_calls(5)
+        many = self.check_git_calls(40)
+        shows = lambda calls: [c for c in calls if c[0] == "show" and "app/svc.py" in c[-1]]
+        logs = lambda calls: [c for c in calls if c[0] == "log"]
+        self.assertEqual(len(shows(few)), 1)
+        self.assertEqual(len(shows(many)), 1)  # one read per distinct cited file
+        self.assertEqual(len(logs(few)), len(logs(many)))
+        self.assertLessEqual(len(logs(many)), 2)
+        page_blob = lambda c: c[-1].startswith("HEAD:docs/wiki/") and c[-1].endswith(".md")
+        other = lambda calls: [c for c in calls if not page_blob(c)]
+        self.assertEqual(len(other(few)), len(other(many)))  # only the page blobs scale
+        self.assertEqual(len(many) - len(other(many)), 42)  # 40 pages + index.md + svc.md, one read each
+
+    def test_window_search_is_linear_in_file_length(self):
+        from agents.wikify import drift
+        from tests.wikify_perf_helpers import assert_scales_linearly
+
+        def make(n):
+            lines = [f"line {i}" for i in range(n)]
+            return lines, 50, drift.range_hash(lines, 10, 59)
+
+        assert_scales_linearly(self, make, drift.find_windows, 4000, label="find_windows")
+
+    def test_oversized_relocation_gives_up_instead_of_running_away(self):
+        from agents.wikify import drift
+
+        lines = [f"line {i}" for i in range(6000)]
+        self.assertIsNone(drift.find_windows(lines, 3000, "0" * 12))
 
 
 if __name__ == "__main__":

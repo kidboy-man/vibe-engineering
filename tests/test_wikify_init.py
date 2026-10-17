@@ -1,6 +1,12 @@
+import contextlib
+import importlib
+import io
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from agents.wikify import commands, init_cmd, scan
 from tests.test_wikify_state import RepoCase
@@ -41,7 +47,7 @@ class InitTests(RepoCase):
 
     def test_template_copied_byte_for_byte(self):
         self.assertTrue(TEMPLATE.is_file())
-        self.assertLessEqual(len(TEMPLATE.read_text().splitlines()), 140)
+        self.assertLessEqual(len(TEMPLATE.read_text().splitlines()), 180)
         init_cmd.cmd_init(cwd=self.root)
         self.assertEqual(self.wiki("WIKIFY.md").read_bytes(), TEMPLATE.read_bytes())
 
@@ -135,3 +141,89 @@ class InitTests(RepoCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UpdateProtocolTests(RepoCase):
+    OLD = "# WIKIFY: an older shipped protocol\n"
+
+    def setUp(self):
+        super().setUp()
+        init_cmd.cmd_init(cwd=self.root)
+        self.path = self.root / "docs/wiki/WIKIFY.md"
+        self.known = mock.patch.object(
+            init_cmd, "KNOWN_PROTOCOL_SHA256", frozenset({init_cmd.sha256(self.OLD.encode())})
+        )
+        self.known.start()
+        self.addCleanup(self.known.stop)
+
+    def run_update(self, apply=False):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = init_cmd.cmd_update_protocol(self.root, apply)
+        return rc, buf.getvalue()
+
+    def test_current_protocol_is_up_to_date(self):
+        rc, out = self.run_update(apply=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("up to date", out)
+
+    def test_dry_run_reports_and_writes_nothing(self):
+        self.path.write_text(self.OLD)
+        rc, out = self.run_update()
+        self.assertEqual(rc, 0)
+        self.assertIn("would replace", out)
+        self.assertEqual(self.path.read_text(), self.OLD)
+
+    def test_apply_replaces_a_pristine_older_version(self):
+        self.path.write_text(self.OLD)
+        rc, out = self.run_update(apply=True)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.path.read_bytes(), TEMPLATE.read_bytes())
+
+    def test_locally_edited_file_is_never_overwritten(self):
+        self.path.write_text(self.OLD + "my own rule\n")
+        for apply in (False, True):
+            rc, out = self.run_update(apply)
+            self.assertEqual(rc, 1)
+            self.assertIn("locally edited; not overwritten", out)
+        self.assertEqual(self.path.read_text(), self.OLD + "my own rule\n")
+
+    def test_a_planted_symlink_at_the_temp_name_is_never_followed(self):
+        self.path.write_text(self.OLD)
+        victim = self.root / "victim.txt"
+        victim.write_text("keep me\n")
+        (self.root / "docs/wiki" / f".WIKIFY.md.{os.getpid()}.tmp").symlink_to(victim)
+        rc, out = self.run_update(apply=True)
+        self.assertEqual(rc, 1)
+        self.assertEqual(victim.read_text(), "keep me\n")
+        self.assertEqual(self.path.read_text(), self.OLD)
+
+    def test_missing_file_and_symlink_are_refused(self):
+        self.path.unlink()
+        self.assertEqual(self.run_update(True)[0], 1)
+        target = self.root / "elsewhere.md"
+        target.write_text(self.OLD)
+        self.path.symlink_to(target)
+        rc, out = self.run_update(True)
+        self.assertEqual(rc, 1)
+        self.assertEqual(target.read_text(), self.OLD)
+
+    def test_every_historical_version_is_known(self):
+        init_cmd_known = importlib.reload(init_cmd).KNOWN_PROTOCOL_SHA256
+        rel = "agents/kits/wikify/templates/wikify/WIKIFY.md"
+        log = subprocess.run(
+            ["git", "log", "--follow", "--format=%H", "--", rel],
+            cwd=TEMPLATE.parents[5], capture_output=True, text=True, check=False,
+        )
+        commits = log.stdout.split()
+        if log.returncode != 0 or len(commits) < 2:
+            self.skipTest("git history of WIKIFY.md is not available")
+        current = init_cmd.sha256(TEMPLATE.read_bytes())
+        for commit in commits:
+            blob = subprocess.run(
+                ["git", "show", f"{commit}:{rel}"], cwd=TEMPLATE.parents[5], capture_output=True, check=True
+            ).stdout
+            digest = init_cmd.sha256(blob)
+            self.assertTrue(
+                digest == current or digest in init_cmd_known, f"{commit} is not in the known list"
+            )

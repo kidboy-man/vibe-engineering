@@ -28,13 +28,16 @@ reaches the network or their machine without agreement.
 Bundled templates MUST NOT contain local secrets, auth tokens, or absolute
 machine-specific paths. Installers MUST NOT copy secret material from the user's
 environment into managed files. Guardrail hooks MUST deny operations that match their
-destructive or secret-bearing policy. Hook scripts MUST fail open on parse or internal
-errors so a broken hook never blocks a session; they are heuristic speed bumps, not
-sandboxes, and documentation MUST say so. Commands that gate correctness (for example
-`vibe wikify verify`, `plan`, and `docs`) MUST fail closed.
+destructive or secret-bearing policy. Hook scripts that run inside an agent session MUST
+fail open on parse or internal errors so a broken hook never blocks a session; they are
+heuristic speed bumps, not sandboxes, and documentation MUST say so. Commands that gate
+correctness (for example `vibe wikify verify`, `plan`, `docs`, and `check`) MUST fail
+closed, as MUST git hooks and CI gates that invoke them (for example `check --ci` and an
+installed `pre-push` hook).
 
 Rationale: templates ship to every user; a leaked path or token is a permanent leak.
 Hooks run inside the user's agent session, where a crashing hook must not lock them out.
+A git or CI gate that fails open silently defeats its purpose, so it fails closed.
 
 ### IV. Test-First with Frozen Contracts
 
@@ -93,4 +96,4 @@ new principle or materially expanded guidance, PATCH for clarifications. Every p
 request review MUST verify compliance with these principles; deviations MUST be
 justified in the PR description. Runtime development guidance lives in `AGENTS.md`.
 
-**Version**: 1.0.1 | **Ratified**: 2026-10-17 | **Last Amended**: 2026-10-17
+**Version**: 1.1.0 | **Ratified**: 2026-10-17 | **Last Amended**: 2026-10-17
