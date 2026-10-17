@@ -40,22 +40,64 @@ def ignored_control_files(root: Path) -> list[str]:
     ]
 
 
+IMPORTED_MODES = ("editable", "frozen")
+
+
 def _default() -> dict:
-    return {"version": 1, "covered": None}
+    return {
+        "version": 1, "covered": None, "citations": {}, "imported": {}, "imported_mode": "editable",
+    }
+
+
+def _parse(text: str | None) -> dict:
+    try:
+        data = json.loads(text or "")
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _readable(root: Path) -> bool:
+    """True when the state file parses to a JSON object, so a rewrite cannot drop settings."""
+    try:
+        return isinstance(json.loads((Path(root) / STATE_REL).read_text(encoding="utf-8")), dict)
+    except (OSError, ValueError):
+        return False
+
+
+def _read_raw(root: Path) -> dict:
+    try:
+        return _parse((Path(root) / STATE_REL).read_text(encoding="utf-8"))
+    except OSError:
+        return {}
+
+
+def _str_map(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str)}
 
 
 def load(root: Path) -> dict:
     """Read state; anything missing, invalid, or mistyped yields defaults."""
-    try:
-        data = json.loads((Path(root) / STATE_REL).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return _default()
-    if not isinstance(data, dict):
-        return _default()
+    return _normalise(_read_raw(root))
+
+
+def load_head(root: Path) -> dict:
+    """Like ``load`` but from the committed state file, so a dirty tree never counts."""
+    return _normalise(_parse(gitview.show_head(Path(root), STATE_REL)))
+
+
+def _normalise(data: dict) -> dict:
     covered = data.get("covered")
-    if covered is not None and not isinstance(covered, str):
-        covered = None
-    return {"version": 1, "covered": covered}
+    mode = data.get("imported_mode")
+    return {
+        "version": 1,
+        "covered": covered if isinstance(covered, str) else None,
+        "citations": _str_map(data.get("citations")),
+        "imported": _str_map(data.get("imported")),
+        "imported_mode": mode if mode in IMPORTED_MODES else "editable",
+    }
 
 
 class UnsafeWikiPath(Exception):
@@ -74,13 +116,30 @@ def check_wiki_path(root: Path) -> None:
         raise UnsafeWikiPath("docs/wiki resolves outside the repository")
 
 
-def save(root: Path, head: str | None) -> None:
-    """Rewrite the state file; ``covered`` always reflects ``head``."""
+def save(
+    root: Path,
+    head: str | None,
+    citations: dict[str, str] | None = None,
+    imported: dict[str, str] | None = None,
+) -> None:
+    """Rewrite the state file; ``covered`` always reflects ``head``.
+
+    Keys this version does not own (and the citation/imported maps when the
+    argument is ``None``) are kept as found, so a newer state file survives an
+    older code path rewriting it.
+    """
     check_wiki_path(root)
     path = Path(root) / STATE_REL
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"version": 1, "covered": head}
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    if path.exists() and not _readable(root):
+        raise UnsafeWikiPath(f"{STATE_REL} is not valid JSON (merge conflict?); fix it first")
+    payload = _read_raw(root)
+    payload.update(version=1, covered=head)
+    if citations is not None:
+        payload["citations"] = citations
+    if imported is not None:
+        payload["imported"] = imported
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def base(root: Path) -> str | None:

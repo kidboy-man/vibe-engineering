@@ -9,10 +9,18 @@ With --format=cursor every path (allow, deny, fail-open) prints a
 This is a convenience gate, not a security control. It fails open on any
 parse error, git error or timeout. Set VIBE_WIKIFY=off to disable it.
 
-Freshness mirrors agents/wikify/state.py:is_fresh (vendored: hook scripts run
-with a bare python3 and cannot import `agents`): no commits -> fresh; the state
-file never committed -> stale; the commit that last touched the state file and
-everything since must touch only docs/wiki/.
+The verdict comes from `vibe wikify check --ci --json` whenever `vibe` is on PATH,
+so the hook, a git pre-push hook and CI cannot disagree: drift (`changed` or
+`missing` citations) blocks and names the pages. One exception: while a cited file
+changed but its citation has no recorded range hash (right after an upgrade, before
+`vibe wikify mark`), `check` cannot see body edits, so the commit-order rule below
+still decides. Without `vibe` (or on any error from it) the commit-order rule is the
+fallback.
+
+The commit-order rule mirrors agents/wikify/state.py:is_fresh (vendored: hook
+scripts run with a bare python3 and cannot import `agents`): no commits -> fresh;
+the state file never committed -> stale; the commit that last touched the state
+file and everything since must touch only docs/wiki/.
 
 Known v1 limitations: it checks HEAD, not the ref being pushed
 (`git push origin other:main`), and it does not cover pushes typed in a
@@ -35,6 +43,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -67,6 +76,20 @@ MESSAGE = (
     "show the user the wiki diff and scan result, and only after the user confirms commit "
     "with 'git add -- docs/wiki'. Set VIBE_WIKIFY=off to bypass."
 )
+DRIFT_MESSAGE = (
+    "wikify: docs/wiki has drifted from the code. Follow docs/wiki/WIKIFY.md: run "
+    "'vibe wikify check' to see the pages, update only those, run 'vibe wikify verify' and "
+    "'vibe wikify mark', show the user the wiki diff, and only after the user confirms commit "
+    "with 'git add -- docs/wiki'. Set VIBE_WIKIFY=off to bypass."
+)
+UNBASELINED_MESSAGE = (
+    "wikify: code changed under citations that have no recorded range hash, so drift cannot "
+    "be checked precisely. Run 'vibe wikify verify' and 'vibe wikify mark', show the user the "
+    "wiki diff, and only after the user confirms commit with 'git add -- docs/wiki'. "
+    "Set VIBE_WIKIFY=off to bypass."
+)
+MAX_FINDINGS_SHOWN = 10
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 def _tokenize(line: str) -> list[str]:
@@ -203,16 +226,21 @@ def _docs_only(output: str | None) -> bool:
     return output is not None and all(p.startswith(WIKI_DIR) for p in output.splitlines() if p)
 
 
-def _is_stale(cwd: str) -> bool:
-    """True only when git positively says the wiki is stale; any doubt -> False."""
+def _wiki_root(cwd: str) -> str | None:
+    """The repo root when it is wikified and has commits; None on any doubt."""
     top = _git(cwd, "rev-parse", "--show-toplevel")
     if not top or not top.strip():
-        return False
+        return None
     root = top.strip()
     if not os.path.isfile(os.path.join(root, STATE_REL)):
-        return False  # repo is not wikified
+        return None  # repo is not wikified
     if _git(root, "rev-parse", "--verify", "-q", "HEAD") is None:
-        return False  # no commits (or git failed): nothing to cover
+        return None  # no commits (or git failed): nothing to cover
+    return root
+
+
+def _commit_order_stale(root: str) -> bool:
+    """True only when git positively says the wiki is stale; any doubt -> False."""
     base = _git(root, "log", "-1", "--format=%H", "--", STATE_REL)
     if base is None:
         return False
@@ -224,6 +252,68 @@ def _is_stale(cwd: str) -> bool:
     if in_base is None or since is None:
         return False
     return not (_docs_only(in_base) and _docs_only(since))
+
+
+def _is_stale(cwd: str) -> bool:
+    root = _wiki_root(cwd)
+    return root is not None and _commit_order_stale(root)
+
+
+def _find_vibe() -> str | None:
+    return shutil.which("vibe")
+
+
+def _vibe_check(root: str) -> dict | None:
+    """Parsed `vibe wikify check --ci --json`, or None when it cannot give a verdict."""
+    vibe = _find_vibe()
+    remaining = _deadline - time.monotonic()
+    if not vibe or remaining <= 0:
+        return None
+    try:
+        result = subprocess.run(
+            [vibe, "wikify", "check", "--ci", "--json"],
+            cwd=root, capture_output=True, text=True, errors="replace",
+            check=False, timeout=min(TIMEOUT_SECONDS, remaining),
+        )
+        data = json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+    if result.returncode not in (0, 1) or not isinstance(data, dict):
+        return None
+    return data if isinstance(data.get("ok"), bool) else None
+
+
+def _clean(text: object) -> str:
+    return CONTROL.sub("?", str(text))[:200]
+
+
+def _drift_message(data: dict) -> str:
+    rows = [
+        f"  {_clean(f.get('category'))} {_clean(f.get('page'))}:{_clean(f.get('line'))} "
+        f"{_clean(f.get('path'))}:{_clean(f.get('start'))}-{_clean(f.get('end'))}"
+        for f in (data.get("drift") or [])[:MAX_FINDINGS_SHOWN]
+        if isinstance(f, dict)
+    ]
+    detail = _clean(data["error"]) if data.get("error") else ""
+    head = DRIFT_MESSAGE if not detail else f"{DRIFT_MESSAGE} (check failed: {detail})"
+    return "\n".join([head, *rows])
+
+
+def _blocked(cwd: str) -> str | None:
+    """A block reason for a push from ``cwd``, or None to allow."""
+    root = _wiki_root(cwd)
+    if root is None:
+        return None
+    data = _vibe_check(root)
+    if data is None:
+        return MESSAGE if _commit_order_stale(root) else None
+    if not data["ok"]:
+        return _drift_message(data)
+    counts = data.get("counts")
+    unbaselined = counts.get("unbaselined_changed", 0) if isinstance(counts, dict) else 0
+    if unbaselined and _commit_order_stale(root):
+        return UNBASELINED_MESSAGE
+    return None
 
 
 def _git_push_cwd(args: list[str], cwd: str) -> tuple[bool, str]:
@@ -246,7 +336,7 @@ def _git_push_cwd(args: list[str], cwd: str) -> tuple[bool, str]:
     return False, cwd
 
 
-def _shell_stale(command: str, cwd: str) -> bool:
+def _shell_block(command: str, cwd: str) -> str | None:
     for tokens in _segments(command):
         tokens = _strip_prefixes(tokens)
         if not tokens:
@@ -257,9 +347,11 @@ def _shell_stale(command: str, cwd: str) -> bool:
                 cwd = _resolve(cwd, args[0]) or cwd  # unresolvable: keep cwd, keep scanning
         elif name == "git":
             is_push, where = _git_push_cwd(args, cwd)
-            if is_push and _is_stale(where):
-                return True
-    return False
+            if is_push:
+                reason = _blocked(where)
+                if reason:
+                    return reason
+    return None
 
 
 def decide(payload: object) -> str | None:
@@ -277,7 +369,7 @@ def decide(payload: object) -> str | None:
     if not isinstance(command, str) or not command or len(command) > MAX_COMMAND_CHARS:
         return None
     cwd = str(payload.get("cwd") or os.getcwd())
-    return MESSAGE if _shell_stale(command, cwd) else None
+    return _shell_block(command, cwd)
 
 
 def _emit(cursor_format: bool, permission: str, reason: str | None = None) -> None:

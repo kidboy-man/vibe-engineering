@@ -101,12 +101,54 @@ def build_parser(kit_specs: Mapping[str, KitSpec] = KITS) -> argparse.ArgumentPa
 
     wik = sub.add_parser("wikify", help="Maintain a verified repo wiki in docs/wiki")
     wik_sub = wik.add_subparsers(dest="wikify_command", required=True)
-    wik_sub.add_parser("init", help="Scaffold docs/wiki (never overwrites files)")
+    init_parser = wik_sub.add_parser("init", help="Scaffold docs/wiki (never overwrites files)")
+    init_parser.add_argument(
+        "--update-protocol", action="store_true",
+        help="Replace WIKIFY.md only if it is an unmodified older shipped version (dry run unless --apply)",
+    )
+    init_parser.add_argument(
+        "--apply", action="store_true", help="With --update-protocol: write the file"
+    )
     plan_parser = wik_sub.add_parser("plan", help="Show which wiki pages need updating")
     plan_parser.add_argument("--full", action="store_true", help="Plan a full rebuild")
     plan_parser.add_argument("--json", action="store_true", help="Print the plan as JSON")
     wik_sub.add_parser("verify", help="Check citations and scan the wiki for secrets")
-    wik_sub.add_parser("mark", help="Verify, then record the covered commit")
+    mark_parser = wik_sub.add_parser("mark", help="Verify, then record the covered commit")
+    mark_parser.add_argument(
+        "--reanchor", action="store_true", help="Re-anchor moved citations before verifying"
+    )
+    reanchor_parser = wik_sub.add_parser(
+        "reanchor", help="Fix line numbers of moved citations (dry run unless --apply)"
+    )
+    reanchor_parser.add_argument(
+        "--apply", action="store_true", help="Rewrite the line numbers (default: dry run)"
+    )
+    migrate_parser = wik_sub.add_parser(
+        "migrate-imported", help="Register adopted docs as imported pages (dry run unless --apply)"
+    )
+    migrate_parser.add_argument(
+        "--apply", action="store_true", help="Write docs/wiki/.wikify.json (default: dry run)"
+    )
+    fix_parser = wik_sub.add_parser(
+        "fix-links", help="Rewrite dead paths in imported pages that .wikifymap maps (dry run unless --apply)"
+    )
+    fix_parser.add_argument("--apply", action="store_true", help="Rewrite the paths (default: dry run)")
+    wik_sub.add_parser(
+        "sync", help="Check for drift, preview re-anchoring and print the work list (read-only)"
+    )
+    hook_parser = wik_sub.add_parser(
+        "install-hook", help="Install a pre-push git hook that runs check --ci (dry run unless --apply)"
+    )
+    hook_parser.add_argument(
+        "--apply", action="store_true", help="Write the hook (default: dry run)"
+    )
+    check_parser = wik_sub.add_parser(
+        "check", help="Report which wiki pages drifted from the code (read-only)"
+    )
+    check_parser.add_argument(
+        "--ci", action="store_true", help="Judge the committed wiki at HEAD; concise output"
+    )
+    check_parser.add_argument("--json", action="store_true", help="Print the result as JSON")
     link_parser = wik_sub.add_parser(
         "link", help="Add the wiki pointer block to AGENTS.md (and CLAUDE.md/GEMINI.md if present)"
     )

@@ -21,7 +21,7 @@ from agents import merge_strategies as ms
 MANIFEST_FILE = core.MANIFEST_FILE
 KIT_NAME = "wikify"
 GUARD_REL = "hooks/vibe-wikify/wikify_guard.py"
-SKILL_REL = "skills/wikify-adopt/SKILL.md"
+SKILL_RELS = ("skills/wikify-adopt/SKILL.md", "skills/wikify-sync/SKILL.md")
 SKILL_KINDS = {"claude"}  # agents with a skills directory this kit knows how to use
 
 CLAUDE_MATCHER = "Bash"
@@ -219,7 +219,8 @@ def install(
     for agent in present:
         print(f"install {agent.dirname}/{GUARD_REL}")
         if agent.kind in SKILL_KINDS:
-            print(f"install {agent.dirname}/{SKILL_REL}")
+            for skill in SKILL_RELS:
+                print(f"install {agent.dirname}/{skill}")
         print(f"register hooks in {agent.dirname}/{agent.config_name}")
     print(f"write {paths.manifest_path}")
     if dry_run:
@@ -238,10 +239,11 @@ def install(
             print(f"installed {agent.dirname}/{GUARD_REL}")
         managed.add(f"{agent.dirname}/{GUARD_REL}")
         if agent.kind in SKILL_KINDS:
-            skill_dst = agent.dir(paths) / SKILL_REL
-            if core.install_copy_style_file(paths.template_dir / SKILL_REL, skill_dst, agent.dir(paths)):
-                print(f"installed {agent.dirname}/{SKILL_REL}")
-            managed.add(f"{agent.dirname}/{SKILL_REL}")
+            for skill in SKILL_RELS:
+                skill_dst = agent.dir(paths) / skill
+                if core.install_copy_style_file(paths.template_dir / skill, skill_dst, agent.dir(paths)):
+                    print(f"installed {agent.dirname}/{skill}")
+                managed.add(f"{agent.dirname}/{skill}")
         _register(paths, agent)
 
     core.write_text(paths.manifest_path, json.dumps(core.manifest_state(KIT_NAME, managed), indent=2) + "\n")
@@ -253,7 +255,7 @@ def diff_kit(home: str | None = None) -> int:
     paths = _paths(home)
     any_diff = False
     for agent in AGENTS:
-        for rel in (GUARD_REL, SKILL_REL) if agent.kind in SKILL_KINDS else (GUARD_REL,):
+        for rel in (GUARD_REL, *SKILL_RELS) if agent.kind in SKILL_KINDS else (GUARD_REL,):
             dst = agent.dir(paths) / rel
             if dst.exists() and core.diff_copy_style(paths.template_dir / rel, dst, f"{agent.dirname}/{rel}"):
                 any_diff = True
@@ -281,7 +283,7 @@ def doctor(home: str | None = None) -> int:
         print("manifest: installed")
     else:
         print("manifest: not installed")
-    missing = [rel for rel in (GUARD_REL, SKILL_REL) if not (paths.template_dir / rel).exists()]
+    missing = [rel for rel in (GUARD_REL, *SKILL_RELS) if not (paths.template_dir / rel).exists()]
     if not missing:
         print("templates: ok")
     for rel in missing:
@@ -344,7 +346,10 @@ def uninstall(home: str | None = None, dry_run: bool = False, yes: bool = False)
     for agent in AGENTS:
         if agent.present(paths):
             core.prune_empty_dirs(agent.dir(paths) / "hooks" / "vibe-wikify", agent.dir(paths) / "hooks")
-            core.prune_empty_dirs(agent.dir(paths) / "skills" / "wikify-adopt", agent.dir(paths) / "skills")
+            for skill in SKILL_RELS:
+                core.prune_empty_dirs(
+                    agent.dir(paths) / Path(skill).parent, agent.dir(paths) / "skills"
+                )
     paths.manifest_path.unlink(missing_ok=True)
     try:
         paths.manifest_dir.rmdir()

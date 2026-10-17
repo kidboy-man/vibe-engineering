@@ -498,5 +498,27 @@ class LinearLinkScanTests(unittest.TestCase):
         self.assertEqual(agentmap.page_links("p.md", text), set())
 
 
+class CapUsageTests(unittest.TestCase):
+    def index(self, count, pad=""):
+        rows = "".join(f"- [P{n}](a/p{n}.md) — hint {pad}\n" for n in range(count))
+        return f"# Wiki index\n\n<!-- wikify:map -->\n{rows}<!-- /wikify:map -->\n"
+
+    def test_cap_usage_ratios(self):
+        entries, size = agentmap.cap_usage(self.index(30))
+        self.assertAlmostEqual(entries, 0.5)
+        self.assertGreater(size, 0)
+        self.assertEqual(agentmap.cap_usage("# Wiki index\n"), (0.0, 0.0))
+
+    def test_group_suggestions_need_five_entries_in_one_folder(self):
+        block = agentmap.parse_map(self.index(6))
+        self.assertEqual(agentmap.group_suggestions(block), [("a", 6)])
+        self.assertEqual(agentmap.group_suggestions(agentmap.parse_map(self.index(4))), [])
+
+    def test_folder_index_pages_are_not_suggested_again(self):
+        text = "<!-- wikify:map -->\n" + "".join(
+            f"- [P{n}](a/p{n}.md) — h\n" for n in range(4)) + "- [I](a/index.md) — h\n<!-- /wikify:map -->\n"
+        self.assertEqual(agentmap.group_suggestions(agentmap.parse_map(text)), [])
+
+
 if __name__ == "__main__":
     unittest.main()

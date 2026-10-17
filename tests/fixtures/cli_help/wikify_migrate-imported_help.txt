@@ -1,0 +1,5 @@
+usage: vibe wikify migrate-imported [-h] [--apply]
+
+options:
+  -h, --help  show this help message and exit
+  --apply     Write docs/wiki/.wikify.json (default: dry run)

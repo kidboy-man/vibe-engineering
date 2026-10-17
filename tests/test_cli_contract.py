@@ -56,6 +56,32 @@ class CliHelpContractTests(unittest.TestCase):
     def test_wikify_help(self):
         self._assert_matches_fixture("wikify_help.txt", "wikify")
 
+    def test_wikify_check_help(self):
+        self._assert_matches_fixture("wikify_check_help.txt", "wikify", "check")
+
+    def test_wikify_reanchor_help(self):
+        self._assert_matches_fixture("wikify_reanchor_help.txt", "wikify", "reanchor")
+
+    def test_wikify_mark_help(self):
+        self._assert_matches_fixture("wikify_mark_help.txt", "wikify", "mark")
+
+    def test_wikify_migrate_imported_help(self):
+        self._assert_matches_fixture(
+            "wikify_migrate-imported_help.txt", "wikify", "migrate-imported"
+        )
+
+    def test_wikify_init_help(self):
+        self._assert_matches_fixture("wikify_init_help.txt", "wikify", "init")
+
+    def test_wikify_install_hook_help(self):
+        self._assert_matches_fixture("wikify_install-hook_help.txt", "wikify", "install-hook")
+
+    def test_wikify_sync_help(self):
+        self._assert_matches_fixture("wikify_sync_help.txt", "wikify", "sync")
+
+    def test_wikify_fix_links_help(self):
+        self._assert_matches_fixture("wikify_fix-links_help.txt", "wikify", "fix-links")
+
     def test_wikify_link_help(self):
         self._assert_matches_fixture("wikify_link_help.txt", "wikify", "link")
 

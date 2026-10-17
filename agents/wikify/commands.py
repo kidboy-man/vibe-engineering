@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-from agents.wikify import adopt_cmd, agentmap, citations, docs_cmd, docs_inventory, gitview, init_cmd, plan, pointer, scan, state
+from agents.wikify import adopt_cmd, agentmap, check_cmd, citations, docs_cmd, docs_inventory, drift, gitview, hookinstall, imported, imported_refs, init_cmd, plan, pointer, reanchor, scan, state
 
 
 def _human_blocks(text: str) -> list[tuple[int, str]]:
@@ -65,6 +65,7 @@ def _verify(root: Path) -> tuple[int, list[str]]:
     errors += state.ignored_control_files(root)
     notices: list[str] = []
     allowed: list[str] = []
+    st = state.load(root)
     if not any(e.startswith(("docs:", "docs/wiki:")) for e in errors):
         block = agentmap.MapBlock([], [], 0)
         texts: dict[str, str] = {}
@@ -86,6 +87,7 @@ def _verify(root: Path) -> tuple[int, list[str]]:
                 failed = True
                 if not reason.startswith("ignore file rejected"):  # reported already
                     errors.append(f"docs: doc inventory failed: {reason}")
+        live: set[str] = set()
         for rel, path in pages:
             try:
                 text = path.read_text(encoding="utf-8")
@@ -93,6 +95,8 @@ def _verify(root: Path) -> tuple[int, list[str]]:
                 errors.append(f"{rel}: not valid UTF-8")
                 continue
             texts[rel] = text
+            if rel in st["imported"] and imported.is_imported_shape(text):
+                live.add(rel)
             checked = text
             if rel == "index.md":  # only the top-level index carries the map
                 block = agentmap.parse_map(text)
@@ -113,7 +117,19 @@ def _verify(root: Path) -> tuple[int, list[str]]:
                     for c in citations.parse(checked)[0]
                     if c.path in eligible
                 )
-            notices.extend(_notices(root, rel, text))
+            if rel not in live:  # imported pages get IMPORTED PAGE notices instead
+                notices.extend(_notices(root, rel, text))
+        edited, removed = imported.edited_pages(texts, st)
+        notices.extend(
+            f"NOTICE: {rel} is registered as imported but is no longer a wrapper; "
+            "it is checked as an ordinary page" for rel in imported.lost_shape(texts, st)
+        )
+        if st["imported_mode"] == "frozen":
+            errors.extend(f"IMPORTED PAGE CHANGED (frozen): {rel}" for rel in edited)
+        else:
+            notices.extend(f"IMPORTED PAGE EDITED: {rel}" for rel in edited)
+        notices.extend(f"IMPORTED PAGE REMOVED: {rel}" for rel in removed)
+        notices.extend(imported.invalid_mode_notice(root))
         errors.extend(block.errors)
         reachable = agentmap.reachable_pages({e.path for e in block.entries}, texts)
         errors.extend(agentmap.validate_map(block, set(texts), reachable))
@@ -162,10 +178,13 @@ def cmd_verify(cwd: str | Path | None = None) -> int:
     return rc
 
 
-def cmd_mark(cwd: str | Path | None = None) -> int:
+def cmd_mark(cwd: str | Path | None = None, heal: bool = False) -> int:
     root = _root(cwd)
     if root is None:
         return 1
+    if heal:
+        rc, lines = reanchor.run(root, apply_changes=True)
+        print("\n".join(lines))
     rc, lines = run_verify(root)
     print("\n".join(lines))
     if rc:
@@ -173,7 +192,18 @@ def cmd_mark(cwd: str | Path | None = None) -> int:
         return 1
     head = gitview.head(root)
     try:
-        state.save(root, head)
+        pages = drift.read_pages(root, at_head=False)
+        st = state.load(root)
+        keep = drift.moved_hashes(root, pages, st)
+        state.save(
+            root, head, citations=drift.baseline(root, pages, keep),
+            imported={rel: imported.page_hash(pages[rel]) for rel in imported.effective(pages, st)},
+        )
+        if keep:
+            print(
+                f"NOTICE: {len(keep)} citation(s) moved; their old range hash was kept so `check` "
+                "still reports them. Run `vibe wikify reanchor --apply` (or `mark --reanchor`)."
+            )
     except (state.UnsafeWikiPath, OSError) as exc:
         print(f"not marked: {exc if isinstance(exc, state.UnsafeWikiPath) else type(exc).__name__}")
         return 1
@@ -210,13 +240,30 @@ def cmd_plan(
 def cmd_wikify(args: argparse.Namespace, cwd: str | Path | None = None) -> int:
     sub = args.wikify_command
     if sub == "init":
+        if args.update_protocol:
+            return init_cmd.cmd_update_protocol(cwd, args.apply)
+        if args.apply:
+            print("--apply only works with --update-protocol")
+            return 2
         return init_cmd.cmd_init(cwd)
     if sub == "plan":
         return cmd_plan(cwd, args.full, args.json)
     if sub == "verify":
         return cmd_verify(cwd)
     if sub == "mark":
-        return cmd_mark(cwd)
+        return cmd_mark(cwd, args.reanchor)
+    if sub == "fix-links":
+        return imported_refs.cmd_fix_links(cwd, args.apply)
+    if sub == "sync":
+        return check_cmd.cmd_sync(cwd)
+    if sub == "install-hook":
+        return hookinstall.cmd_install_hook(cwd, args.apply)
+    if sub == "migrate-imported":
+        return imported.cmd_migrate(cwd, args.apply)
+    if sub == "reanchor":
+        return reanchor.cmd_reanchor(cwd, args.apply)
+    if sub == "check":
+        return check_cmd.cmd_check(cwd, args.ci, args.json)
     if sub == "link":
         return pointer.cmd_link(cwd, args.dry_run)
     if sub == "docs":

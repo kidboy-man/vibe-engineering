@@ -1,0 +1,6 @@
+usage: vibe wikify check [-h] [--ci] [--json]
+
+options:
+  -h, --help  show this help message and exit
+  --ci        Judge the committed wiki at HEAD; concise output
+  --json      Print the result as JSON

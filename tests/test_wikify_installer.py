@@ -16,6 +16,7 @@ from agents.kits.wikify.installer import diff_kit, doctor, install, uninstall
 REL = "hooks/vibe-wikify/wikify_guard.py"
 GUARD_REL = "hooks/vibe-guardrails/guard.py"
 SKILL_REL = "skills/wikify-adopt/SKILL.md"
+SYNC_REL = "skills/wikify-sync/SKILL.md"
 
 
 def make_home(tmp: str, *agents: str) -> Path:
@@ -151,7 +152,8 @@ class InstallTests(unittest.TestCase):
             manifest = read_json(home / ".vibe-wikify" / ".vibe-engineering-manifest.json")
             self.assertEqual(manifest["kit"], "wikify")
             self.assertEqual(
-                manifest["managed_files"], [f".claude/{REL}", f".claude/{SKILL_REL}", f".cursor/{REL}"]
+                manifest["managed_files"],
+                [f".claude/{REL}", f".claude/{SKILL_REL}", f".claude/{SYNC_REL}", f".cursor/{REL}"],
             )
 
 
@@ -305,6 +307,79 @@ class CoexistenceTests(unittest.TestCase):
             self.assertIn("vibe-wikify", commands()[0])
             self.assertTrue((home / ".claude" / REL).exists())
 
+
+
+class SyncSkillTests(unittest.TestCase):
+    TEMPLATE = Path(wikify.__file__).resolve().parent / "templates" / "wikify" / SYNC_REL
+
+    def test_sync_skill_is_a_managed_template(self):
+        manifest = read_json(self.TEMPLATE.parents[2] / "manifest.json")
+        self.assertIn(SYNC_REL, manifest["managed_files"])
+        self.assertTrue(self.TEMPLATE.read_text(encoding="utf-8").startswith("---\nname: wikify-sync\n"))
+
+    def test_install_is_idempotent_and_backs_up_a_changed_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude")
+            do_install(home)
+            skill = home / ".claude" / SYNC_REL
+            self.assertEqual(skill.read_text(), self.TEMPLATE.read_text())
+            self.assertNotIn("installed .claude/" + SYNC_REL, do_install(home)[1])
+            skill.write_text("edited")
+            do_install(home)
+            self.assertEqual(skill.read_text(), self.TEMPLATE.read_text())
+            backups = [p for p in (home / ".claude").rglob("*") if p.is_file() and "edited" in p.read_text()]
+            self.assertTrue(backups)
+
+    def test_cursor_and_codex_get_no_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude", ".cursor", ".codex")
+            do_install(home)
+            self.assertFalse((home / ".cursor" / "skills").exists())
+            self.assertFalse((home / ".codex" / "skills").exists())
+
+    def test_uninstall_removes_both_unmodified_skills_but_keeps_an_edited_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude")
+            do_install(home)
+            run(uninstall, home=str(home), yes=True)
+            self.assertFalse((home / ".claude" / "skills" / "wikify-adopt").exists())
+            self.assertFalse((home / ".claude" / "skills" / "wikify-sync").exists())
+            do_install(home)
+            (home / ".claude" / SYNC_REL).write_text("edited")
+            run(uninstall, home=str(home), yes=True)
+            self.assertEqual((home / ".claude" / SYNC_REL).read_text(), "edited")
+            self.assertFalse((home / ".claude" / SKILL_REL).exists())
+
+    def test_doctor_and_diff_cover_the_new_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude")
+            do_install(home)
+            self.assertIn("templates: ok", run(doctor, home=str(home))[1])
+            (home / ".claude" / SYNC_REL).write_text("edited")
+            self.assertIn("skills/wikify-sync/SKILL.md", run(diff_kit, home=str(home))[1])
+
+    def test_dry_run_lists_both_skills_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = make_home(tmp, ".claude")
+            rc, out = run(install, home=str(home), dry_run=True, yes=True)
+            self.assertIn(f"install .claude/{SYNC_REL}", out)
+            self.assertEqual(list((home / ".claude").iterdir()), [])
+
+    def test_skill_text_names_only_real_commands_and_keeps_its_guardrails(self):
+        import re
+        text = self.TEMPLATE.read_text(encoding="utf-8")
+        for bad in ("/home/", "/Users/", "C:\\", "token", "password", "api_key", "api-key"):
+            self.assertNotIn(bad, text)
+        real = {"init", "plan", "verify", "mark", "link", "docs", "adopt", "check", "reanchor",
+                "sync", "install-hook", "migrate-imported", "fix-links"}
+        used = set(re.findall(r"vibe wikify ([a-z-]+)", text))
+        self.assertTrue(used)
+        self.assertLessEqual(used, real)
+        for sentence in (
+            "never invent facts", "contradiction", "untrusted", "wikify:human",
+            "wikify:generated", ".wikifyignore", ".wikify-allow", "never deleted", "Never push",
+        ):
+            self.assertIn(sentence.lower(), text.lower())
 
 
 class SkillTests(unittest.TestCase):

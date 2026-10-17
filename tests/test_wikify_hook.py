@@ -52,6 +52,10 @@ class RepoCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name).resolve()
         git(self.root, "init", "-q", "-b", BRANCH)
+        # the commit-order rule is what these tests pin down; DelegationTests opts in to vibe
+        patcher = mock.patch.object(guard, "_find_vibe", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def commit(self, rel, content="x\n", msg=SUBJECT):
         p = self.root / rel
@@ -318,6 +322,115 @@ class DecideTests(RepoCase):
         self.assertTrue(guard.decide({"command": "git push", "cwd": str(self.root)}))
         for bad in (None, [], "x", {}, {"tool_input": "x"}):
             self.assertIsNone(guard.decide(bad))
+
+
+class DelegationTests(RepoCase):
+    """The hook takes its verdict from `vibe wikify check --ci --json` when vibe is on PATH."""
+
+    def setUp(self):
+        super().setUp()
+        self.bin = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.bin, ignore_errors=True))
+        self.calls = self.bin / "calls"
+        self.vibe_exit = 0
+        self.vibe_stdout = ""
+        patcher = mock.patch.object(guard, "_find_vibe", side_effect=self.find)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.available = True
+
+    def find(self):
+        if not self.available:
+            return None
+        script = self.bin / "vibe"
+        script.write_text(
+            f"#!/bin/sh\necho \"$@\" >> {self.calls}\ncat <<'EOF'\n{self.vibe_stdout}\nEOF\nexit {self.vibe_exit}\n"
+        )
+        script.chmod(0o755)
+        return str(script)
+
+    def verdict(self, ok=True, unbaselined=0, drift=(), code=None, error=None):
+        self.vibe_stdout = json.dumps(
+            {"ok": ok, "counts": {"unbaselined_changed": unbaselined}, "drift": list(drift), "error": error}
+        )
+        self.vibe_exit = (0 if ok else 1) if code is None else code
+
+    def stale_repo(self):
+        self.commit(CODE_FILE)
+        self.mark()
+        self.commit("src/b.py")  # commit-order rule says stale
+
+    def push(self, command="git push origin main"):
+        return guard.decide(bash(command, self.root))
+
+    def test_drift_blocks_and_names_the_pages(self):
+        self.stale_repo()
+        self.verdict(ok=False, drift=[{"category": "changed", "page": "svc.md", "line": 3,
+                                       "path": "app/svc.py", "start": 10, "end": 20}])
+        reason = self.push()
+        self.assertIn("drifted", reason)
+        self.assertIn("changed svc.md:3 app/svc.py:10-20", reason)
+        self.assertEqual(self.calls.read_text().strip(), "wikify check --ci --json")
+
+    def test_clean_check_allows_even_when_commit_order_says_stale(self):
+        self.stale_repo()
+        self.verdict(ok=True)
+        self.assertIsNone(self.push())
+
+    def test_docs_only_commit_with_a_bad_citation_is_blocked(self):
+        self.commit(CODE_FILE)
+        self.mark()
+        self.commit("docs/wiki/x.md")
+        self.assertTrue(state.is_fresh(self.root))
+        self.verdict(ok=False, drift=[{"category": "missing", "page": "x.md", "line": 1,
+                                       "path": "gone.py", "start": 1, "end": 1}])
+        self.assertIn("drifted", self.push())
+
+    def test_unbaselined_changes_keep_the_commit_order_rule(self):
+        self.stale_repo()
+        self.verdict(ok=True, unbaselined=2)
+        self.assertEqual(self.push(), guard.UNBASELINED_MESSAGE)
+
+    def test_unbaselined_but_fresh_is_allowed(self):
+        self.commit(CODE_FILE)
+        self.mark()
+        self.verdict(ok=True, unbaselined=2)
+        self.assertIsNone(self.push())
+
+    def test_unusable_vibe_falls_back_to_the_commit_order_rule(self):
+        self.stale_repo()
+        for kind in ("missing", "exit2", "garbage", "no-ok"):
+            with self.subTest(kind):
+                self.available = kind != "missing"
+                self.vibe_exit = 2 if kind == "exit2" else 0
+                self.vibe_stdout = {"garbage": "not json", "no-ok": "{}"}.get(kind, "")
+                self.assertEqual(self.push(), guard.MESSAGE)
+
+    def test_unusable_vibe_on_a_fresh_repo_allows(self):
+        self.commit(CODE_FILE)
+        self.mark()
+        self.available = False
+        self.assertIsNone(self.push())
+
+    def test_error_verdict_blocks_and_control_characters_are_neutralised(self):
+        self.stale_repo()
+        self.verdict(ok=False, error="boom\x1b[31m", drift=[
+            {"category": "changed", "page": "a\x1b[2Jb.md", "line": 1, "path": "p", "start": 1, "end": 2}])
+        reason = self.push()
+        self.assertIn("drifted", reason)
+        self.assertNotIn("\x1b", reason)
+
+    def test_unwikified_repo_never_calls_vibe(self):
+        self.commit("src/a.py")
+        self.verdict(ok=False)
+        self.assertIsNone(self.push())
+        self.assertFalse(self.calls.exists())
+
+    def test_non_push_commands_never_call_vibe(self):
+        self.stale_repo()
+        self.verdict(ok=False)
+        self.assertIsNone(guard.decide(bash("git status", self.root)))
+        self.assertFalse(self.calls.exists())
 
 
 class ScriptTests(RepoCase):

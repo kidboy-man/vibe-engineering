@@ -1,11 +1,24 @@
-usage: vibe wikify [-h] {init,plan,verify,mark,link,docs,adopt} ...
+usage: vibe wikify [-h]
+                   {init,plan,verify,mark,reanchor,migrate-imported,fix-links,sync,install-hook,check,link,docs,adopt} ...
 
 positional arguments:
-  {init,plan,verify,mark,link,docs,adopt}
+  {init,plan,verify,mark,reanchor,migrate-imported,fix-links,sync,install-hook,check,link,docs,adopt}
     init                Scaffold docs/wiki (never overwrites files)
     plan                Show which wiki pages need updating
     verify              Check citations and scan the wiki for secrets
     mark                Verify, then record the covered commit
+    reanchor            Fix line numbers of moved citations (dry run unless
+                        --apply)
+    migrate-imported    Register adopted docs as imported pages (dry run
+                        unless --apply)
+    fix-links           Rewrite dead paths in imported pages that .wikifymap
+                        maps (dry run unless --apply)
+    sync                Check for drift, preview re-anchoring and print the
+                        work list (read-only)
+    install-hook        Install a pre-push git hook that runs check --ci (dry
+                        run unless --apply)
+    check               Report which wiki pages drifted from the code (read-
+                        only)
     link                Add the wiki pointer block to AGENTS.md (and
                         CLAUDE.md/GEMINI.md if present)
     docs                Write outline pages for existing markdown docs

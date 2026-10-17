@@ -79,6 +79,47 @@ def regular_tracked(root: Path) -> set[str] | None:
     return out
 
 
+def ls_tree_files(root: Path, rel: str) -> list[str] | None:
+    """Regular files (100644/100755) under ``rel`` in the HEAD tree; None on error.
+
+    Symlinks and gitlinks are dropped for the same reason as ``regular_tracked``.
+    """
+    if head(root) is None:
+        return []
+    result = run_git(root, "ls-tree", "-r", "-z", "HEAD", "--", rel)
+    if result.returncode != 0:
+        return None
+    out: list[str] = []
+    for entry in result.stdout.split("\0"):
+        meta, _, path = entry.partition("\t")
+        if path and meta.split(" ", 1)[0] in ("100644", "100755"):
+            out.append(path)
+    return sorted(out)
+
+
+MAX_LOG_COMMITS = 2000
+
+
+def log_names_since(root: Path, base: str) -> list[tuple[str, list[str]]] | None:
+    """``(short hash, paths)`` per commit in ``base..HEAD``, newest first; None on error.
+
+    One git call, capped at ``MAX_LOG_COMMITS`` commits.
+    """
+    result = run_git(
+        root, "log", "--no-renames", "--name-only", f"-n{MAX_LOG_COMMITS}",
+        "--format=%x01%h", f"{base}..HEAD",
+    )
+    if result.returncode != 0:
+        return None
+    commits: list[tuple[str, list[str]]] = []
+    for line in result.stdout.splitlines():
+        if line.startswith("\x01"):
+            commits.append((line[1:], []))
+        elif line and commits:
+            commits[-1][1].append(line)
+    return commits
+
+
 def ignored(root: Path, rels: list[str] | tuple[str, ...]) -> list[str]:
     """Which untracked ``rels`` git would ignore; [] on error or timeout."""
     result = run_git(root, "check-ignore", "--", *rels)
