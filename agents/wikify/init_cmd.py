@@ -136,11 +136,17 @@ def cmd_update_protocol(cwd: str | Path | None = None, apply: bool = False) -> i
         print(f"would replace {WIKI_DIR}WIKIFY.md with the current protocol (rerun with --apply)")
         return 0
     tmp = target.with_name(f".WIKIFY.md.{os.getpid()}.tmp")
+    created = False
     try:
-        tmp.write_bytes(shipped)
+        # exclusive and no-follow: a planted file or symlink at the temp name is an error, never a target
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(tmp, flags, 0o644), "wb") as handle:
+            created = True
+            handle.write(shipped)
         os.replace(tmp, target)
     except OSError as exc:
-        tmp.unlink(missing_ok=True)
+        if created:
+            tmp.unlink(missing_ok=True)
         print(f"cannot write the protocol: {type(exc).__name__}")
         return 1
     print(f"updated {WIKI_DIR}WIKIFY.md; review it with git diff and commit docs-only")

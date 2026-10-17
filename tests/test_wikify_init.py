@@ -1,6 +1,7 @@
 import contextlib
 import importlib
 import io
+import os
 import subprocess
 import tempfile
 import unittest
@@ -186,6 +187,16 @@ class UpdateProtocolTests(RepoCase):
             self.assertEqual(rc, 1)
             self.assertIn("locally edited; not overwritten", out)
         self.assertEqual(self.path.read_text(), self.OLD + "my own rule\n")
+
+    def test_a_planted_symlink_at_the_temp_name_is_never_followed(self):
+        self.path.write_text(self.OLD)
+        victim = self.root / "victim.txt"
+        victim.write_text("keep me\n")
+        (self.root / "docs/wiki" / f".WIKIFY.md.{os.getpid()}.tmp").symlink_to(victim)
+        rc, out = self.run_update(apply=True)
+        self.assertEqual(rc, 1)
+        self.assertEqual(victim.read_text(), "keep me\n")
+        self.assertEqual(self.path.read_text(), self.OLD)
 
     def test_missing_file_and_symlink_are_refused(self):
         self.path.unlink()
