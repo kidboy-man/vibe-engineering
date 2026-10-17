@@ -40,11 +40,13 @@ def plan(root: Path) -> Plan:
     )
 
 
-def _rewrite(text: str, heals: list[drift.Finding]) -> tuple[str, int]:
-    """Replace the line numbers of the matching citations; nothing else changes."""
+def _rewrite(text: str, heals: list[drift.Finding]) -> tuple[str, int, set[str]]:
+    """Replace the line numbers of the matching citations; nothing else changes.
+    Returns the new text, how many citations changed, and the keys of the heals that applied."""
     human = citations.human_spans(text)
     wanted = {(f.path, f.start, f.end, f.symbol): f for f in heals}
     out: list[str] = []
+    done: set[str] = set()
     last = count = 0
     for m in citations.CITE.finditer(text):
         if any(a <= m.start() < b for a, b in human):
@@ -57,17 +59,22 @@ def _rewrite(text: str, heals: list[drift.Finding]) -> tuple[str, int]:
         out.append(str(heal.new_start) if m.group(3) is None else f"{heal.new_start}-{heal.new_end}")
         last = m.end(3 if m.group(3) else 2)
         count += 1
+        done.add(drift.finding_key(heal))
     out.append(text[last:])
-    return "".join(out), count
+    return "".join(out), count, done
 
 
 def apply(root: Path, heals: list[drift.Finding]) -> int:
-    """Write the heals page by page and re-key their baseline hashes; returns citations healed."""
+    """Write the heals page by page and re-key their baseline hashes; returns citations healed.
+
+    Only the heals the page really took are re-keyed, so a page edited since the plan keeps a
+    baseline that still matches what it says."""
     root = Path(root)
     state.check_wiki_path(root)
     st = state.load(root)
     original = st["citations"]
     renamed: dict[str, str] = {}  # new key -> hash, built from the original map only
+    taken: set[str] = set()  # old keys whose citation text was really rewritten
     total = 0
     by_page: dict[str, list[drift.Finding]] = {}
     for f in heals:
@@ -76,16 +83,16 @@ def apply(root: Path, heals: list[drift.Finding]) -> int:
         path = root / state.WIKI_DIR / rel
         with open(path, newline="", encoding="utf-8") as handle:
             text = handle.read()
-        new, count = _rewrite(text, group)
+        new, count, healed = _rewrite(text, group)
         if count:
             _write_atomic(path, new)
             total += count
         for f in group:
             old_key = drift.finding_key(f)
-            if old_key in original:
+            if old_key in healed and old_key in original:
+                taken.add(old_key)
                 renamed[drift.finding_key(f, moved=True)] = original[old_key]
-    old_keys = {drift.finding_key(f) for f in heals}
-    keys = {k: v for k, v in original.items() if k not in old_keys}
+    keys = {k: v for k, v in original.items() if k not in taken}
     keys.update(renamed)
     if keys != original:
         state.save(root, st["covered"], citations=keys)

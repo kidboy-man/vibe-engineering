@@ -86,10 +86,11 @@ def plan_map(index_text: str, pages: list[Page]) -> tuple[str, dict[str, str]] |
 
 
 def _replace_block(text: str, entries: list[str]) -> str:
-    start = text.find(agentmap.MAP_BEGIN)
-    if start < 0:
+    found = agentmap._first_block(agentmap._mask(text))  # markers quoted in a human block do not count
+    if found is None:
         return text.rstrip("\n") + ("\n\n" if text.strip() else "") + _block_text(entries)
-    stop = text.find(agentmap.MAP_END, start) + len(agentmap.MAP_END)
+    start, _, end = found
+    stop = end + len(agentmap.MAP_END)
     tail = text[stop:]
     return text[:start] + _block_text(entries).rstrip("\n") + (tail if tail.startswith("\n") else "\n" + tail)
 

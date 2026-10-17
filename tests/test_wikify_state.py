@@ -204,6 +204,36 @@ class StateTests(RepoCase):
         self.assertTrue(state.is_fresh(self.root))
 
 
+class AtomicWriteTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    def test_exclusive_never_overwrites_and_leaves_no_temp_file(self):
+        from agents.wikify import atomic
+        target = self.dir / "page.md"
+        atomic.write_atomic(target, "first", exclusive=True)
+        with self.assertRaises(FileExistsError):
+            atomic.write_atomic(target, "second", exclusive=True)
+        self.assertEqual(target.read_text(), "first")
+        self.assertEqual([p.name for p in self.dir.iterdir()], ["page.md"])
+
+    def test_plain_write_replaces(self):
+        from agents.wikify import atomic
+        target = self.dir / "page.md"
+        atomic.write_atomic(target, "first")
+        atomic.write_atomic(target, "second")
+        self.assertEqual(target.read_text(), "second")
+
+    def test_a_stale_temp_file_from_a_recycled_pid_does_not_block(self):
+        import os
+        from agents.wikify import atomic
+        (self.dir / f".page.md.{os.getpid()}.tmp").write_text("stale")
+        atomic.write_atomic(self.dir / "page.md", "ok", exclusive=True)
+        self.assertEqual((self.dir / "page.md").read_text(), "ok")
+
+
 class StateKeysTests(RepoCase):
     def write_raw(self, payload):
         path = self.root / STATE

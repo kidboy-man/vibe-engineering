@@ -76,7 +76,10 @@ def read_pages(root: Path, at_head: bool) -> dict[str, str]:
     root = Path(root)
     pages: dict[str, str] = {}
     if at_head:
-        for path in gitview.ls_tree_files(root, WIKI_DIR) or []:
+        listing = gitview.ls_tree_files(root, WIKI_DIR)
+        if listing is None:  # an empty wiki and a failed listing must not look alike
+            raise RuntimeError("git ls-tree failed")
+        for path in listing:
             rel = path[len(WIKI_DIR):]
             if rel.lower().endswith(".md") and rel not in CONTROL_FILES:
                 text = gitview.show_head_strict(root, path)
@@ -226,15 +229,17 @@ def _classify_one(
         return "changed", "no range hash yet; cannot prove the cited body moved unchanged", None, ()
     if in_bounds and range_hash(lines, cite.start, cite.end) == digest:
         return None
-    windows = find_windows(lines, length, digest, anchor=cite.symbol)
     if hunks is not None:  # git's diff of the recorded commit settles moved versus edited
         mapped = map_range(hunks, cite.start, cite.end)
         if mapped is None:
             if not symbol_in_file():
                 return "missing", f"symbol `{cite.symbol}` not found in {cite.path}", None, ()
             return "changed", "cited lines were edited", None, ()
-        if windows and mapped in windows:
-            return "moved", "", mapped, ()
+        if 1 <= mapped <= mapped + length - 1 <= len(lines) and range_hash(
+            lines, mapped, mapped + length - 1
+        ) == digest:
+            return "moved", "", mapped, ()  # no search needed, whatever twins exist
+    windows = find_windows(lines, length, digest, anchor=cite.symbol)
     if windows is None:
         return "changed", "cited range too large to relocate", None, ()
     if len(windows) == 1:
@@ -314,10 +319,9 @@ def _resolve_by_shift(findings: list[Finding]) -> list[Finding]:
             continue
         above = max((s for s in shifts[f.path] if s[0] < f.start), default=None)
         below = min((s for s in shifts[f.path] if s[0] > f.start), default=None)
-        hits = {
-            f.start + delta for ref in (above, below) if ref for delta in (ref[1],)
-            if f.start + delta in f.candidates
-        }
+        deltas = {ref[1] for ref in (above, below) if ref}
+        # both neighbours must agree: a conflicting one means the block could have moved either way
+        hits = {f.start + d for d in deltas if len(deltas) == 1 and f.start + d in f.candidates}
         if len(hits) == 1:
             new = hits.pop()
             out.append(replace(

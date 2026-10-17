@@ -94,6 +94,15 @@ class ApplyTests(ReanchorCase):
         self.assertEqual(rc, 0, text_out)
         self.assertNotIn("moved", text_out)
 
+    def test_a_heal_that_changed_nothing_does_not_rekey_the_baseline(self):
+        self.insert_lines_above(15)
+        todo = reanchor.plan(self.root)
+        self.assertEqual(len(todo.heals), 1)
+        self.page("Rewritten after the plan: no citation here.\n")  # the citation is gone before apply
+        before = self.keys()
+        self.assertEqual(reanchor.apply(self.root, todo.heals), 0)
+        self.assertEqual(self.keys(), before)
+
     def test_only_the_moved_citation_in_a_page_changes(self):
         self.page("Handle " + CITE + "\n\nTail (src: app/svc.py:21-30)\n")
         git(self.root, "add", "-A")

@@ -164,8 +164,11 @@ def fix_links(root: Path, apply_changes: bool) -> tuple[int, list[str]]:
                 raw = handle.read()
             new_raw = _apply_changes(raw, changes)
             write_atomic(root / WIKI_DIR / rel, new_raw)
-            # a mechanical edit by this tool is not a human edit: keep frozen mode and mark quiet
-            imported.register(root, {rel: imported.page_hash(new_raw)})
+            if imported.page_hash(raw) == st["imported"][rel]:
+                # this tool's own mechanical edit is not a human edit: keep frozen mode and mark quiet
+                imported.register(root, {rel: imported.page_hash(new_raw)})
+            else:  # a human edit made earlier must stay visible until someone marks it
+                lines.append(_safe(f"note: {rel} was edited since the last mark; run vibe wikify mark after reviewing it"))
     if unregistered and not lines:
         return 1, [f"refused: {len(unregistered)} wrapped page(s) are not registered; run vibe wikify migrate-imported first"]
     if not lines:

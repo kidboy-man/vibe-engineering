@@ -109,6 +109,27 @@ class ReaderTests(DriftCase):
         self.assertEqual([names for _, names in commits], [["app/svc.py"], ["app/other.py"]])
         self.assertIsNone(gitview.log_names_since(self.root, "deadbeef"))
 
+    def test_log_names_since_lists_the_files_a_merge_brought_in(self):
+        base = gitview.head(self.root)
+        git(self.root, "checkout", "-q", "-b", "side")
+        self.write_code("x = 1\n", rel="app/side.py", msg="side work")
+        git(self.root, "checkout", "-q", "-")
+        self.write_code("y = 1\n", rel="app/main.py", msg="main work")
+        git(self.root, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+        touched = drift.touched_since(self.root, base)
+        self.assertIn("app/side.py", touched)
+        self.assertIn("app/main.py", touched)
+
+    def test_a_failed_ls_tree_is_an_error_not_an_empty_wiki(self):
+        with mock.patch.object(gitview, "ls_tree_files", return_value=None):
+            with self.assertRaises(RuntimeError):
+                drift.read_pages(self.root, at_head=True)
+        from agents.wikify import check_cmd
+        with mock.patch.object(gitview, "ls_tree_files", return_value=None):
+            result = check_cmd.run_check(self.root, ci=True)
+        self.assertFalse(result.ok)
+        self.assertIsNotNone(result.error)
+
     def test_diff_hunks_only_accepts_a_full_commit_id(self):
         victim = self.root / "injected.txt"
         for bad in (f"--output={victim}", "-p", "HEAD~1", "abc123", "", "g" * 40):
@@ -266,6 +287,12 @@ class DiffGuidedTests(DriftCase):
         self.write_code("\n".join(lines), rel="app/twin.py", msg="insert after")
         self.assertNotIn(("twin.md", 10), self.classify())
 
+    def test_a_hunk_proven_shift_survives_the_search_budget(self):
+        self.write_code("# new\n# new\n# new\n" + twin_file(), rel="app/twin.py", msg="shift 3")
+        with mock.patch.object(drift, "MAX_WINDOW_WORK", 1):
+            found = self.twin(self.classify())
+        self.assertEqual((found.category, found.new_start), ("moved", 13))
+
     def test_an_edit_below_the_range_does_not_move_it(self):
         self.write_code(twin_file().replace("# mid 5", "# mid changed"), rel="app/twin.py", msg="edit below")
         self.assertNotIn(("twin.md", 10), self.classify())
@@ -330,6 +357,28 @@ class ConsistentShiftTests(DriftCase):
         x = found[("blocks.md", 30)]
         self.assertEqual(x.category, "changed")  # start + 3 is not a candidate: never guessed
         self.assertIn("ambiguous", x.reason)
+
+    def test_neighbours_that_disagree_on_the_shift_cancel_the_heal(self):
+        """U (above) moved by 3, W (below) moved by 1: X could have moved either way."""
+        pad = lambda n, tag: [f"# {tag} {i}" for i in range(n)]
+        x = [f"xblk {n}" for n in range(5)]
+        u = [f"ublk {n}" for n in range(10)]
+        w = [f"wblk {n}" for n in range(10)]
+        old = pad(4, "head") + u + pad(15, "mid") + x + pad(25, "gap") + x + pad(20, "far") + w + pad(5, "end")
+        self.write_code("\n".join(old) + "\n", rel="app/blocks.py", msg="blocks v2")
+        self.page(
+            "U (src: app/blocks.py:5-14 `ublk 0`)\n\nX (src: app/blocks.py:30-34 `xblk 0`)\n\n"
+            "W (src: app/blocks.py:85-94 `wblk 0`)\n", rel="docs/wiki/blocks.md")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "three cites")
+        from agents.wikify import commands
+        self.assertEqual(quiet(commands.cmd_mark, self.root)[0], 0)
+        new = ["# s"] * 3 + pad(4, "head") + u + pad(15, "mid") + x + pad(25, "gap") + x + pad(18, "far") + w + pad(5, "end")
+        self.write_code("\n".join(new) + "\n", rel="app/blocks.py", msg="shift 3 then 1")
+        found = self.findings()
+        self.assertEqual(found[("blocks.md", 5)].new_start, 8)
+        self.assertEqual(found[("blocks.md", 85)].new_start, 86)
+        self.assertEqual(found[("blocks.md", 30)].category, "changed")
 
     def test_reanchor_heals_it(self):
         from agents.wikify import reanchor

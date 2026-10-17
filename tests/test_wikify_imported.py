@@ -349,6 +349,7 @@ class FixLinksTests(ImportedCase):
         super().setUp()
         body = "# Overview\n\nRun `docs/runbook.md` or `docs/missing.md`.\n"
         (self.root / PAGE_PATH).write_text(adopt_plan.wrap("docs/overview.md", body))
+        self.assertEqual(self.mark()[0], 0)  # the registered hash matches the page
         self.commit_wiki()
 
     def fix(self, apply=False):
@@ -381,6 +382,17 @@ class FixLinksTests(ImportedCase):
         self.assertEqual(rc, 1)
         self.assertIn("migrate-imported", out)
         self.assertEqual((self.root / PAGE_PATH).read_text(), before)
+
+    def test_a_human_edit_made_before_fix_links_stays_visible(self):
+        path = self.root / PAGE_PATH
+        text = path.read_text()
+        tail = adopt_plan.HUMAN_END + "\n"
+        path.write_text(text[: -len(tail)] + "Unreviewed edit.\n" + tail)
+        rc, out = self.fix(apply=True)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("`docs/wiki/w/runbook.md`", path.read_text())  # the mapped path was still fixed
+        self.assertIn("edited since the last mark", out)
+        self.assertIn("IMPORTED PAGE EDITED: w/overview.md", self.verify()[1])
 
     def test_apply_keeps_the_hash_current_so_frozen_mode_accepts_the_tools_own_edit(self):
         path = self.root / STATE

@@ -106,7 +106,7 @@ def log_names_since(root: Path, base: str) -> list[tuple[str, list[str]]] | None
     One git call, capped at ``MAX_LOG_COMMITS`` commits.
     """
     result = run_git(
-        root, "log", "--no-renames", "--name-only", f"-n{MAX_LOG_COMMITS + 1}",
+        root, "log", "-m", "--no-renames", "--name-only", f"-n{MAX_LOG_COMMITS + 1}",
         "--format=%x01%h", f"{base}..HEAD",
     )
     if result.returncode != 0:

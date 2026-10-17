@@ -19,7 +19,10 @@ vibe wikify install-hook --apply    # writes .git/hooks/pre-push (mode 0755)
 The hook runs `vibe wikify check --ci` and blocks the push when it fails or when `vibe` is not on
 `PATH`. It never overwrites an existing `pre-push` hook, and it refuses when `core.hooksPath` is
 set (husky and similar tools): add `vibe wikify check --ci` to that tool's pre-push step instead.
-Delete the file to remove the gate. Like every client-side hook it can be skipped with
+It judges the checked-out `HEAD`, not the refs being pushed (`git push origin other-branch` is
+checked against the current checkout); pushes that only delete remote refs are skipped.
+`VIBE_WIKIFY=off git push` skips it for one push, and a machine without `vibe` on `PATH` is blocked
+rather than waved through (the gate fails closed; install `vibe` or use `--no-verify`). Delete the file to remove the gate. Like every client-side hook it can be skipped with
 `git push --no-verify`; use CI for a gate that cannot be skipped.
 
 ## GitHub Actions
