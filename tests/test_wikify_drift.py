@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from agents.wikify import citations, drift, gitview, state
 from tests.test_wikify_state import git
@@ -107,6 +108,29 @@ class ReaderTests(DriftCase):
         commits = gitview.log_names_since(self.root, base)
         self.assertEqual([names for _, names in commits], [["app/svc.py"], ["app/other.py"]])
         self.assertIsNone(gitview.log_names_since(self.root, "deadbeef"))
+
+    def test_log_names_since_gives_up_when_history_is_truncated(self):
+        base = gitview.head(self.root)
+        self.write_code("x = 1\n", rel="app/a.py", msg="a")
+        self.write_code("x = 2\n", rel="app/a.py", msg="b")
+        with mock.patch.object(gitview, "MAX_LOG_COMMITS", 1):
+            self.assertIsNone(gitview.log_names_since(self.root, base))
+        with mock.patch.object(gitview, "MAX_LOG_COMMITS", 2):
+            self.assertEqual(len(gitview.log_names_since(self.root, base)), 2)
+
+    def test_head_mode_skips_a_page_that_is_not_utf8_like_the_work_tree(self):
+        path = self.root / "docs/wiki/bad.md"
+        path.write_bytes(b"Caf\xe9 (src: app/svc.py:10-20 `handle`)\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "bad bytes")
+        self.assertNotIn("bad.md", drift.read_pages(self.root, at_head=True))
+        self.assertNotIn("bad.md", drift.read_pages(self.root, at_head=False))
+
+    def test_head_pages_use_universal_newlines_like_read_text(self):
+        (self.root / "docs/wiki/crlf.md").write_bytes(b"One\r\n\r\nTwo\rThree\r\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "crlf")
+        self.assertEqual(drift.read_pages(self.root, True)["crlf.md"], "One\n\nTwo\nThree\n")
 
     def test_ls_tree_files(self):
         self.assertIn(PAGE, gitview.ls_tree_files(self.root, "docs/wiki/"))

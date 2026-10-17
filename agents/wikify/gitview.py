@@ -106,7 +106,7 @@ def log_names_since(root: Path, base: str) -> list[tuple[str, list[str]]] | None
     One git call, capped at ``MAX_LOG_COMMITS`` commits.
     """
     result = run_git(
-        root, "log", "--no-renames", "--name-only", f"-n{MAX_LOG_COMMITS}",
+        root, "log", "--no-renames", "--name-only", f"-n{MAX_LOG_COMMITS + 1}",
         "--format=%x01%h", f"{base}..HEAD",
     )
     if result.returncode != 0:
@@ -117,6 +117,8 @@ def log_names_since(root: Path, base: str) -> list[tuple[str, list[str]]] | None
             commits.append((line[1:], []))
         elif line and commits:
             commits[-1][1].append(line)
+    if len(commits) > MAX_LOG_COMMITS:
+        return None  # truncated history would undercount touched files; callers say so
     return commits
 
 
@@ -183,6 +185,25 @@ def show_head(root: Path, rel: str) -> str | None:
     """Content of ``rel`` at HEAD, so uncommitted edits never count."""
     result = run_git(root, "show", f"HEAD:{rel}")
     return result.stdout if result.returncode == 0 else None
+
+
+def show_head_strict(root: Path, rel: str) -> str | None:
+    """UTF-8 text of ``rel`` at HEAD with universal newlines, like ``Path.read_text``;
+    None when the blob is missing or not valid UTF-8 (so HEAD and work-tree reads agree)."""
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotePath=false", "show", f"HEAD:{rel}"],
+            cwd=root, capture_output=True, check=False, timeout=TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        text = result.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def last_commit_touching(root: Path, rel: str) -> str | None:

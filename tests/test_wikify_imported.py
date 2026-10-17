@@ -356,11 +356,10 @@ class FixLinksTests(ImportedCase):
         self.assertIn("`docs/missing.md`", text)  # not mapped to an existing page: untouched
         self.assertTrue(imported.is_imported_shape(text))
 
-    def test_next_mark_records_the_new_hash(self):
+    def test_apply_records_the_hash_of_its_own_edit(self):
         self.fix(apply=True)
-        self.assertIn("IMPORTED PAGE EDITED: w/overview.md", self.verify()[1])
-        self.assertEqual(self.mark()[0], 0)
         self.assertNotIn("IMPORTED PAGE", self.verify()[1])
+        self.assertEqual(self.mark()[0], 0)
 
     def test_unregistered_wrappers_and_other_pages_are_never_touched(self):
         state.save(self.root, state.load(self.root)["covered"], imported={})
@@ -369,6 +368,26 @@ class FixLinksTests(ImportedCase):
         self.assertEqual(rc, 1)
         self.assertIn("migrate-imported", out)
         self.assertEqual((self.root / PAGE_PATH).read_text(), before)
+
+    def test_apply_keeps_the_hash_current_so_frozen_mode_accepts_the_tools_own_edit(self):
+        path = self.root / STATE
+        data = json.loads(path.read_text())
+        data["imported_mode"] = "frozen"
+        data["imported"]["w/overview.md"] = imported.page_hash((self.root / PAGE_PATH).read_text())
+        path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        self.fix(apply=True)
+        rc, out = self.verify()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("IMPORTED PAGE", out)
+
+    def test_rewrite_does_not_touch_longer_paths_with_the_same_prefix(self):
+        body = "# Overview\n\n`docs/runbook.md` and `docs/runbook.md.bak` and `docs/runbook.mdx:3`.\n"
+        (self.root / PAGE_PATH).write_text(adopt_plan.wrap("docs/overview.md", body))
+        self.fix(apply=True)
+        text = (self.root / PAGE_PATH).read_text()
+        self.assertIn("`docs/wiki/w/runbook.md`", text)
+        self.assertIn("`docs/runbook.md.bak`", text)
+        self.assertIn("`docs/runbook.mdx:3`", text)
 
     def test_nothing_to_fix(self):
         self.fix(apply=True)

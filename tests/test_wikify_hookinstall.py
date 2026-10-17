@@ -84,9 +84,14 @@ class ScriptTests(RepoCase):
         self.bin = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(self.bin, ignore_errors=True))
 
-    def run_hook(self, path):
-        env = {**os.environ, "PATH": path}
-        return subprocess.run([str(self.hook)], cwd=self.root, env=env, capture_output=True, text=True)
+    PUSH = "refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 2222222222222222222222222222222222222222\n"
+    DELETE = "(delete) 0000000000000000000000000000000000000000 refs/heads/old 2222222222222222222222222222222222222222\n"
+
+    def run_hook(self, path, stdin=PUSH, **env_extra):
+        env = {**os.environ, "PATH": path, **env_extra}
+        return subprocess.run(
+            [str(self.hook)], cwd=self.root, env=env, capture_output=True, text=True, input=stdin
+        )
 
     def fake_vibe(self, exit_code):
         script = self.bin / "vibe"
@@ -99,6 +104,21 @@ class ScriptTests(RepoCase):
             result = self.run_hook(f"{self.bin}:/usr/bin:/bin")
             self.assertEqual(result.returncode, code)
             self.assertEqual((self.bin / "args").read_text().strip(), "wikify check --ci")
+
+    def test_deleting_remote_refs_is_not_checked(self):
+        self.fake_vibe(1)
+        result = self.run_hook(f"{self.bin}:/usr/bin:/bin", stdin=self.DELETE)
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse((self.bin / "args").exists())
+
+    def test_a_mixed_push_is_still_checked(self):
+        self.fake_vibe(1)
+        result = self.run_hook(f"{self.bin}:/usr/bin:/bin", stdin=self.DELETE + self.PUSH)
+        self.assertEqual(result.returncode, 1)
+
+    def test_vibe_wikify_off_skips_the_gate_even_without_vibe(self):
+        result = self.run_hook(str(self.bin), VIBE_WIKIFY="off")
+        self.assertEqual(result.returncode, 0)
 
     def test_script_fails_closed_when_vibe_is_missing(self):
         result = self.run_hook(str(self.bin))

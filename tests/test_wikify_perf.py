@@ -224,14 +224,14 @@ class DriftPerfTests(unittest.TestCase):
                 case.page(f"Handle {CITE}\n\nTail (src: app/svc.py:21-30)\n", rel=f"docs/wiki/p{n}.md")
             git(case.root, "add", "-A")
             git(case.root, "commit", "-q", "-m", "pages")
-            real = gitview.run_git
+            real = gitview.subprocess.run
             calls = []
 
-            def spy(root, *args):
-                calls.append(args)
-                return real(root, *args)
+            def spy(argv, *args, **kwargs):
+                calls.append(tuple(argv[3:]))  # drop: git -c core.quotePath=false
+                return real(argv, *args, **kwargs)
 
-            with mock.patch.object(gitview, "run_git", side_effect=spy):
+            with mock.patch.object(gitview.subprocess, "run", side_effect=spy):
                 quiet(check_cmd.cmd_check, case.root, True)
             return calls
         finally:

@@ -43,7 +43,8 @@ class ParityCase(DriftCase):
         check = quiet(check_cmd.cmd_check, self.root, True)[0]
         env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}"}
         script = subprocess.run(
-            [str(self.root / ".git/hooks/pre-push")], cwd=self.root, env=env, capture_output=True, text=True
+            [str(self.root / ".git/hooks/pre-push")], cwd=self.root, env=env, capture_output=True, text=True,
+            input="refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 2222222222222222222222222222222222222222\n"
         )
         return hook is not None, check != 0, script.returncode != 0
 

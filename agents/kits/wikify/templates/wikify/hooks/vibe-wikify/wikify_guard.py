@@ -280,7 +280,9 @@ def _vibe_check(root: str) -> dict | None:
         return None
     if result.returncode not in (0, 1) or not isinstance(data, dict):
         return None
-    return data if isinstance(data.get("ok"), bool) else None
+    if not isinstance(data.get("ok"), bool) or data.get("error"):
+        return None  # an internal error is not a verdict: fall back to the commit-order rule
+    return data
 
 
 def _clean(text: object) -> str:
@@ -294,9 +296,7 @@ def _drift_message(data: dict) -> str:
         for f in (data.get("drift") or [])[:MAX_FINDINGS_SHOWN]
         if isinstance(f, dict)
     ]
-    detail = _clean(data["error"]) if data.get("error") else ""
-    head = DRIFT_MESSAGE if not detail else f"{DRIFT_MESSAGE} (check failed: {detail})"
-    return "\n".join([head, *rows])
+    return "\n".join([DRIFT_MESSAGE, *rows])
 
 
 def _blocked(cwd: str) -> str | None:

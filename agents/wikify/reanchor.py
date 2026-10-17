@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents.wikify import citations, drift, gitview, imported, state
-from agents.wikify.adopt_cmd import _write_atomic
+from agents.wikify.atomic import write_atomic as _write_atomic
 
 
 @dataclass
@@ -66,7 +66,8 @@ def apply(root: Path, heals: list[drift.Finding]) -> int:
     root = Path(root)
     state.check_wiki_path(root)
     st = state.load(root)
-    keys = dict(st["citations"])
+    original = st["citations"]
+    renamed: dict[str, str] = {}  # new key -> hash, built from the original map only
     total = 0
     by_page: dict[str, list[drift.Finding]] = {}
     for f in heals:
@@ -80,10 +81,13 @@ def apply(root: Path, heals: list[drift.Finding]) -> int:
             _write_atomic(path, new)
             total += count
         for f in group:
-            old_key = f"{rel}|{f.path}:{f.start}-{f.end}|{f.symbol or ''}"
-            if old_key in keys:
-                keys[f"{rel}|{f.path}:{f.new_start}-{f.new_end}|{f.symbol or ''}"] = keys.pop(old_key)
-    if keys != st["citations"]:
+            old_key = drift.finding_key(f)
+            if old_key in original:
+                renamed[drift.finding_key(f, moved=True)] = original[old_key]
+    old_keys = {drift.finding_key(f) for f in heals}
+    keys = {k: v for k, v in original.items() if k not in old_keys}
+    keys.update(renamed)
+    if keys != original:
         state.save(root, st["covered"], citations=keys)
     return total
 

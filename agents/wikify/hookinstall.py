@@ -12,6 +12,13 @@ from agents.wikify import gitview
 
 SCRIPT = """#!/bin/sh
 # Installed by `vibe wikify install-hook`; delete this file to remove the gate.
+# VIBE_WIKIFY=off skips it for one push; `git push --no-verify` skips every hook.
+[ "$VIBE_WIKIFY" = "off" ] && exit 0
+deleting=1
+while read -r _ local_sha _ _; do
+    case "$local_sha" in *[!0]*) deleting=0 ;; esac
+done
+[ "$deleting" = 1 ] && exit 0  # deleting remote refs publishes nothing
 if ! command -v vibe >/dev/null 2>&1; then
     echo "wikify: 'vibe' was not found on PATH; cannot check the wiki before pushing" >&2
     exit 1

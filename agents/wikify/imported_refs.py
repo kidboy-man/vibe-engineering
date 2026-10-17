@@ -12,7 +12,8 @@ from pathlib import Path
 
 from agents.secret_policies import is_secret_path
 from agents.wikify import adopt_plan, citations, drift, gitview, imported, scan, state
-from agents.wikify.adopt_refs import MAX_FILE_BYTES
+from agents.wikify import adopt_refs
+from agents.wikify.atomic import write_atomic
 from agents.wikify.pointer import _safe
 from agents.wikify.state import WIKI_DIR
 
@@ -20,7 +21,7 @@ MAX_REFERENCES = 500
 MAX_TOKEN = 200
 FLOOR_NOTICE = "NOTICE: reference checks match names and paths only; a hit is a floor, not proof"
 _TICKS = re.compile(r"`([^`\n]+)`")
-_LINK = re.compile(r"\]\(<?([^()\s#<>]+)")
+_LINK = adopt_refs._LINK
 _LOCATION = re.compile(r":\d+(?:-\d+)?$")
 _PATH = re.compile(r"^[\w.@+-]+(?:/[\w.@+-]+)+$")
 _EXT = re.compile(r"\.[A-Za-z0-9]{1,8}$")
@@ -30,13 +31,7 @@ _PROSE = (".md", ".markdown", ".rst", ".txt")
 
 
 def _read_text(root: Path, rel: str) -> str | None:
-    path = root / rel
-    try:
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
-            return None
-        return path.read_bytes().decode("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
+    return adopt_refs._read(root, rel)
 
 
 def _words(root: Path, tracked: set[str], ignore: list[str]) -> set[str]:
@@ -151,11 +146,12 @@ def fix_links(root: Path, apply_changes: bool) -> tuple[int, list[str]]:
         changes = _changes(text, rules, tracked, wiki_pages)
         lines += [_safe(f"{rel}:{n}: `{old}` -> `{new}`") for n, old, new in changes]
         if changes and apply_changes:
-            from agents.wikify.adopt_cmd import _write_atomic
-
             with open(root / WIKI_DIR / rel, newline="", encoding="utf-8") as handle:
                 raw = handle.read()
-            _write_atomic(root / WIKI_DIR / rel, _apply_changes(raw, changes))
+            new_raw = _apply_changes(raw, changes)
+            write_atomic(root / WIKI_DIR / rel, new_raw)
+            # a mechanical edit by this tool is not a human edit: keep frozen mode and mark quiet
+            imported.register(root, {rel: imported.page_hash(new_raw)})
     if unregistered and not lines:
         return 1, [f"refused: {len(unregistered)} wrapped page(s) are not registered; run vibe wikify migrate-imported first"]
     if not lines:
@@ -181,7 +177,9 @@ def _changes(text, rules, tracked, wiki_pages):
 def _apply_changes(raw: str, changes: list[tuple[int, str, str]]) -> str:
     lines = raw.split("\n")
     for n, old, new in changes:
-        lines[n - 1] = lines[n - 1].replace(f"`{old}", f"`{new}")
+        lines[n - 1] = re.sub(
+            "`" + re.escape(old) + r"(?![\w./-])", lambda _: f"`{new}", lines[n - 1]
+        )
     return "\n".join(lines)
 
 

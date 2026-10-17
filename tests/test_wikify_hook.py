@@ -412,9 +412,20 @@ class DelegationTests(RepoCase):
         self.available = False
         self.assertIsNone(self.push())
 
-    def test_error_verdict_blocks_and_control_characters_are_neutralised(self):
+    def test_an_internal_error_in_check_is_not_a_verdict(self):
         self.stale_repo()
-        self.verdict(ok=False, error="boom\x1b[31m", drift=[
+        self.verdict(ok=False, error="GitTimeout")
+        self.assertEqual(self.push(), guard.MESSAGE)  # fell back to the commit-order rule
+
+    def test_an_internal_error_on_a_fresh_repo_allows(self):
+        self.commit(CODE_FILE)
+        self.mark()
+        self.verdict(ok=False, error="GitTimeout")
+        self.assertIsNone(self.push())
+
+    def test_control_characters_in_findings_are_neutralised(self):
+        self.stale_repo()
+        self.verdict(ok=False, drift=[
             {"category": "changed", "page": "a\x1b[2Jb.md", "line": 1, "path": "p", "start": 1, "end": 2}])
         reason = self.push()
         self.assertIn("drifted", reason)

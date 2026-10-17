@@ -71,6 +71,29 @@ class ApplyTests(ReanchorCase):
         self.run_reanchor(apply=True)
         self.assertIn("app/svc.py:12 `def handle`", self.page_text())
 
+    def test_chained_moves_keep_each_citation_its_own_hash(self):
+        """B's new range is A's old range and both cite the same symbol: re-keying must not
+        let one overwrite the other."""
+        block = lambda tag: [f"{tag} blk"] + [f"{tag} {n}" for n in range(1, 10)]
+        text = "\n".join(["# pad"] * 4 + block("A") + block("B") + ["# tail"] * 4) + "\n"
+        self.write_code(text, rel="app/two.py", msg="two blocks")
+        self.page("A (src: app/two.py:5-14 `blk`)\n\nB (src: app/two.py:15-24 `blk`)\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "two cites")
+        self.assertEqual(quiet(commands.cmd_mark, self.root)[0], 0)
+        before = self.keys()
+        hash_a, hash_b = before["svc.md|app/two.py:5-14|blk"], before["svc.md|app/two.py:15-24|blk"]
+        self.assertNotEqual(hash_a, hash_b)
+        self.write_code("# new\n" * 10 + text, rel="app/two.py", msg="shift 10")
+        self.assertEqual(self.run_reanchor(apply=True)[0], 0)
+        keys = self.keys()
+        self.assertEqual(keys["svc.md|app/two.py:15-24|blk"], hash_a)  # A moved onto B's old range
+        self.assertEqual(keys["svc.md|app/two.py:25-34|blk"], hash_b)
+        self.assertEqual(len(keys), 2)
+        rc, text_out = quiet(check_cmd.cmd_check, self.root)
+        self.assertEqual(rc, 0, text_out)
+        self.assertNotIn("moved", text_out)
+
     def test_only_the_moved_citation_in_a_page_changes(self):
         self.page("Handle " + CITE + "\n\nTail (src: app/svc.py:21-30)\n")
         git(self.root, "add", "-A")

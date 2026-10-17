@@ -25,9 +25,20 @@ def range_hash(lines: list[str], start: int, end: int) -> str:
     return hashlib.sha256(body.encode("utf-8", "surrogateescape")).hexdigest()[:HASH_HEX]
 
 
+def key_of(page: str, path: str, start: int, end: int, symbol: str | None) -> str:
+    return f"{page}|{path}:{start}-{end}|{symbol or ''}"
+
+
 def citation_key(page: str, cite: Citation) -> str:
     """State key of a citation; it embeds the range, so ``reanchor`` must re-key."""
-    return f"{page}|{cite.path}:{cite.start}-{cite.end}|{cite.symbol or ''}"
+    return key_of(page, cite.path, cite.start, cite.end, cite.symbol)
+
+
+def finding_key(f: "Finding", moved: bool = False) -> str:
+    """State key of the citation a finding is about (``moved``: at its new range)."""
+    if moved:
+        return key_of(f.page, f.path, f.new_start, f.new_end, f.symbol)
+    return key_of(f.page, f.path, f.start, f.end, f.symbol)
 
 
 def find_windows(
@@ -68,7 +79,7 @@ def read_pages(root: Path, at_head: bool) -> dict[str, str]:
         for path in gitview.ls_tree_files(root, WIKI_DIR) or []:
             rel = path[len(WIKI_DIR):]
             if rel.lower().endswith(".md") and rel not in CONTROL_FILES:
-                text = gitview.show_head(root, path)
+                text = gitview.show_head_strict(root, path)
                 if text is not None:
                     pages[rel] = text
         return pages
@@ -111,10 +122,7 @@ def moved_hashes(root: Path, pages: dict[str, str], st: dict) -> dict[str, str]:
     if tracked is None:
         return {}
     done = classify(root, pages, st, tracked, load_ignore(root, at_head=False))
-    keys = (
-        f"{f.page}|{f.path}:{f.start}-{f.end}|{f.symbol or ''}"
-        for f in done.findings if f.category == "moved"
-    )
+    keys = (finding_key(f) for f in done.findings if f.category == "moved")
     return {key: st["citations"][key] for key in keys if key in st["citations"]}
 
 
@@ -179,9 +187,12 @@ def _classify_one(
     """(category, reason, new start) or None when the citation is clean."""
     length = cite.end - cite.start + 1
     in_bounds = 1 <= cite.start <= cite.end <= len(lines)
-    symbol_in_file = cite.symbol is None or any(cite.symbol in ln for ln in lines)
+
+    def symbol_in_file() -> bool:
+        return cite.symbol is None or any(cite.symbol in ln for ln in lines)
+
     if digest is None:
-        if not symbol_in_file:
+        if not symbol_in_file():
             return "missing", f"symbol `{cite.symbol}` not found in {cite.path}", None
         if in_bounds and (
             cite.symbol is None or cite.symbol in "\n".join(lines[cite.start - 1 : cite.end])
@@ -197,7 +208,7 @@ def _classify_one(
         return "moved", "", windows[0]
     if len(windows) > 1:
         return "changed", f"ambiguous: {len(windows)} matches", None
-    if not symbol_in_file:
+    if not symbol_in_file():
         return "missing", f"symbol `{cite.symbol}` not found in {cite.path}", None
     return "changed", "cited body changed", None
 
