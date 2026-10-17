@@ -2,11 +2,13 @@ import contextlib
 import hashlib
 import io
 import json
+import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from agents.wikify import adopt_plan as ap
-from agents.wikify import adopt_cmd, adopt_refs
+from agents.wikify import adopt_cmd, adopt_refs, agentmap, commands, docs_cmd, docs_inventory, gitview, plan
 from agents.wikify import citations, state
 from tests.test_wikify_state import git
 from tests.wikify_adopt_helpers import AdoptCase, MAPPING, validate
@@ -307,6 +309,258 @@ class ReportTests(AdoptCase):
         before = git(self.root, "status", "--porcelain")
         self.report()
         self.assertEqual(git(self.root, "status", "--porcelain"), before)
+
+
+class ApplyCase(AdoptCase):
+    def apply(self, **kw):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = adopt_cmd.cmd_adopt(self.root, apply=True, **kw)
+        return rc, buf.getvalue()
+
+    def verify(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = commands.cmd_verify(self.root)
+        return rc, buf.getvalue()
+
+    def mark(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = commands.cmd_mark(self.root)
+        return rc, buf.getvalue()
+
+    def cycle(self, **kw):
+        """apply, commit 1 (staged renames), verify, mark, commit 2 (docs only)."""
+        rc, out = self.apply(**kw)
+        self.assertEqual(rc, 0, out)
+        git(self.root, "commit", "-q", "-m", "docs(wiki): move docs")
+        rc, out = self.verify()
+        self.assertEqual(rc, 0, out)
+        rc, out = self.mark()
+        self.assertEqual(rc, 0, out)
+        git(self.root, "add", "--", "docs/wiki")
+        git(self.root, "commit", "-q", "-m", "docs(wiki): adopt")
+
+    def read(self, rel):
+        return (self.root / rel).read_text(encoding="utf-8")
+
+
+class ApplyTests(ApplyCase):
+    def test_moves_wrap_and_keep_history(self):
+        self.build("nested-docs")
+        self.write_map()
+        rc, out = self.apply()
+        self.assertEqual(rc, 0, out)
+        self.assertFalse((self.root / "docs/adr/0001.md").exists())
+        self.assertEqual(ap.unwrap(self.read("docs/wiki/decisions/0001.md")), ("docs/adr/0001.md", "# ADR 1\n\nDecision.\n"))
+        self.assertEqual(
+            ap.unwrap(self.read("docs/wiki/specs/trd/auth/tokens.md")),
+            ("docs/trd/auth/tokens.md", "# Tokens\n\nBody without trailing newline"),
+        )
+        staged = git(self.root, "diff", "--cached", "--name-status", "-M")
+        self.assertEqual(sorted(l.split("\t")[0] for l in staged.splitlines()), ["R100"] * 3)  # pure renames
+        git(self.root, "commit", "-q", "-m", "move")
+        log = git(self.root, "log", "--follow", "--format=%s", "--", "docs/wiki/decisions/0001.md")
+        self.assertIn("init", log.splitlines())
+
+    def test_skipped_docs_stay_and_output_says_what_to_do_next(self):
+        self.build("nested-docs")
+        self.write_map()
+        rc, out = self.apply()
+        for rel in ("docs/build.md", "docs/secret-notes.md", "docs/guide.markdown", "README.md", "docs/img/d.png"):
+            self.assertTrue((self.root / rel).exists(), rel)
+        self.assertIn("git commit", out)
+        self.assertIn("vibe wikify mark", out)
+
+    def test_bodies_are_hash_equal_after_the_full_cycle(self):
+        self.build("nested-docs")
+        self.write_map()
+        want = {m["source"]: m for m in json.loads(self._report())["moves"]}
+        self.cycle()
+        for source, m in want.items():
+            src, body = ap.unwrap(self.read(m["destination"]))
+            self.assertEqual(src, source)
+            self.assertEqual(ap.sha256(body.encode()), m["body_sha256"])
+
+    def _report(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            adopt_cmd.cmd_adopt(self.root, report=True)
+        return buf.getvalue()
+
+    def test_dirty_tree_and_detached_head_are_refused_without_force(self):
+        self.build("flat-docs")
+        self.write_map("docs/** -> w/\n")
+        (self.root / "scratch.txt").write_text("x")
+        rc, out = self.apply()
+        self.assertEqual(rc, 1)
+        self.assertIn("uncommitted changes", out)
+        self.assertTrue((self.root / "docs/overview.md").exists())
+        rc, out = self.apply(force=True)
+        self.assertEqual(rc, 0, out)
+        (self.root / "scratch.txt").unlink()
+        git(self.root, "reset", "-q", "--hard")
+        git(self.root, "clean", "-fdq")
+        git(self.root, "checkout", "-q", "--detach")
+        rc, out = self.apply()
+        self.assertEqual(rc, 1)
+        self.assertIn("detached HEAD", out)
+
+    def test_existing_destination_is_never_overwritten(self):
+        self.build("flat-docs")
+        (self.root / "docs/wiki/w").mkdir()
+        (self.root / "docs/wiki/w/overview.md").write_text("# mine\n")
+        self.write_map("docs/** -> w/\n")
+        rc, out = self.apply()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.read("docs/wiki/w/overview.md"), "# mine\n")
+        self.assertTrue((self.root / "docs/overview.md").exists())
+        self.assertIn("skip docs/overview.md: collision", out)
+
+    def test_nothing_to_move_is_a_no_op(self):
+        self.build("empty-docs")
+        self.write_map("docs/** -> w/\n")
+        before = git(self.root, "status", "--porcelain")
+        rc, out = self.apply()
+        self.assertEqual(rc, 0)
+        self.assertIn("nothing to move", out)
+        self.assertEqual(git(self.root, "status", "--porcelain"), before)
+
+
+class IdempotenceTests(ApplyCase):
+    def test_second_apply_after_both_commits_changes_nothing(self):
+        self.build("nested-docs")
+        self.write_map()
+        self.cycle()
+        head = git(self.root, "rev-parse", "HEAD")
+        rc, out = self.apply()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("nothing to move", out)
+        self.assertEqual(git(self.root, "status", "--porcelain"), "")
+        self.assertEqual(git(self.root, "rev-parse", "HEAD"), head)
+
+    def test_interrupted_run_needs_force_and_then_completes(self):
+        self.build("flat-docs")
+        self.write_map("docs/** -> w/\n")
+        real = gitview.run_git
+        calls = {"mv": 0}
+
+        def flaky(root, *args):
+            if args and args[0] == "mv":
+                calls["mv"] += 1
+                if calls["mv"] == 2:
+                    return subprocess.CompletedProcess(args, 1, "", "boom")
+            return real(root, *args)
+
+        with mock.patch.object(gitview, "run_git", flaky):
+            rc, out = self.apply()
+        self.assertEqual(rc, 1)
+        self.assertIn("--force", out)
+        rc, out = self.apply()
+        self.assertEqual(rc, 1)
+        self.assertIn("uncommitted changes", out)
+        rc, out = self.apply(force=True)
+        self.assertEqual(rc, 0, out)
+        for name in ("overview", "runbook"):
+            self.assertTrue(ap.is_wrapped(self.read(f"docs/wiki/w/{name}.md")))
+            self.assertFalse((self.root / f"docs/{name}.md").exists())
+        index = self.read("docs/wiki/index.md")
+        self.assertEqual(index.count("(w/overview.md)"), 1)
+        self.assertEqual(index.count("(w/runbook.md)"), 1)
+
+
+class MapAndOutlineTests(ApplyCase):
+    def outline_and_map(self):
+        """flat docs with generated outline pages, and sources/index.md listed in the map."""
+        self.build("flat-docs")
+        with contextlib.redirect_stdout(io.StringIO()):
+            docs_cmd.cmd_docs(self.root)
+        index = self.root / "docs/wiki/index.md"
+        index.write_text(index.read_text().replace(
+            "<!-- /wikify:map -->", "- [Sources](sources/index.md) \u2014 outline pages\n<!-- /wikify:map -->"))
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "outline")
+
+    def test_map_entries_and_verify_after_commit_one(self):
+        self.build("nested-docs")
+        self.write_map()
+        rc, out = self.apply()
+        self.assertEqual(rc, 0, out)
+        index = self.read("docs/wiki/index.md")
+        self.assertIn("(decisions/0001.md) \u2014 imported from docs/adr/0001.md", index)
+        self.assertIn("[Payments TRD](specs/trd/payments.md)", index)
+        git(self.root, "commit", "-q", "-m", "move")
+        rc, out = self.verify()
+        self.assertEqual(rc, 0, out)
+
+    def test_map_caps_group_pages_under_folder_indexes(self):
+        self.build("empty-docs")
+        for i in range(70):
+            (self.root / f"docs/d{i:02d}.md").write_text(f"# Doc {i}\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "docs")
+        self.write_map("docs/** -> pages/\n")
+        self.cycle()
+        index = self.read("docs/wiki/index.md")
+        self.assertIn("(pages/index.md)", index)
+        self.assertLessEqual(len(agentmap.parse_map(index).entries), agentmap.MAX_ENTRIES)
+        self.assertEqual(self.read("docs/wiki/pages/index.md").count("](d"), 70)
+
+    def test_outline_pages_of_moved_docs_are_removed_and_index_rewritten(self):
+        self.outline_and_map()
+        self.write_map("docs/overview.md -> w/\n")
+        self.cycle()
+        self.assertFalse((self.root / "docs/wiki/sources/docs/overview.md").exists())
+        self.assertTrue((self.root / "docs/wiki/sources/docs/runbook.md").exists())
+        idx = self.read("docs/wiki/sources/index.md")
+        self.assertNotIn("overview", idx)
+        self.assertIn("runbook", idx)
+        expected, _ = docs_inventory.expected_pages(self.root)
+        self.assertEqual(idx, expected["sources/index.md"])
+
+    def test_outline_index_is_removed_when_no_rows_remain(self):
+        self.outline_and_map()
+        self.write_map("docs/** -> w/\n")
+        self.cycle()
+        self.assertFalse((self.root / "docs/wiki/sources/index.md").exists())
+
+    def test_unrelated_stale_outline_pages_need_prune_sources(self):
+        self.outline_and_map()
+        stale = self.root / "docs/wiki/sources/docs/gone.md"
+        stale.write_text(docs_inventory.MARKER + "\n# gone\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "stale")
+        self.write_map("docs/overview.md -> w/\n")
+        rc, out = self.apply()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(stale.exists())
+        self.assertIn("stale docs/wiki/sources/docs/gone.md", out)
+        git(self.root, "reset", "-q", "--hard")
+        git(self.root, "clean", "-fdq")
+        rc, out = self.apply(prune_sources=True)
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(stale.exists())
+
+    def test_plan_is_clean_after_the_full_cycle(self):
+        self.outline_and_map()
+        self.write_map("docs/** -> w/\n")
+        self.cycle()
+        result = plan.build_plan(self.root)
+        self.assertIsNone(result["error"])
+        self.assertEqual(result["docs_unindexed"], [])
+        self.assertEqual(result["docs_stale"], [])
+        self.assertEqual(result["map_missing"], [])
+        self.assertEqual(result["uncovered"], [])
+
+    def test_commit_plan_is_printed_and_nothing_is_committed(self):
+        self.build("flat-docs")
+        self.write_map("docs/** -> w/\n")
+        head = git(self.root, "rev-parse", "HEAD")
+        rc, out = self.apply()
+        self.assertEqual(git(self.root, "rev-parse", "HEAD"), head)
+        for step in ("1. git commit", "2. vibe wikify verify", "3. git add -- docs/wiki"):
+            self.assertIn(step, out)
 
 
 if __name__ == "__main__":

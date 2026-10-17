@@ -10,7 +10,7 @@ vibe wikify adopt [--map FILE] [--include GLOB] [--exclude GLOB]
 | (none) | Dry run. Prints per file: source, destination, kind, skip reason, inbound refs. Writes nothing. |
 | `--map FILE` | Mapping file to use; default `docs/wiki/.wikifymap`. |
 | `--include` / `--exclude` | Narrow the candidate set by glob; same grammar limits as `.wikifyignore`. |
-| `--apply` | Perform `git mv`, wrap bodies in human blocks, update the map, then run verify. |
+| `--apply` | Perform `git mv` (staged), wrap bodies in human blocks (unstaged), update the map, remove outline pages of moved docs. Does not run `verify`: it reads HEAD, which only matches after commit 1; run it as step 2 of the printed plan. |
 | `--report` | Print the JSON in `adopt-report.schema.json` to stdout; implies no writes unless `--apply` is also given. |
 | `--rewrite-refs` | Also rewrite relative links in moved files and in other tracked docs-only files. |
 | `--prune-sources` | Also remove unrelated stale generated `sources/` pages. Outline pages of the docs this run moves are always removed. |
@@ -20,8 +20,8 @@ vibe wikify adopt [--map FILE] [--include GLOB] [--exclude GLOB]
 
 | Code | Meaning |
 |------|---------|
-| 0 | Dry run or apply completed; for apply, verify passed |
-| 1 | Refused (not a git repo, wiki not initialised, dirty tree or detached HEAD without `--force`, unsafe path, inventory failed) or verify failed after apply |
+| 0 | Dry run or apply completed, or nothing to move |
+| 1 | Refused (not a git repo, wiki not initialised, dirty tree or detached HEAD without `--force`, unsafe path, inventory failed) or a `git mv` failed |
 
 ## Guarantees
 

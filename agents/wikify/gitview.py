@@ -111,6 +111,17 @@ def status_paths(root: Path, rel: str) -> list[str] | None:
     return out
 
 
+def is_clean(root: Path) -> bool:
+    """True when ``git status`` lists nothing (tracked changes, staged changes or untracked files)."""
+    result = run_git(root, "status", "--porcelain", "--untracked-files=all")
+    return result.returncode == 0 and not result.stdout.strip()
+
+
+def on_branch(root: Path) -> bool:
+    """False on a detached HEAD (or any error)."""
+    return run_git(root, "symbolic-ref", "-q", "HEAD").returncode == 0
+
+
 def show_head(root: Path, rel: str) -> str | None:
     """Content of ``rel`` at HEAD, so uncommitted edits never count."""
     result = run_git(root, "show", f"HEAD:{rel}")

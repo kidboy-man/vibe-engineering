@@ -60,20 +60,20 @@ are hash-equal, second apply changes nothing, `plan` reports nothing uncovered (
 
 ### 7b. Apply, safety, idempotence (FR-019, FR-021)
 
-- [ ] T015 [US7] Write failing tests in `tests/test_wikify_adopt.py` for apply: files moved with `git mv` (history preserved, `git log --follow` works), bodies wrapped, hashes match originals, destination never overwritten, no deletion without a flag
-- [ ] T016 [US7] Write failing tests for refusal: dirty tree and detached HEAD exit 1 without `--force`, proceed with it; build-coupled, ignored, secret-path, and secret-hit files stay in place and appear in `skips` with the right reason
-- [ ] T017 [US7] Write failing tests for idempotence and resume: after commits 1 and 2 a second `--apply` is a no-op; after an interrupted run the dirty tree is refused without `--force`, and with `--force` the remainder completes with no duplicate pages
-- [ ] T018 [US7] Implement apply in `agents/wikify/adopt_cmd.py`: validate full plan first, then sorted per-file `git mv` and wrapper write, using `gitview` helpers; make T015-T017 pass
-- [ ] T019 [US7] Write failing tests for the map and indexes: one `<!-- wikify:map -->` entry per adopted page with a mechanical hint from the title, 60/80 char and 60-entry / 6144-byte caps honored, per-folder index pages when caps would be exceeded, entries stay inert text under the existing grammar
-- [ ] T020 [US7] Implement map updates in `agents/wikify/adopt_cmd.py` using `agents/wikify/agentmap.py`; make T019 pass
-- [ ] T021 [US7] Write failing tests that `apply` runs `verify` at the end (smoke check; exits 1 when verify fails) and that, after committing both commits, `verify`, `mark` and `plan` pass with no `docs_unindexed`; edit `agents/wikify/plan.py` only if the post-commit test fails
-- [ ] T022 [US7] Write failing tests for the printed commit plan (commit 1 outside `docs/wiki/`, commit 2 docs-only, never commits) and implement it in `agents/wikify/adopt_cmd.py`
+- [X] T015 [US7] Write failing tests in `tests/test_wikify_adopt.py` for apply: files moved with `git mv` (history preserved, `git log --follow` works), bodies wrapped, hashes match originals, destination never overwritten, no deletion without a flag
+- [X] T016 [US7] Write failing tests for refusal: dirty tree and detached HEAD exit 1 without `--force`, proceed with it; build-coupled, ignored, secret-path, and secret-hit files stay in place and appear in `skips` with the right reason
+- [X] T017 [US7] Write failing tests for idempotence and resume: after commits 1 and 2 a second `--apply` is a no-op; after an interrupted run the dirty tree is refused without `--force`, and with `--force` the remainder completes with no duplicate pages
+- [X] T018 [US7] Implement apply in `agents/wikify/adopt_cmd.py`: validate full plan first, then sorted per-file `git mv` and wrapper write, using `gitview` helpers; make T015-T017 pass
+- [X] T019 [US7] Write failing tests for the map and indexes: one `<!-- wikify:map -->` entry per adopted page with a mechanical hint from the title, 60/80 char and 60-entry / 6144-byte caps honored, per-folder index pages when caps would be exceeded, entries stay inert text under the existing grammar
+- [X] T020 [US7] Implement map updates in `agents/wikify/adopt_cmd.py` using `agents/wikify/agentmap.py`; make T019 pass
+- [X] T021 [US7] Write failing tests that, after `apply` and commit 1 (apply does not run `verify`: it reads HEAD, which still has the old layout), `verify`, `mark` and `plan` pass with no `docs_unindexed`; edit `agents/wikify/plan.py` only if the post-commit test fails
+- [X] T022 [US7] Write failing tests for the printed commit plan (commit 1 outside `docs/wiki/`, commit 2 docs-only, never commits) and implement it in `agents/wikify/adopt_cmd.py`
 
 ### 7c. References and outline pages (FR-021, edge cases)
 
 - [ ] T023 [US7] Write failing tests in `tests/test_wikify_adopt.py` for inbound-reference scan: relative links in other tracked docs, README, `AGENTS.md`, `CLAUDE.md`, source comments, CI configs are found and listed with file and line; unresolvable ones land in `unresolved_refs`; nothing is edited by default
 - [ ] T024 [US7] Implement scan and `--rewrite-refs` in `agents/wikify/adopt_refs.py`: rewrite relative links in moved files and in other tracked docs-only files only; make T023 pass
-- [ ] T025 [US7] Write failing tests that apply removes the outline pages of moved docs and rewrites or removes `sources/index.md`, and that unrelated stale generated pages are removed only with `--prune-sources`; implement in `agents/wikify/adopt_cmd.py` reusing `docs_cmd._stale`
+- [X] T025 [US7] Write failing tests that apply removes the outline pages of moved docs and rewrites or removes `sources/index.md`, and that unrelated stale generated pages are removed only with `--prune-sources`; implement in `agents/wikify/adopt_cmd.py` reusing `docs_cmd._stale`
 
 ### 7d. Skill (FR-018, FR-022)
 

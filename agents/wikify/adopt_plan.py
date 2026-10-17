@@ -174,6 +174,7 @@ class Candidate:
     reason: str | None
     sha256: str
     refs: tuple[adopt_refs.Ref, ...] = ()
+    moved: bool = False  # resume: already moved by an interrupted run
 
 
 @dataclass(frozen=True)
@@ -237,7 +238,7 @@ def _classify(root: Path, source: str, rule: Rule, refs: tuple, taken: set[str])
         return _skip(source, "unsafe-path", refs=refs)
     data = _read_body(root, source)
     if data is None:
-        return _skip(source, "unsafe-path", refs=refs)
+        return _resume(root, source, dest, rule, refs) or _skip(source, "unsafe-path", refs=refs)
     digest = sha256(data)
     try:
         body = data.decode("utf-8")
@@ -253,3 +254,21 @@ def _classify(root: Path, source: str, rule: Rule, refs: tuple, taken: set[str])
         return _skip(source, "collision", digest, refs)
     taken.add(dest.casefold())
     return Candidate(source, dest, rule.kind, None, digest, refs)
+
+
+def _resume(root: Path, source: str, dest: str, rule: Rule, refs: tuple) -> Candidate | None:
+    """A doc whose source is gone but whose destination exists was moved by an interrupted run."""
+    if (Path(root) / source).exists():
+        return None
+    data = _read_body(root, WIKI_DIR + dest)
+    if data is None:
+        return None
+    try:
+        wrapped = unwrap(data.decode("utf-8"))
+    except UnicodeDecodeError:
+        return None
+    if wrapped is not None:
+        if wrapped[0] != source:
+            return None
+        data = wrapped[1].encode("utf-8")
+    return Candidate(source, dest, rule.kind, None, sha256(data), refs, moved=True)

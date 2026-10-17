@@ -186,8 +186,8 @@ a second apply changes nothing, and `plan` reports nothing uncovered.
    run), **Then** it prints per file the source, destination, kind, any skip reason, and inbound
    references found, and writes nothing.
 2. **Given** an approved mapping, **When** the developer runs `vibe wikify adopt --apply`, **Then** files
-   are moved with history preserved, links are rewritten, the map is updated, outline pages for the moved
-   docs are handled as specified, and the verifier runs.
+   are moved with history preserved, bodies are wrapped verbatim, the map is updated, outline pages for the
+   moved docs are removed, and the printed commit steps leave the wiki verifying cleanly.
 3. **Given** build-coupled files, non-markdown assets, ignored files, secret paths, or files with secret
    scan hits, **When** adopt runs, **Then** they stay in place and are reported with a reason.
 4. **Given** a dirty working tree or detached HEAD, **When** adopt runs without `--force`, **Then** it

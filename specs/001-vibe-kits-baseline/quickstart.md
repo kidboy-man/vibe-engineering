@@ -25,9 +25,11 @@ vibe wikify init
 vibe wikify adopt                      # dry run: table of moves, skips, inbound refs
 vibe wikify adopt --report > report.json
 # edit docs/wiki/.wikifymap, review the dry run again
-vibe wikify adopt --apply              # git mv, human-block wrap, map update, verify
-vibe wikify adopt --apply              # second run: no-op
+vibe wikify adopt --apply              # git mv (staged), human-block wrap, map update
+git commit -m 'docs(wiki): move docs'  # commit 1: staged renames only
 vibe wikify verify && vibe wikify mark
+git add -- docs/wiki && git commit -m 'docs(wiki): adopt'   # commit 2: docs-only
+vibe wikify adopt --apply              # second run: no-op
 vibe wikify plan                       # expect: nothing uncovered
 ```
 
