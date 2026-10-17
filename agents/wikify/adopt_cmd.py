@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import stat
 from pathlib import Path
 
@@ -33,15 +34,29 @@ def _contexts(unmapped: list[str]) -> list[str]:
     return sorted({"/".join(p.split("/")[:2]) for p in unmapped if "/" in p})
 
 
-def build_report(plan: ap.Plan, outgoing: list[tuple[str, int, str]]) -> dict:
+def _rewritable(ref: adopt_refs.Ref, moved: set[str]) -> bool:
+    """Incoming link refs that ``--rewrite-refs`` fixes: links in markdown files under docs/."""
+    return (
+        ref.kind == "link" and ref.file.startswith("docs/") and not ref.file.startswith(WIKI_DIR)
+        and ref.file.lower().endswith(".md") and ref.file not in moved
+    )
+
+
+def build_report(
+    plan: ap.Plan, outgoing: list[tuple[str, int, str]], rewrite: bool = False
+) -> dict:
     moves = [c for c in plan.candidates if not c.reason]
     skips = [c for c in plan.candidates if c.reason]
     unresolved: set[tuple[str, str, int]] = set()
+    sources = {c.source for c in moves}
+    edited = sorted({r.file for c in moves for r in c.refs if rewrite and _rewritable(r, sources)})
     for c in moves:
         for r in c.refs:
-            unresolved.add((c.source, r.file, r.line))
+            if not (rewrite and _rewritable(r, sources)):
+                unresolved.add((c.source, r.file, r.line))
     for doc, line, target in outgoing:
-        unresolved.add((target, doc, line))
+        if not rewrite:
+            unresolved.add((target, doc, line))
     unmapped = sorted(c.source for c in skips if c.reason == "unmapped")
     return {
         "moves": [
@@ -56,7 +71,7 @@ def build_report(plan: ap.Plan, outgoing: list[tuple[str, int, str]]) -> dict:
         "unclassified": unmapped,
         "suggested_contexts": _contexts(unmapped),
         "commit_plan": {
-            "outside_wiki": sorted(c.source for c in moves),
+            "outside_wiki": sorted([c.source for c in moves] + edited),
             "wiki_only": sorted([WIKI_DIR + c.destination for c in moves] + ([INDEX_REL] if moves else [])),
         },
     }
@@ -113,13 +128,13 @@ def cmd_adopt(
     moves = [c.source for c in plan.candidates if not c.reason]
     outgoing = adopt_refs.outgoing(root, moves)
     if report:
-        print(json.dumps(build_report(plan, outgoing), indent=2, sort_keys=True))
+        print(json.dumps(build_report(plan, outgoing, rewrite_refs), indent=2, sort_keys=True))
         return 0
     _print_plan(plan)
     n_skip = sum(1 for c in plan.candidates if c.reason)
     print(f"{len(moves)} move(s), {n_skip} skipped")
     if apply:
-        return _apply(root, plan, prune_sources)
+        return _apply(root, plan, prune_sources, rewrite_refs)
     print("dry run: no files written; pass --apply to move the docs")
     return 0
 
@@ -225,7 +240,26 @@ def _prune_empty(top: Path) -> None:
                 pass
 
 
-def _apply(root: Path, plan: ap.Plan, prune_sources: bool) -> int:
+def _rewrite_incoming(root: Path, moves: list[ap.Candidate], new_paths: dict[str, str]) -> list[str]:
+    """Fix relative links in docs-only markdown files that point at moved docs; stages each edit."""
+    sources = set(new_paths)
+    files = sorted({r.file for c in moves for r in c.refs if _rewritable(r, sources)})
+    done: list[str] = []
+    for rel in files:
+        path = root / rel
+        data = ap._read_body(root, rel)
+        if data is None:
+            continue
+        base = posixpath.dirname(rel)
+        text, n = adopt_refs.rewrite_links(data.decode("utf-8"), base, base, new_paths)
+        if n:
+            _write_atomic(path, text)
+            gitview.run_git(root, "add", "--", rel)
+            done.append(rel)
+    return done
+
+
+def _apply(root: Path, plan: ap.Plan, prune_sources: bool, rewrite: bool = False) -> int:
     moves = [c for c in plan.candidates if not c.reason]
     if not moves:
         print("nothing to move")
@@ -246,6 +280,7 @@ def _apply(root: Path, plan: ap.Plan, prune_sources: bool) -> int:
     if any((root / WIKI_DIR / rel).exists() or not _dirs_safe(root, rel) for rel in extra):
         print("refused: a folder index page already exists; nothing written")
         return 1
+    new_paths = {c.source: WIKI_DIR + c.destination for c in moves}
     for c in sorted(moves, key=lambda c: c.source):
         dest = root / WIKI_DIR / c.destination
         if not c.moved:
@@ -264,12 +299,19 @@ def _apply(root: Path, plan: ap.Plan, prune_sources: bool) -> int:
         if data is None or ap.sha256(data) != c.sha256:
             print(f"refused: {_safe(c.destination)} does not match the planned content; stopping")
             return 1
+        if rewrite:
+            text, _ = adopt_refs.rewrite_links(
+                text, posixpath.dirname(c.source), posixpath.dirname(WIKI_DIR + c.destination), new_paths
+            )
         _write_atomic(dest, ap.wrap(c.source, text))
     for rel, text in sorted(extra.items()):
         (root / WIKI_DIR / rel).parent.mkdir(parents=True, exist_ok=True)
         _write_atomic(root / WIKI_DIR / rel, text, exclusive=True)
     if index_text != index_path.read_text(encoding="utf-8"):
         _write_atomic(index_path, index_text)
+    edited = _rewrite_incoming(root, moves, new_paths) if rewrite else []
+    for rel in edited:
+        print(f"rewrote links in {_safe(rel)} (staged)")
     removed, stale = _outline_cleanup(root, moves, prune_sources)
     current = index_path.read_text(encoding="utf-8")
     pruned = adopt_map.drop_entries(current, set(removed))

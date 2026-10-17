@@ -71,8 +71,8 @@ are hash-equal, second apply changes nothing, `plan` reports nothing uncovered (
 
 ### 7c. References and outline pages (FR-021, edge cases)
 
-- [ ] T023 [US7] Write failing tests in `tests/test_wikify_adopt.py` for inbound-reference scan: relative links in other tracked docs, README, `AGENTS.md`, `CLAUDE.md`, source comments, CI configs are found and listed with file and line; unresolvable ones land in `unresolved_refs`; nothing is edited by default
-- [ ] T024 [US7] Implement scan and `--rewrite-refs` in `agents/wikify/adopt_refs.py`: rewrite relative links in moved files and in other tracked docs-only files only; make T023 pass
+- [X] T023 [US7] Write failing tests in `tests/test_wikify_adopt.py` for inbound-reference scan: relative links in other tracked docs, README, `AGENTS.md`, `CLAUDE.md`, source comments, CI configs are found and listed with file and line; unresolvable ones land in `unresolved_refs`; nothing is edited by default
+- [X] T024 [US7] Implement scan and `--rewrite-refs` in `agents/wikify/adopt_refs.py`: rewrite relative links in moved files and in other tracked docs-only files only; make T023 pass
 - [X] T025 [US7] Write failing tests that apply removes the outline pages of moved docs and rewrites or removes `sources/index.md`, and that unrelated stale generated pages are removed only with `--prune-sources`; implement in `agents/wikify/adopt_cmd.py` reusing `docs_cmd._stale`
 
 ### 7d. Skill (FR-018, FR-022)

@@ -11,7 +11,7 @@ from agents.wikify import adopt_plan as ap
 from agents.wikify import adopt_cmd, adopt_refs, agentmap, commands, docs_cmd, docs_inventory, gitview, plan
 from agents.wikify import citations, state
 from tests.test_wikify_state import git
-from tests.wikify_adopt_helpers import AdoptCase, MAPPING, validate
+from tests.wikify_adopt_helpers import FIXTURES, AdoptCase, MAPPING, validate
 
 SPEC = Path(__file__).resolve().parents[1] / "specs" / "001-vibe-kits-baseline"
 
@@ -184,7 +184,7 @@ class RefsTests(AdoptCase):
         self.assertIn(("docs/trd/payments.md", "link"), adr)
         self.assertIn(("src/app.py", "path"), adr)
         self.assertEqual([(r.file, r.kind) for r in refs["docs/build.md"]], [("Makefile", "path")])
-        self.assertEqual(refs["docs/trd/payments.md"], [])
+        self.assertEqual([(r.file, r.kind) for r in refs["docs/trd/payments.md"]], [("docs/overview.md", "link")])
 
     def test_is_config(self):
         for name in ("pyproject.toml", "Makefile", "a/b/ci.yml", "package.json", "Dockerfile"):
@@ -561,6 +561,66 @@ class MapAndOutlineTests(ApplyCase):
         self.assertEqual(git(self.root, "rev-parse", "HEAD"), head)
         for step in ("1. git commit", "2. vibe wikify verify", "3. git add -- docs/wiki"):
             self.assertIn(step, out)
+
+
+class RewriteTests(unittest.TestCase):
+    MOVED = {"docs/adr/0001.md": "docs/wiki/decisions/0001.md"}
+
+    def test_links_follow_moved_docs_and_assets_keep_their_target(self):
+        text = "See [ADR](../adr/0001.md#x) and ![d](../img/d.png)\n"
+        got, n = adopt_refs.rewrite_links(text, "docs/trd", "docs/wiki/specs/trd", self.MOVED)
+        self.assertEqual(got, "See [ADR](../../decisions/0001.md#x) and ![d](../../../img/d.png)\n")
+        self.assertEqual(n, 2)
+
+    def test_urls_anchors_absolute_and_fences_are_left_alone(self):
+        text = "[u](https://x.io/a.md) [a](#top) [r](/abs.md)\n```\n[c](../adr/0001.md)\n```\n"
+        self.assertEqual(adopt_refs.rewrite_links(text, "docs/trd", "docs/wiki/x", self.MOVED), (text, 0))
+
+    def test_unchanged_links_are_not_counted(self):
+        self.assertEqual(adopt_refs.rewrite_links("[a](b.md)", "docs", "docs", {}), ("[a](b.md)", 0))
+
+
+class RewriteApplyTests(ApplyCase):
+    def prepare(self):
+        self.build("nested-docs")
+        self.write_map()
+
+    def test_default_leaves_bodies_byte_identical(self):
+        self.prepare()
+        self.cycle()
+        _, body = ap.unwrap(self.read("docs/wiki/specs/trd/payments.md"))
+        self.assertEqual(body, FIXTURES["nested-docs"]["docs/trd/payments.md"])
+        self.assertIn("(trd/payments.md)", self.read("docs/overview.md"))
+
+    def test_rewrite_refs_fixes_moved_bodies_and_incoming_docs_links(self):
+        self.prepare()
+        rc, out = self.apply(rewrite_refs=True)
+        self.assertEqual(rc, 0, out)
+        _, body = ap.unwrap(self.read("docs/wiki/specs/trd/payments.md"))
+        self.assertIn("[ADR](../../decisions/0001.md)", body)
+        self.assertIn("![d](../../../img/d.png)", body)
+        original = FIXTURES["nested-docs"]["docs/trd/payments.md"]
+        want, _ = adopt_refs.rewrite_links(
+            original, "docs/trd", "docs/wiki/specs/trd",
+            {"docs/adr/0001.md": "docs/wiki/decisions/0001.md", "docs/trd/payments.md": "docs/wiki/specs/trd/payments.md"},
+        )
+        self.assertEqual(body, want)  # equal after the same link substitutions, nothing else
+        self.assertIn("(wiki/specs/trd/payments.md)", self.read("docs/overview.md"))
+        self.assertIn("https://x.io/a.md", self.read("docs/overview.md"))
+        names = git(self.root, "diff", "--cached", "--name-status", "-M").splitlines()
+        self.assertEqual(sorted(l.split("\t")[0] for l in names), ["M", "R100", "R100", "R100"])
+
+    def test_rewrite_refs_cycle_verifies_and_unresolved_shrinks(self):
+        self.prepare()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            adopt_cmd.cmd_adopt(self.root, report=True, rewrite_refs=True)
+        data = json.loads(buf.getvalue())
+        targets = {r["target"] for r in data["unresolved_refs"]}
+        self.assertNotIn("docs/img/d.png", targets)  # rewritten, no longer unresolved
+        self.assertIn("src/app.py", {r["file"] for r in data["unresolved_refs"]})  # code comment: only listed
+        self.assertIn("docs/overview.md", data["commit_plan"]["outside_wiki"])
+        self.cycle(rewrite_refs=True)
 
 
 if __name__ == "__main__":

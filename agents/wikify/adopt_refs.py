@@ -99,3 +99,36 @@ def outgoing(root: Path, sources: list[str]) -> list[tuple[str, int, str]]:
                 if resolved != doc and resolved in tracked:
                     found.append((doc, n, resolved))
     return found
+
+
+def rewrite_links(
+    text: str, old_base: str, new_base: str, moved: dict[str, str]
+) -> tuple[str, int]:
+    """Re-point relative markdown links after a doc moves from ``old_base`` to ``new_base``.
+
+    ``moved`` maps old repo paths to new repo paths. A link to a moved doc follows
+    it; a link to anything else keeps pointing at the same file, now reached from
+    the new location. URLs, absolute paths and fenced code are left alone.
+    Returns the new text and the number of links changed.
+    """
+    count = 0
+    fenced = False
+    out: list[str] = []
+
+    def fix(m: re.Match) -> str:
+        nonlocal count
+        target = m.group(1)
+        if "://" in target or target.startswith(("/", "mailto:")):
+            return m.group(0)
+        resolved = posixpath.normpath(posixpath.join(old_base, target))
+        new = posixpath.relpath(moved.get(resolved, resolved), new_base or ".")
+        if new == target:
+            return m.group(0)
+        count += 1
+        return m.group(0)[: m.start(1) - m.start(0)] + new
+
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        out.append(line if fenced else _LINK.sub(fix, line))
+    return "\n".join(out), count

@@ -22,6 +22,7 @@ FIXTURES = {
         "docs/adr/0001.md": "# ADR 1\n\nDecision.\n",
         "docs/img/d.png": "\x89PNG",
         "docs/guide.markdown": "# Guide\n",
+        "docs/overview.md": "# Overview\n\nStart at [payments](trd/payments.md) or [site](https://x.io/a.md).\n",
         "docs/secret-notes.md": "# Notes\n\npassword = 'hunter2hunter2'\n",
         "docs/build.md": "# Build output\n",
         "Makefile": "check:\n\tcat docs/build.md\n",
