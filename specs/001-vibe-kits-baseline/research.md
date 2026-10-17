@@ -15,10 +15,10 @@ Items marked **verify in design spec** need confirmation in source before implem
 - **Alternatives considered**: Option B, a new page kind exempt from citation checks. It needs verifier,
   planner, and notice changes and creates a second exemption path to keep safe. Rejected unless the
   verification below fails.
-- **Verify in design spec**: (a) human blocks of 100+ KB are not capped by `MAX_*` limits; (b) markdown
-  headings and relative links inside human blocks survive `LINK`/`HEADING` handling; (c) `verify` can
-  report adopted pages separately ("documented, not code-verified") by recognising the provenance comment.
-  If (a) or (c) fails, fall back to Option B.
+- **Verified (T001)**: no cap on human blocks; headings and links inside blocks are masked from both the
+  uncited check and reachability; `verify` cannot report adopted pages separately, so the provenance comment
+  and existing `HUMAN BLOCK CHANGED` notices serve as the label. Option A stands. See
+  `docs/superpowers/specs/2026-10-17-wikify-adopt-design.md`.
 
 ## D2. Mapping file
 
@@ -33,8 +33,8 @@ Items marked **verify in design spec** need confirmation in source before implem
 ## D3. Atomicity
 
 - **Decision**: validate the whole plan first (collisions, secret-scan hits, path safety, dirty tree), then
-  perform `git mv` per file in sorted order; a re-run recomputes remaining moves from the mapping file, so
-  an interrupted run is resumable and idempotent. No partial rollback.
+  perform `git mv` per file in sorted order. Resume after an interruption needs `--force` (dirty tree);
+  after commits 1 and 2 a re-run is a no-op. No partial rollback.
 - **Rationale**: git history is the undo; `git mv` is cheap and each step is independently valid.
 - **Alternatives considered**: staging area in a temp tree then swap (more code, same safety).
 
@@ -47,16 +47,17 @@ Items marked **verify in design spec** need confirmation in source before implem
 
 ## D5. Freshness and commit plan
 
-- **Decision**: the command prints a two-commit plan: (1) an earlier commit for everything outside
-  `docs/wiki/` (pointer links, removed originals, rewritten refs); (2) a docs-only commit under
-  `docs/wiki/`. It never commits.
+- **Decision**: commit 1 is the staged pure `git mv` renames (plus rewritten refs outside the wiki); then
+  `mark`; then a docs-only commit 2. The wrapper write is unstaged so renames stay 100% similar. It never commits.
 - **Rationale**: the freshness rule allows only docs-only commits after the commit that touches
   `.wikify.json`.
 
 ## D6. Outline pages from `wikify docs`
 
-- **Decision**: stale `sources/` pages for migrated docs are listed and removed only with `--prune-sources`.
-- **Rationale**: existing behavior flags stale generated pages and never auto-deletes.
+- **Decision**: apply always removes the `sources/` outline pages of the docs it moves and rewrites or removes
+  `sources/index.md`; `--prune-sources` removes only unrelated stale generated pages.
+- **Rationale**: after the move commit the doc is under `docs/wiki/`, no longer eligible, so its outline page would
+  fail verify ("generated page has no eligible source").
 
 ## D7. Skill delivery
 

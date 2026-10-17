@@ -13,7 +13,7 @@ vibe wikify adopt [--map FILE] [--include GLOB] [--exclude GLOB]
 | `--apply` | Perform `git mv`, wrap bodies in human blocks, update the map, then run verify. |
 | `--report` | Print the JSON in `adopt-report.schema.json` to stdout; implies no writes unless `--apply` is also given. |
 | `--rewrite-refs` | Also rewrite relative links in moved files and in other tracked docs-only files. |
-| `--prune-sources` | Remove stale generated `sources/` outline pages for migrated docs. |
+| `--prune-sources` | Also remove unrelated stale generated `sources/` pages. Outline pages of the docs this run moves are always removed. |
 | `--force` | Allow a dirty tree or detached HEAD. |
 
 ## Exit codes
@@ -34,8 +34,10 @@ vibe wikify adopt [--map FILE] [--include GLOB] [--exclude GLOB]
 ## Printed commit plan
 
 ```text
-commit 1 (outside docs/wiki/): pointer links, removed originals, rewritten refs
-commit 2 (docs-only): docs/wiki/** and .wikify.json mark
+1. git commit            # staged pure renames (+ `git add` of rewritten refs outside docs/wiki/)
+2. vibe wikify mark
+3. git add -- docs/wiki && git commit   # wrapped bodies, map, outline removal, .wikify.json (docs-only)
 ```
 
-The command prints this plan and never commits.
+The renames are one commit so `git log --follow` works; the command prints this plan and never commits.
+Re-running before commit 1 requires `--force` (resume); after both commits it is a no-op.

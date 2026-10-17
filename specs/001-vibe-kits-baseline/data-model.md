@@ -10,19 +10,20 @@ One markdown file considered for adoption.
 |-------|---------|
 | `source` | repo-relative path of the file |
 | `destination` | repo-relative path under `docs/wiki/`, empty when skipped |
-| `kind` | `spec`, `adr`, `reference`, `asset`, or `skipped` |
-| `skip_reason` | set only when `kind = skipped`: `build-coupled`, `ignored`, `secret-path`, `secret-hit`, `non-markdown`, `collision`, `unmapped` |
+| `kind` | `spec`, `adr`, `reference` (from the mapping rule, default `reference`), or `skipped` |
+| `skip_reason` | set only when `kind = skipped`: `build-coupled`, `ignored`, `secret-path`, `secret-hit`, `non-markdown`, `root-file`, `collision`, `unsafe-body`, `unsafe-path`, `unmapped` |
 | `inbound_refs` | list of `{file, line, rewritable}` references to this file from elsewhere |
 | `body_sha256` | hash of the body before the move, for the no-content-loss check |
 
 Rules:
 - `destination` is unique across candidates and MUST NOT exist already (never overwrite).
 - `source` MUST be a tracked, regular, UTF-8 markdown file inside the repo; symlinks are skipped.
-- `kind = asset` files move only when referenced by a moved doc and not skipped by another rule.
+- Non-markdown assets and `.markdown` files never move (`walk_wiki` allows only `.md` under `docs/wiki/`); links to them from moved docs are reported in `unresolved_refs`.
+- Root-level files move only when a mapping rule names the exact path.
 
 ## Mapping rule (in `.wikifymap`)
 
-`source-glob -> destination-folder/`, first match wins, `#` comments, bounded size and wildcard count.
+`source-glob -> destination-folder/ [kind=spec|adr|reference]`, first match wins, `#` comments, bounded size and wildcard count.
 Absent rule for a candidate means `skip_reason = unmapped`, reported, never guessed by the CLI.
 
 ## Adopted page

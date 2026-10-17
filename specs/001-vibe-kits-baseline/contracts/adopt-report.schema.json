@@ -14,7 +14,7 @@
         "properties": {
           "source": {"type": "string"},
           "destination": {"type": "string"},
-          "kind": {"enum": ["spec", "adr", "reference", "asset"]},
+          "kind": {"enum": ["spec", "adr", "reference"]},
           "body_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
         }
       }
@@ -28,7 +28,7 @@
         "properties": {
           "source": {"type": "string"},
           "reason": {
-            "enum": ["build-coupled", "ignored", "secret-path", "secret-hit", "non-markdown", "collision", "unmapped"]
+            "enum": ["build-coupled", "ignored", "secret-path", "secret-hit", "non-markdown", "root-file", "collision", "unsafe-body", "unsafe-path", "unmapped"]
           }
         }
       }

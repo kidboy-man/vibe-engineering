@@ -262,8 +262,8 @@ a second apply changes nothing, and `plan` reports nothing uncovered.
 - **FR-019** *(planned)*: Adopt MUST preserve all moved markdown content (verifiable by content hash) and
   MUST NOT weaken citations, the secret scan, human blocks, the map, or the freshness gate.
 - **FR-020** *(planned)*: Migrated prose that is not code-cited MUST be represented so the verifier stays
-  strict for ordinary pages and reports migrated prose separately as documented, not code-verified. The
-  representation is a design decision for the plan phase.
+  strict for ordinary pages and migrated prose is visibly marked as documented, not code-verified
+  (human-block notices plus a provenance label). Representation: see the design spec.
 - **FR-021** *(planned)*: Adopt MUST refuse on a dirty tree or detached HEAD without `--force`, MUST be
   idempotent, and MUST print a commit plan that keeps the freshness rule satisfiable (changes outside
   `docs/wiki/` in a separate earlier commit).
