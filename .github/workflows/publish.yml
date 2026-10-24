@@ -46,10 +46,12 @@ jobs:
           python-version: "3.11"
 
       - name: Install build tooling
-        run: python -m pip install --upgrade build
+        run: python -m pip install --require-hashes -r requirements-build.txt
 
       - name: Build sdist and wheel
-        run: python -m build
+        # --no-isolation: build deps come from the hash-pinned file above,
+        # not from a fresh unpinned resolve of pyproject's build-system.requires.
+        run: python -m build --no-isolation
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
