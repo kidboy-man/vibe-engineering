@@ -1,4 +1,8 @@
 {
-  "version": 1,
-  "covered": null
+  "citations": {},
+  "covered": "3842cf9870fa32bf153d4a6c704cf9edcfe84d12",
+  "imported": {
+    "guides/second-brain-setup.md": "8e44148ee9b6bcdf"
+  },
+  "version": 1
 }
