@@ -1,0 +1,3 @@
+# Repo paths the wiki must not cite, one glob per line.
+# Example: a vendored directory such as third_party/
+# A name without / matches at any depth; a / anchors at the repo root; no ! lines.
