@@ -1,0 +1,4 @@
+# Reviewed false positives of the secret scan, one per line.
+# Format: <page path under docs/wiki>|sha256:<first 16 hex of sha256(matched text)>
+# verify prints the exact line to add (ALLOW-LIST KEY). Never store the secret itself.
+# Only add entries after a human has reviewed the match.

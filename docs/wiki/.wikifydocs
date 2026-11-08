@@ -1,0 +1,4 @@
+# Extra docs to outline in docs/wiki/sources, one glob per line.
+# Default docs (README, docs/, ...) are always included; .wikifyignore still wins.
+# Example (uncomment to enable):
+# docs-extra/

@@ -1,3 +1,5 @@
+<!-- wikify:human -->
+<!-- imported from=docs/second-brain-setup.md -->
 # LLM Second-Brain — Setup Guide
 
 > Based on a working implementation bootstrapped on 2026-06-26. This guide documents the exact steps, tool choices, and pitfalls discovered during the live build. Read it once, follow it once, and you'll have a local LLM-maintained second brain that compounds knowledge across every AI agent you use.
@@ -441,3 +443,4 @@ Weekly:   "lint the wiki" → agent finds orphans, dead links, contradictions
 - [Obsidian Skills](https://github.com/kepano/obsidian-skills) — teaches LLMs Obsidian-native syntax (Steph Ango)
 - [Obsidian forum thread 8580](https://forum.obsidian.md/t/support-for-vaults-in-windows-subsystem-for-linux-wsl/8580) — the EISDIR bug
 - [Agent Skills spec](https://agentskills.io/specification) — cross-platform skill standard
+<!-- /wikify:human -->
