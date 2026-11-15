@@ -239,8 +239,11 @@ def doctor(home: str | None = None) -> int:
             local_only = sorted(k for k in settings if k in LOCAL_ONLY_KEYS)
             secretish = sorted(k for k in settings if is_secret_key(k))
             if local_only or secretish:
-                preserved = ", ".join(local_only + secretish)
-                print(f"opencode.jsonc: preserved local-only / secret-ish keys ({preserved}); kit will not overwrite them")
+                print(
+                    "opencode.jsonc: preserved local-only / secret-ish keys "
+                    f"(local-only: {len(local_only)}, secret-ish: {len(secretish)}); "
+                    "kit will not overwrite them"
+                )
             else:
                 print("opencode.jsonc: no known local-only or secret keys")
         except (json.JSONDecodeError, ValueError) as exc:
