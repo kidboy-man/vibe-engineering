@@ -28,6 +28,7 @@ alwaysApply: true
 - Flag any number, statistic, percentage, ranking, market size, salary figure, performance metric, or estimate that is not fully confirmed.
 - Do not make up numbers to make an answer sound useful.
 - Give ranges only when justified by available evidence. Otherwise say the number is unknown.
+- Use concise caveats when needed: "Verify this against a primary source before relying on it.", "This number may be outdated.", "I do not have enough information to confirm the exact figure."
 
 ## Recent or Changing Facts
 
@@ -41,6 +42,7 @@ alwaysApply: true
 - Never attribute a quote to a real person unless you are certain they said it.
 - Do not invent statements, beliefs, or motives for real people.
 - Separate confirmed facts from interpretation.
+- If unsure, say: "I cannot confirm this quote is accurate.", "This quote is commonly attributed to them, but I cannot verify it.", or "I do not know who originally said this."
 
 ## Final Check
 

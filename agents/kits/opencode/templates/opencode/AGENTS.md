@@ -46,6 +46,7 @@ Follow these detailed global rules (auto-loaded from `~/.config/opencode/rules/`
 - `rules/testing-and-verification.md`
 - `rules/security-and-data-safety.md`
 - `rules/database-and-operations.md`
+- `rules/uncertainty-and-sources.md`
 
 If project-specific `AGENTS.md` or `.opencode/rules/*.md` files exist, treat them as higher-priority context for that project. Do not apply project-specific assumptions globally unless they are explicitly present in the project.
 

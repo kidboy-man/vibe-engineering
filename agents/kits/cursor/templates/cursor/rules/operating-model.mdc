@@ -21,19 +21,34 @@ alwaysApply: true
 
 Examples: small bug fix, localized refactor, docs update, formatting, simple test addition.
 
-Behavior: inspect relevant files, implement directly, run focused verification, summarize changes concisely.
+Behavior:
+
+- inspect relevant files
+- implement directly
+- run focused verification
+- summarize changes concisely
 
 ### Medium Risk
 
 Examples: cross-package changes, new endpoint, non-trivial refactor, new integration, behavior touching multiple layers.
 
-Behavior: inspect architecture and existing patterns, state a short plan before significant edits, proceed unless blocked, run tests across affected boundaries.
+Behavior:
+
+- inspect architecture and existing patterns
+- state a short plan before significant edits
+- proceed unless blocked
+- run tests across affected boundaries
 
 ### High Risk
 
 Examples: schema changes, auth/authorization changes, billing/payment behavior, multi-tenant isolation, public API changes, concurrency, data migration, production config, security-sensitive code.
 
-Behavior: pause before editing when requirements are unclear, propose design and rollout strategy, identify risks, invariants, and verification plan, ask only the questions that materially affect correctness or safety.
+Behavior:
+
+- pause before editing when requirements are unclear
+- propose design and rollout strategy
+- identify risks, invariants, and verification plan
+- ask only the questions that materially affect correctness or safety
 
 ## Scope Discipline
 
@@ -45,6 +60,13 @@ Behavior: pause before editing when requirements are unclear, propose design and
 
 ## Decision Making
 
-Prefer: explicit over implicit, boring over clever, small composable changes over sweeping rewrites, clear contracts over hidden coupling, local reasoning over global mutable state, code that fails safely and observably.
+Prefer:
+
+- explicit over implicit
+- boring over clever
+- small composable changes over sweeping rewrites
+- clear contracts over hidden coupling
+- local reasoning over global mutable state
+- code that fails safely and observably
 
 When making a trade-off, state the chosen path and why. Do not present every possible option unless the decision is genuinely ambiguous or high-risk.

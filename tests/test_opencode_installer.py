@@ -234,6 +234,7 @@ class OpenCodeManifestContractTests(unittest.TestCase):
         self.assertIn("rules/security-and-data-safety.md", managed)
         self.assertIn("rules/database-and-operations.md", managed)
         self.assertIn("rules/testing-and-verification.md", managed)
+        self.assertIn("rules/uncertainty-and-sources.md", managed)
         for agent in (
             "backend-tech-lead",
             "go-backend-implementer",
