@@ -2,6 +2,8 @@
 
 Thanks for helping improve vibe-kits. Bug reports and feature ideas go in
 [GitHub issues](https://github.com/kidboy-man/vibe-engineering/issues).
+Security problems go through [SECURITY.md](SECURITY.md), not public issues. By
+participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Pull requests
 

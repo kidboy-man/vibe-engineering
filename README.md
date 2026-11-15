@@ -25,9 +25,9 @@
 
 ## Why vibe-kits?
 
-You switch between Claude Code, Cursor, Codex, Gemini and OpenCode, and each
-one starts with its own blank config. Your rules, review habits and safety
-limits end up copied by hand, slightly different everywhere.
+You use Claude Code, Cursor, Codex, Gemini and OpenCode, and every one of them
+starts with a blank config. Your rules, review habits and safety limits get
+copied by hand and slowly drift apart.
 
 `vibe kits` installs one portable engineering setup into each tool's native
 format: a persona, modular rules, review agents, slash commands, guardrail
@@ -41,6 +41,9 @@ overwrites your own config keys.
 - A local Obsidian + qmd vault gives your agents notes they can search.
 
 ## Quickstart
+
+Needs Python 3.10+. Install with [pipx](https://pipx.pypa.io) (recommended) or
+`pip install vibe-kits`.
 
 ```bash
 pipx install vibe-kits
@@ -89,17 +92,16 @@ dry run: no files written
 
 ## Supported tools
 
-| Kit | Claude Code | OpenCode | Gemini CLI | Codex CLI | Cursor |
-|-----|:-----------:|:--------:|:----------:|:---------:|:------:|
-| [`claude-code`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/claude-code.md) | ✅ | | | | |
-| [`opencode`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/opencode.md) | | ✅ | | | |
-| [`gemini`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/gemini.md) | | | ✅ | | |
-| [`codex`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/codex.md) | | | | ✅ | |
-| [`cursor`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/cursor.md) | | | | | ✅ |
-| [`workflow`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/workflow.md) | ✅ | ✅ | | | |
-| [`guardrails`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/guardrails.md) | ✅ | | | ✅ | ✅ |
-| [`wikify`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/wikify.md) | ✅ | | | ✅ | ✅ |
-| [`second-brain`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/second-brain.md) | ✅ | ✅ | | ✅ | ✅ |
+Each of Claude Code, OpenCode, Gemini CLI, Codex CLI and Cursor has its own
+setup kit, named `claude-code`, `opencode`, `gemini`, `codex` and `cursor`.
+Four more kits work across tools (Gemini CLI uses only its own setup kit):
+
+| Kit | Claude Code | OpenCode | Codex CLI | Cursor |
+|-----|:-----------:|:--------:|:---------:|:------:|
+| [`workflow`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/workflow.md) | ✅ | ✅ | | |
+| [`guardrails`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/guardrails.md) | ✅ | | ✅ | ✅ |
+| [`wikify`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/wikify.md) | ✅ | | ✅ | ✅ |
+| [`second-brain`](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/second-brain.md) | ✅ | ✅ | ✅ | ✅ |
 
 `workflow`, `guardrails` and `wikify` install only into agent config directories
 that already exist. `second-brain` creates the config files it merges into,
@@ -167,11 +169,13 @@ VIBE_SECOND_BRAIN_PATH="$HOME/notes" vibe kits second-brain install --yes
 
 Full contract: [Safety model →](https://github.com/kidboy-man/vibe-engineering/blob/main/docs/kits/safety-model.md)
 
-## Contributing
+## Help and community
 
-[CONTRIBUTING.md](https://github.com/kidboy-man/vibe-engineering/blob/main/CONTRIBUTING.md)
-covers the dev setup, the test suite and how to add a new kit.
+- **Bugs and ideas:** [open an issue](https://github.com/kidboy-man/vibe-engineering/issues/new/choose).
+- **Security reports:** see [SECURITY.md](https://github.com/kidboy-man/vibe-engineering/blob/main/SECURITY.md). Please don't file them as public issues.
+- **Contributing:** [CONTRIBUTING.md](https://github.com/kidboy-man/vibe-engineering/blob/main/CONTRIBUTING.md) covers dev setup, tests and how to add a kit.
+- **Conduct:** [Code of Conduct](https://github.com/kidboy-man/vibe-engineering/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 
-[MIT](https://github.com/kidboy-man/vibe-engineering/blob/main/LICENSE)
+[MIT](https://github.com/kidboy-man/vibe-engineering/blob/main/LICENSE) · [Releases and changelog](https://github.com/kidboy-man/vibe-engineering/releases)

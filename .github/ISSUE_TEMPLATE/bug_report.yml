@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in vibe-kits misbehaved.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For security problems, use the private
+        advisory link on the issue chooser instead of this form.
+  - type: input
+    id: version
+    attributes:
+      label: vibe version
+      description: Output of `vibe --version`.
+    validations:
+      required: true
+  - type: input
+    id: kit
+    attributes:
+      label: Kit and command
+      description: For example `vibe kits claude-code install --yes`.
+    validations:
+      required: true
+  - type: input
+    id: tool
+    attributes:
+      label: AI tool and version
+      description: For example Claude Code, Cursor, Codex CLI, Gemini CLI or OpenCode, with its version.
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Python version
+      description: For example Ubuntu 24.04 / Python 3.12.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Paste the `--dry-run` or `doctor` output. Remove any secrets first.
+      render: text

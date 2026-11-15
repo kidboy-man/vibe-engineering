@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest a new kit, tool target or improvement.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like vibe-kits to do?
+      description: For a new kit or tool target, name the tool and where it reads its config from.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
