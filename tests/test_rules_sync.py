@@ -96,6 +96,29 @@ class SyncRulesTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("operating-model.md", err)
 
+    def test_new_canonical_rule_is_reported(self):
+        self.sync_rules.sync(self.root, True)
+        (self.root / CLAUDE / "new-rule.md").write_text("# New Rule\n", encoding="utf-8")
+        rc, out, _err = self._run_main(["--check"])
+        self.assertEqual(rc, 1)
+        self.assertIn("new-rule.md", out)
+
+    def test_orphan_copies_are_reported(self):
+        self.sync_rules.sync(self.root, True)
+        (self.root / OPENCODE / "orphan.md").write_text("x\n", encoding="utf-8")
+        (self.root / CURSOR / "orphan-too.mdc").write_text("x\n", encoding="utf-8")
+        rc, out, _err = self._run_main(["--check"])
+        self.assertEqual(rc, 1)
+        self.assertIn("orphan.md", out)
+        self.assertIn("orphan-too.mdc", out)
+
+    def test_crlf_canonical_is_written_as_lf(self):
+        canonical = self.root / CLAUDE / "operating-model.md"
+        canonical.write_bytes(canonical.read_bytes().replace(b"\n", b"\r\n"))
+        self.sync_rules.sync(self.root, True)
+        for path in self.sync_rules.expected_outputs(self.root):
+            self.assertNotIn(b"\r", path.read_bytes(), f"{path} has CR")
+
 
 class RepoTemplateTests(unittest.TestCase):
     """The committed templates, not a temp copy."""
@@ -121,6 +144,9 @@ class RepoTemplateTests(unittest.TestCase):
             for path in embedded:
                 lines = path.read_text(encoding="utf-8").splitlines()
                 self.assertIn(heading, lines, f"{path.name} lacks section {heading!r}")
+
+    def test_repo_rule_inventory_is_complete(self):
+        self.assertEqual(_load_script().inventory_problems(REPO_ROOT), [])
 
 
 if __name__ == "__main__":

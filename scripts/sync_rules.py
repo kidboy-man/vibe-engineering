@@ -63,8 +63,8 @@ CURSOR_FRONTMATTER: dict[str, tuple[str, tuple[str, ...], bool]] = {
 
 
 def _read(path: Path) -> str:
-    with path.open("r", encoding="utf-8", newline="\n") as fh:
-        return fh.read()
+    """Read as text with universal newlines, so a CRLF checkout compares and syncs as LF."""
+    return path.read_text(encoding="utf-8")
 
 
 def _write(path: Path, text: str) -> None:
@@ -92,6 +92,21 @@ def expected_outputs(root: Path) -> dict[Path, str]:
     return outputs
 
 
+def inventory_problems(root: Path) -> list[str]:
+    """Rule files on disk that RULES does not account for: a new canonical rule or an orphaned copy."""
+    known = {
+        root / CLAUDE_RULES: ("*.md", {f"{name}.md" for name in RULES}),
+        root / OPENCODE_RULES: ("*.md", {f"{name}.md" for name in RULES}),
+        root / CURSOR_RULES: ("*.mdc", {f"{name}.mdc" for name in RULES} | {"00-persona.mdc"}),
+    }
+    problems = []
+    for directory, (pattern, names) in known.items():
+        for path in sorted(directory.glob(pattern)):
+            if path.name not in names:
+                problems.append(f"unexpected rule file {path} (add it to RULES and CURSOR_FRONTMATTER, or remove it)")
+    return problems
+
+
 def sync(root: Path, write: bool) -> list[Path]:
     """Return destinations that differ from the canonical text; rewrite them when *write*."""
     outputs = expected_outputs(root)
@@ -113,19 +128,18 @@ def main(argv: list[str] | None = None, root: Path = REPO_ROOT) -> int:
         print(f"error: canonical rule file not found: {exc.filename}", file=sys.stderr)
         return 2
 
-    if args.check:
-        if stale:
-            for path in stale:
-                print(f"stale: {path}")
-            print("Run: python3 scripts/sync_rules.py")
-            return 1
-        print("rule copies are in sync")
-        return 0
-
+    problems = inventory_problems(root)
+    label = "stale" if args.check else "updated"
     for path in stale:
-        print(f"updated: {path}")
+        print(f"{label}: {path}")
+    for problem in problems:
+        print(f"error: {problem}")
+    if args.check and stale:
+        print("Run: python3 scripts/sync_rules.py")
+    if problems or (args.check and stale):
+        return 1
     if not stale:
-        print("rule copies already in sync")
+        print("rule copies are in sync")
     return 0
 
 
