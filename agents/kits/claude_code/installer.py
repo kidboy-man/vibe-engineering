@@ -170,7 +170,7 @@ def doctor(home: str | None = None) -> int:
             env = settings.get("env", {}) if isinstance(settings, dict) else {}
             secretish = sorted(k for k in env if k in SECRET_SETTING_KEYS or "TOKEN" in k or "KEY" in k)
             if secretish:
-                print(f"settings env: preserved local-only keys present ({', '.join(secretish)}); kit will not overwrite them")
+                print(f"settings env: preserved local-only keys present ({len(secretish)} key(s)); kit will not overwrite them")
             else:
                 print("settings env: no known secret/proxy keys")
         except json.JSONDecodeError:
