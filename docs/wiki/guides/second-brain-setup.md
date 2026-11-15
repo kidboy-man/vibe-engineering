@@ -32,7 +32,7 @@ elsewhere:
   that closes the wiring into a working system.
 
 If you are a **user** of the kit, you do not need to read this file —
-the README and the kit's `wiki/docs/` templates are enough. If you are a
+[docs/kits/second-brain.md](../../kits/second-brain.md) and the kit's `wiki/docs/` templates are enough. If you are a
 **maintainer** or **contributor** to the kit, this file is the
 authoritative source for the rationale, design tradeoffs, and known
 limitations.
