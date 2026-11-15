@@ -3,9 +3,9 @@
 Manages rule files under ~/.cursor/rules/ — one .mdc file per engineering rule
 plus a persona rule. Never modifies Cursor settings, extensions, or credentials.
 
-Note: Cursor also supports project-local rules at .cursor/rules/ (preferred for
-per-project behavior). This kit installs global user-level rules that apply
-across all projects unless overridden locally.
+Note: Cursor documents project rules at .cursor/rules/ and only partly supports
+a global ~/.cursor/rules. Installing there prints a warning; for rules Cursor
+reliably loads, install into a project with ``--home <repo>``.
 """
 
 from __future__ import annotations
@@ -17,6 +17,12 @@ from agents import installer_core as core
 MANIFEST_FILE = core.MANIFEST_FILE
 KIT_NAME = "cursor"
 
+GLOBAL_INSTALL_NOTICE = (
+    "warning: Cursor does not reliably load rules from ~/.cursor/rules (its docs only describe "
+    "project rules in .cursor/rules). For rules Cursor will read, install per project: "
+    "vibe kits cursor install --home <repo>"
+)
+
 KIT = core.CopyKit(
     kit_name=KIT_NAME,
     label="Cursor IDE",
@@ -27,7 +33,7 @@ KIT = core.CopyKit(
     missing_binary_is_failure=False,
     ensure_subdir="rules",
     extra_doctor_dirs=(("rules dir", "rules"),),
-    doctor_footer="note: for per-project rules, copy .mdc files to .cursor/rules/ in each project",
+    default_target_notice=GLOBAL_INSTALL_NOTICE,
 )
 
 

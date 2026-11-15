@@ -242,6 +242,13 @@ class CopyKit:
     ensure_subdir: str = ""  # created on install (relative to the target dir)
     extra_doctor_dirs: tuple[tuple[str, str], ...] = ()  # (label, subdir) lines
     doctor_footer: str | None = None
+    default_target_notice: str | None = None  # printed when installing to the real home's target dir
+
+
+def _print_default_target_notice(kit: CopyKit, target_dir: Path) -> None:
+    """Print the kit's notice when *target_dir* is the default one under the real home."""
+    if kit.default_target_notice and target_dir.resolve() == (Path.home() / kit.target_subdir).resolve():
+        print(kit.default_target_notice)
 
 
 def _copy_kit_files(kit: CopyKit, home: str | None) -> tuple[Path, Path, list[tuple[Path, Path, str]]]:
@@ -253,6 +260,7 @@ def _copy_kit_files(kit: CopyKit, home: str | None) -> tuple[Path, Path, list[tu
 
 def copy_kit_install(kit: CopyKit, home: str | None = None, dry_run: bool = False, yes: bool = False) -> int:
     _home, target_dir, files = _copy_kit_files(kit, home)
+    _print_default_target_notice(kit, target_dir)
     plan = plan_copy_files(files)
     for change in [*(c.describe() for c in plan), f"write {MANIFEST_FILE}"]:
         print(change)
@@ -289,6 +297,7 @@ def copy_kit_doctor(kit: CopyKit, home: str | None = None) -> int:
     print(f"{kit.kit_name} dir: {target_dir}")
     for label, subdir in kit.extra_doctor_dirs:
         print(f"{label}: {target_dir / subdir}")
+    _print_default_target_notice(kit, target_dir)
     binary_ok = report_binary(kit.binary, kit.missing_binary_message)
     ok = binary_ok or not kit.missing_binary_is_failure
 

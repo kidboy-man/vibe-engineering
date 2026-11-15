@@ -1,7 +1,10 @@
+import io
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -108,6 +111,42 @@ class CursorInstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             rc = doctor(home=tmp)
             self.assertIn(rc, (0, 1))
+
+
+class CursorGlobalNoticeTests(unittest.TestCase):
+    """Cursor does not reliably load ~/.cursor/rules, so the default global install warns."""
+
+    def _run(self, fn, fake_home: str, **kwargs) -> str:
+        buf = io.StringIO()
+        with mock.patch.object(Path, "home", return_value=Path(fake_home)), redirect_stdout(buf):
+            fn(**kwargs)
+        return buf.getvalue()
+
+    def test_install_warns_on_default_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(install, tmp, home=None, dry_run=True, yes=True)
+        self.assertIn("warning:", out)
+        self.assertIn("--home <repo>", out)
+
+    def test_dry_run_on_default_home_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._run(install, tmp, home=None, dry_run=True, yes=True)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_explicit_home_equal_to_default_still_warns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(install, tmp, home=tmp, dry_run=True, yes=True)
+        self.assertIn("warning:", out)
+
+    def test_project_home_is_silent(self):
+        with tempfile.TemporaryDirectory() as fake_home, tempfile.TemporaryDirectory() as repo:
+            out = self._run(install, fake_home, home=repo, dry_run=True, yes=True)
+        self.assertNotIn("warning:", out)
+
+    def test_doctor_warns_on_default_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(doctor, tmp, home=None)
+        self.assertIn("warning:", out)
 
 
 if __name__ == "__main__":
