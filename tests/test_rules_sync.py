@@ -57,7 +57,8 @@ class SyncRulesTests(unittest.TestCase):
         self.assertTrue(out.endswith(canonical))
 
     def test_sync_write_then_check_is_clean_and_idempotent(self):
-        self.assertTrue(self.sync_rules.sync(self.root, True))  # real templates have drifted
+        (self.root / OPENCODE / "operating-model.md").write_text("stale\n", encoding="utf-8")
+        self.assertTrue(self.sync_rules.sync(self.root, True))
         self.assertEqual(self.sync_rules.sync(self.root, False), [])
         self.assertEqual(self.sync_rules.sync(self.root, True), [])
         for path in self.sync_rules.expected_outputs(self.root):
@@ -94,6 +95,32 @@ class SyncRulesTests(unittest.TestCase):
         rc, _out, err = self._run_main(["--check"])
         self.assertEqual(rc, 2)
         self.assertIn("operating-model.md", err)
+
+
+class RepoTemplateTests(unittest.TestCase):
+    """The committed templates, not a temp copy."""
+
+    def test_repo_templates_are_in_sync(self):
+        stale = _load_script().sync(REPO_ROOT, False)
+        self.assertEqual(
+            stale,
+            [],
+            "stale rule copies (canonical: claude-code rules); run `python3 scripts/sync_rules.py`:\n"
+            + "\n".join(str(path) for path in stale),
+        )
+
+    def test_embedded_kits_have_a_section_per_rule(self):
+        embedded = (
+            REPO_ROOT / "agents/kits/codex/templates/codex/AGENTS.md",
+            REPO_ROOT / "agents/kits/gemini/templates/gemini/GEMINI.md",
+        )
+        for name in _load_script().RULES:
+            title = (REPO_ROOT / CLAUDE / f"{name}.md").read_text(encoding="utf-8").splitlines()[0]
+            self.assertTrue(title.startswith("# "), f"{name}: first line is not an H1")
+            heading = "### " + title[2:]
+            for path in embedded:
+                lines = path.read_text(encoding="utf-8").splitlines()
+                self.assertIn(heading, lines, f"{path.name} lacks section {heading!r}")
 
 
 if __name__ == "__main__":

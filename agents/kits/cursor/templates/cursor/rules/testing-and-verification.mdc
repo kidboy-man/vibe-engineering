@@ -55,7 +55,7 @@ Run checks in this order when practical:
 3. Integration tests when the change crosses boundaries.
 4. Lint/format/typecheck/build as appropriate for the project.
 
-Use the project's existing commands and conventions. If uncertain, inspect README, Makefile, package scripts, CI config, or existing docs before inventing commands.
+Use the project’s existing commands and conventions. If uncertain, inspect README, Makefile, package scripts, CI config, or existing docs before inventing commands.
 
 ## Definition of Done
 

@@ -166,12 +166,11 @@ class ManifestParityTests(unittest.TestCase):
         self.assertIn("settings_fragment", manifest)
         self.assertTrue(manifest["settings_fragment"])
 
-    def test_claude_has_uncertainty_and_sources_intentionally_missing_from_opencode(self) -> None:
-        """Claude includes rules/uncertainty-and-sources.md; OpenCode omits it by design."""
-        claude_files = self._managed_files(claude_installer)
-        opencode_files = self._managed_files(opencode_installer)
-        self.assertIn("rules/uncertainty-and-sources.md", claude_files)
-        self.assertNotIn("rules/uncertainty-and-sources.md", opencode_files)
+    def test_opencode_rules_match_claude_rules(self) -> None:
+        """Both kits ship the same rule files; scripts/sync_rules.py keeps their text equal."""
+        claude_rules = {f for f in self._managed_files(claude_installer) if f.startswith("rules/")}
+        opencode_rules = {f for f in self._managed_files(opencode_installer) if f.startswith("rules/")}
+        self.assertEqual(opencode_rules, claude_rules)
 
 
 if __name__ == "__main__":
